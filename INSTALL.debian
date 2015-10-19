@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Run: curl -s https://raw.githubusercontent.com/r888888888/danbooru/master/INSTALL.debian > install.sh ; chmod +x install.sh ; ./install.sh
+# Run: curl -s https://raw.githubusercontent.com/Iratu/atfbooru/master/INSTALL.debian > install.sh ; chmod +x install.sh ; ./install.sh
 
 if [[ "$(whoami)" != "root" ]] ; then
   echo "You must run this script as root"
@@ -21,7 +21,7 @@ if [[ -z "$HOSTNAME" ]] ; then
 fi
 
 export RUBY_VERSION=2.1.5
-export GITHUB_INSTALL_SCRIPTS=https://raw.githubusercontent.com/r888888888/danbooru/master/script/install
+export GITHUB_INSTALL_SCRIPTS=https://raw.githubusercontent.com/Iratu/atfbooru/master/script/install
 
 # Install packages
 echo "* Installing packages..."
@@ -85,7 +85,7 @@ echo "* Setting up SSH keys for the danbooru account"
 sudo -u danbooru ssh-keygen
 
 echo "* Setting up danbooru app..."
-sudo -u danbooru git clone https://github.com/r888888888/danbooru ~danbooru/danbooru
+sudo -u danbooru git clone https://github.com/Iratu/atfbooru ~danbooru/danbooru
 sudo -u danbooru bash -l -c 'cd ~/danbooru ; bundle'
 
 echo "* Creating a new local git branch called develop"

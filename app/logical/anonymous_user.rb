@@ -117,7 +117,7 @@ class AnonymousUser
   end
 
   def blacklisted_tags
-    ["spoilers", "guro", "scat", "furry -rating:s"].join("\n")
+    ["spoilers", "guro", "scat"].join("\n")
   end
 
   def time_zone

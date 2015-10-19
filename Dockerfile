@@ -1,7 +1,7 @@
 FROM debian:wheezy
 
 ENV RUBY_VERSION 2.1.5
-ENV GITHUB_INSTALL https://raw.githubusercontent.com/r888888888/danbooru/master/script/install
+ENV GITHUB_INSTALL https://raw.githubusercontent.com/Iratu/atfbooru/master/script/install
 ENV POSTGRESQL_VERSION 9.1
 
 RUN apt-get update
@@ -67,7 +67,7 @@ RUN /etc/init.d/postgresql start && sudo -u postgres createuser -s danbooru && /
 RUN /etc/init.d/postgresql start && sudo -u danbooru createdb danbooru2 && /etc/init.d/postgresql stop
 
 USER danbooru
-RUN git clone git://github.com/r888888888/danbooru.git ~/danbooru
+RUN git clone git://github.com/Iratu/atfbooru.git ~/danbooru
 RUN ["/bin/bash", "-l", "-c", "cd ~/danbooru && bundle install"]
 ADD $GITHUB_INSTALL/danbooru_local_config.rb.templ ~/danbooru/config/danbooru_local_config.rb
 ADD $GITHUB_INSTALL/database.yml.templ ~/danbooru/config/database.yml

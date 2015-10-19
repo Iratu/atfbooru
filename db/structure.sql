@@ -3169,8 +3169,7 @@ CREATE TABLE users (
     favorite_tags text,
     blacklisted_tags text DEFAULT 'spoilers
 guro
-scat
-furry -rating:s'::text,
+scat'::text,
     time_zone character varying(255) DEFAULT 'Eastern Time (US & Canada)'::character varying NOT NULL,
     bcrypt_password_hash text,
     per_page integer DEFAULT 20 NOT NULL,
