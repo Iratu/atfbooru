@@ -85,10 +85,24 @@ private
   end
 
   def create_demotion_dmail
+    approval_text = if user.can_approve_posts?
+      "You can approve posts."
+    else
+      ""
+    end
+
+    upload_text = if user.can_upload_free?
+      "You can upload posts without limit."
+    else
+      ""
+    end
+  
+  
     Dmail.create_split(
       :to_id => user.id,
       :title => "You have been demoted",
       :body => "You have been demoted to a #{user.level_string} level account. #{approval_text} #{upload_text}"
+	  
     )
   end
 end
