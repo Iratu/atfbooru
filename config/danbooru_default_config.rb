@@ -4,7 +4,7 @@ module Danbooru
   class Configuration
     # The version of this Danbooru.
     def version
-      "2.94.0"
+      "2.95.0"
     end
 
     # The name of this Danbooru.
@@ -403,6 +403,14 @@ module Danbooru
 
     def addthis_key
       nil
+    end
+
+    def listbooru_server
+      "http://miura.donmai.us"
+    end
+
+    def listbooru_auth_key
+      ENV["LISTBOORU_AUTH_KEY"]
     end
   end
 end
