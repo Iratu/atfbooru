@@ -1,5 +1,5 @@
 class UserPromotion
-  attr_reader :user, :promoter, :new_level, :options
+  attr_reader :user, :promoter, :new_level, :options, :old_can_approve_posts, :old_can_upload_free
 
   def initialize(user, promoter, new_level, options = {})
     @user = user
@@ -10,6 +10,9 @@ class UserPromotion
 
   def promote!
     validate
+
+    @old_can_approve_posts = user.can_approve_posts?
+    @old_can_upload_free = user.can_upload_free?
 
     user.level = new_level
     user.can_approve_posts = options[:can_approve_posts]
@@ -40,69 +43,45 @@ private
     TransactionLogItem.record_account_upgrade(user)
   end
 
-  def create_user_feedback
-    if user.level > user.level_was
-      body_prefix = "Promoted"
-    elsif user.level < user.level_was
-      body_prefix = "Demoted"
-    else
-      body_prefix = "Updated"
+  def build_messages
+    messages = []
+
+    if user.level_changed?
+      if user.level > user.level_was
+        messages << "You have been promoted to a #{user.level_string} level account from #{user.level_string_was}."
+      elsif user.level < user.level_was
+        messages << "You have been demoted to a #{user.level_string} level account from #{user.level_string_was}."
+      end
     end
 
-    user.feedback.create(
-      :category => "neutral",
-      :body => "#{body_prefix} from #{user.level_string_was} to #{user.level_string}",
-      :disable_dmail_notification => true
-    )
+    if user.can_approve_posts? && !old_can_approve_posts
+      messages << "You gained the ability to approve posts."
+    elsif !user.can_approve_posts? && old_can_approve_posts
+      messages << "You lost the ability to approve posts."
+    end
+
+    if user.can_upload_free? && !old_can_upload_free
+      messages << "You gained the ability to upload posts without limit."
+    elsif !user.can_upload_free? && old_can_upload_free
+      messages << "You lost the ability to upload posts without limit."
+    end
+
+    messages.join("\n")
   end
 
   def create_dmail
-    if user.level >= user.level_was || user.bit_prefs_changed?
-      create_promotion_dmail
-    else
-      create_demotion_dmail
-    end
-  end
-
-  def create_promotion_dmail
-    approval_text = if user.can_approve_posts?
-      "You can approve posts."
-    else
-      ""
-    end
-
-    upload_text = if user.can_upload_free?
-      "You can upload posts without limit."
-    else
-      ""
-    end
-
     Dmail.create_split(
       :to_id => user.id,
       :title => "You have been promoted",
-      :body => "You have been promoted to a #{user.level_string} level account. #{approval_text} #{upload_text}"
+      :body => build_messages
     )
   end
 
-  def create_demotion_dmail
-    approval_text = if user.can_approve_posts?
-      "You can approve posts."
-    else
-      ""
-    end
-
-    upload_text = if user.can_upload_free?
-      "You can upload posts without limit."
-    else
-      ""
-    end
-  
-  
-    Dmail.create_split(
-      :to_id => user.id,
-      :title => "You have been demoted",
-      :body => "You have been demoted to a #{user.level_string} level account. #{approval_text} #{upload_text}"
-	  
+  def create_user_feedback
+    user.feedback.create(
+      :category => "neutral",
+      :body => build_messages,
+      :disable_dmail_notification => true
     )
   end
 end
