@@ -4,13 +4,19 @@ class TagSubscription < ActiveRecord::Base
   before_validation :initialize_post_ids, :on => :create
   before_save :normalize_name
   before_save :limit_tag_count
-  before_create :update_listbooru_on_create
-  before_update :update_listbooru_on_update
-  after_destroy :update_listbooru_on_destroy
   attr_accessible :name, :tag_query, :post_ids, :is_public, :is_visible_on_profile
   validates_presence_of :name, :tag_query, :creator_id
   validate :validate_number_of_queries
   validate :creator_can_create_subscriptions, :on => :create
+
+  def migrate_to_saved_searches
+    tag_query.split(/\r\n|\r|\n/).each do |query|
+      creator.saved_searches.create(
+        :tag_query => query,
+        :category => name
+      )
+    end
+  end
 
   def normalize_name
     self.name = name.gsub(/\s+/, "_")
@@ -76,26 +82,6 @@ class TagSubscription < ActiveRecord::Base
 
   def post_id_array
     post_ids.split(/,/)
-  end
-
-  def update_listbooru_on_create
-    return unless Danbooru.config.listbooru_auth_key
-    Net::HTTP.post_form(Danbooru.config.listbooru_server, {"user_id" => user_id, "query" => tag_query, "name" => "sub:#{id}", "key" => Danbooru.config.listbooru_auth_key})
-  end
-
-  def update_listbooru_on_update
-    update_listbooru_on_destroy
-    update_listbooru_on_create
-  end
-
-  def update_listbooru_on_destroy
-    return unless Danbooru.config.listbooru_auth_key
-    uri = URI.parse(Danbooru.config.listbooru_server)
-    Net::HTTP.start(uri.host, uri.port) do |http|
-      req = Net::HTTP::Delete.new("/searches")
-      req.set_form_data("user_id" => user_id, "query" => tag_query, "key" => Danbooru.config.listbooru_auth_key, "name" => "sub:#{id}")
-      http.request(req)
-    end
   end
 
   module SearchMethods

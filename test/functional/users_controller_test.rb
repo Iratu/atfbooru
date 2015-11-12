@@ -70,6 +70,18 @@ class UsersControllerTest < ActionController::TestCase
         @user.reload
         assert_equal("xyz", @user.favorite_tags)
       end
+
+      context "changing the level" do
+        setup do
+          @cuser = FactoryGirl.create(:user)
+        end
+
+        should "not work" do
+          post :update, {:id => @user.id, :user => {:level => 40}}, {:user_id => @cuser.id}
+          @user.reload
+          assert_equal(20, @user.level)
+        end
+      end
     end
   end
 end

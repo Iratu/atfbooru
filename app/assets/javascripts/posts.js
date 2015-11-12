@@ -328,7 +328,7 @@
       $notice.children().eq(0).hide();
       $notice.children().eq(1).show(); // Loading message
       Danbooru.Note.Box.scale_all();
-      $image.data("scale_factor", 1);
+      $image.data("scale-factor", 1);
       e.preventDefault();
     });
 
@@ -350,7 +350,7 @@
             $notice.show();
           });
           Danbooru.Note.Box.scale_all();
-          $image.data("scale_factor", 1);
+          $image.data("scale-factor", 1);
           e.preventDefault();
         }
       });
@@ -361,23 +361,25 @@
     $("#image-resize-to-window-link").click(function(e) {
       var $img = $("#image");
 
-      if (($img.data("scale_factor") === 1) || ($img.data("scale_factor") === undefined)) {
-        $img.data("original_width", $img.width());
-        $img.data("original_height", $img.height());
-        var client_width = $(window).width() - $("#sidebar").width() - 75;
+      if (($img.data("scale-factor") === 1) || ($img.data("scale-factor") === undefined)) {
+        if ($(window).width() > 660) {
+          var client_width = $(window).width() - $("#sidebar").width() - 75;
+        } else {
+          var client_width = $(window).width() - 30;
+        }
         var client_height = $(window).height();
 
         if ($img.width() > client_width) {
-          var ratio = client_width / $img.width();
-          $img.data("scale_factor", ratio);
-          $img.css("width", $img.data("original_width") * ratio);
-          $img.css("height", $img.data("original_height") * ratio);
+          var ratio = client_width / $img.data("original-width");
+          $img.data("scale-factor", ratio);
+          $img.css("width", $img.data("original-width") * ratio);
+          $img.css("height", $img.data("original-height") * ratio);
           Danbooru.Post.resize_ugoira_controls();
         }
       } else {
-        $img.data("scale_factor", 1);
-        $img.width($img.data("original_width"));
-        $img.height($img.data("original_height"));
+        $img.data("scale-factor", 1);
+        $img.width($img.data("original-width"));
+        $img.height($img.data("original-height"));
         Danbooru.Post.resize_ugoira_controls();
       }
 
@@ -528,16 +530,17 @@
 
   Danbooru.Post.initialize_saved_searches = function() {
     $("#save-search").click(function() {
-      var input = window.prompt("Category for this saved search (optional):");
-      if (input !== null) {
-        $.post(
-          "/saved_searches.js",
-          {
-            "tags": $("#tags").attr("value"),
-            "category": input
-          }
-        );
+      var input = null;
+      if (Danbooru.meta("enable-categorized-saved-searches") === "true") {
+        input = window.prompt("Category for this saved search (optional):");
       }
+      $.post(
+        "/saved_searches.js",
+        {
+          "tags": $("#tags").attr("value"),
+          "category": input
+        }
+      );
     });
   }
 })();
