@@ -529,18 +529,50 @@
   }
 
   Danbooru.Post.initialize_saved_searches = function() {
-    $("#save-search").click(function() {
-      var input = null;
-      if (Danbooru.meta("enable-categorized-saved-searches") === "true") {
-        input = window.prompt("Category for this saved search (optional):");
+    $("#saved_search_category").autocomplete({
+      minLength: 1,
+      source: function(req, resp) {
+        $.ajax({
+          url: "/saved_searches/categories.json",
+          method: "get",
+          success: function(data) {
+            resp($.map(data, function(saved_search) {
+              return {
+                label: saved_search.category,
+                value: saved_search.category
+              };
+            }));
+          }
+        })
       }
-      $.post(
-        "/saved_searches.js",
-        {
-          "tags": $("#tags").attr("value"),
-          "category": input
+    });
+
+    $("#save-search-dialog").dialog({
+      width: 500,
+      modal: true,
+      autoOpen: false,
+      buttons: {
+        "Submit": function() {
+          $("#save-search-dialog form").submit();
+          $(this).dialog("close");
+        },
+        "Cancel": function() {
+          $(this).dialog("close");
         }
-      );
+      }
+    });
+
+    $("#save-search").click(function() {
+      if (Danbooru.meta("disable-categorized-saved-searches") === "false") {
+        $("#save-search-dialog").dialog("open");
+      } else {
+        $.post(
+          "/saved_searches.js",
+          {
+            "saved_search_tags": $("#tags").attr("value")
+          }
+        );
+      }
     });
   }
 })();
