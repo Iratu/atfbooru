@@ -460,10 +460,8 @@ class User < ActiveRecord::Base
     def max_saved_searches
       if is_platinum?
         2000
-      elsif is_gold?
-        200
       else
-        1000
+        250
       end
     end
 
