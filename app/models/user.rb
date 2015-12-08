@@ -460,10 +460,8 @@ class User < ActiveRecord::Base
     def max_saved_searches
       if is_platinum?
         1_000
-      elsif is_gold?
--        200
       else
-        100
+        250
       end
     end
 
@@ -474,7 +472,7 @@ class User < ActiveRecord::Base
     def can_upload?
       if can_upload_free?
         true
-      elsif created_at > 1.minute.ago
+      elsif created_at > 1.week.ago
         false
       else
         upload_limit > 0
@@ -482,8 +480,8 @@ class User < ActiveRecord::Base
     end
 
     def upload_limited_reason
-      if created_at > 1.minute.ago
-        "cannot upload during your first minute of registration"
+      if created_at > 1.week.ago
+        "cannot upload during your first week of registration"
       else
         "have reached your upload limit for the day"
       end
@@ -515,15 +513,15 @@ class User < ActiveRecord::Base
 
     def base_upload_limit
       if created_at >= 1.month.ago
-        100
+        10
       elsif created_at >= 2.months.ago
-        200
+        20
       elsif created_at >= 3.months.ago
-        300
+        30
       elsif created_at >= 4.months.ago
-        400
+        40
       else
-        500
+        50
       end
     end
 
@@ -552,7 +550,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         Danbooru.config.base_tag_query_limit
       else
-        Danbooru.config.base_tag_query_limit * 2
+        2
       end
     end
 
@@ -562,7 +560,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         20_000
       else
-        nil
+        10_000
       end
     end
 
@@ -572,7 +570,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         5
       else
-        10
+        3
       end
     end
 
@@ -596,7 +594,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         6_000
       else
-        9_000
+        3_000
       end
     end
   end
