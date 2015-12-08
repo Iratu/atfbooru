@@ -3,16 +3,34 @@ class SavedSearch < ActiveRecord::Base
     extend ActiveSupport::Concern
 
     module ClassMethods
-      def refresh_listbooru(user_id, name)
+      def refresh_listbooru(user_id)
         return unless Danbooru.config.listbooru_auth_key
+        user = User.find(user_id)
+        return unless user.is_gold?
+        
         params = {
           :user_id => user_id,
-          :name => name,
           :key => Danbooru.config.listbooru_auth_key
         }
         uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
         uri.query = URI.encode_www_form(params)
         Net::HTTP.get_response(uri)
+      end
+
+      def reset_listbooru(user_id)
+        return unless Danbooru.config.listbooru_auth_key
+
+        uri = URI.parse("#{Danbooru.config.listbooru_server}/searches")
+        Net::HTTP.start(uri.host, uri.port) do |http|
+          req = Net::HTTP::Delete.new("/searches")
+          req.set_form_data("user_id" => user_id, "all" => "true", "key" => Danbooru.config.listbooru_auth_key)
+          http.request(req)
+        end
+
+        user = User.find(user_id)
+        user.saved_searches.each do |saved_search|
+          update_listbooru_on_create(user_id, saved_search.category, saved_search.tag_query)
+        end
       end
 
       def update_listbooru_on_create(user_id, name, query)
@@ -87,7 +105,27 @@ class SavedSearch < ActiveRecord::Base
     Tag.scan_query(tag_query).join(" ")
   end
 
+  def self.post_ids(user_id, name = nil)
+    params = {
+      "key" => Danbooru.config.listbooru_auth_key,
+      "user_id" => user_id,
+      "name" => name
+    }
+    uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
+    uri.query = URI.encode_www_form(params)
+
+    Net::HTTP.start(uri.host, uri.port) do |http|
+      resp = http.request_get(uri.request_uri)
+      if resp.is_a?(Net::HTTPSuccess)
+        resp.body.scan(/\d+/).map(&:to_i)
+      else
+        raise "HTTP error code: #{resp.code} #{resp.message}"
+      end
+    end
+  end
+
   def normalize
+    self.category = category.strip.gsub(/\s+/, "_").downcase if category
     self.tag_query = SavedSearch.normalize(tag_query)
   end
 
@@ -106,25 +144,6 @@ class SavedSearch < ActiveRecord::Base
   def update_user_on_destroy
     if user.saved_searches.count == 0
       user.update_attribute(:has_saved_searches, false)
-    end
-  end
-
-  def post_ids
-    params = {
-      "key" => Danbooru.config.listbooru_auth_key,
-      "user_id" => user_id,
-      "name" => category
-    }
-    uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
-    uri.query = URI.encode_www_form(params)
-
-    Net::HTTP.start(uri.host, uri.port) do |http|
-      resp = http.request_get(uri.request_uri)
-      if resp.is_a?(Net::HTTPSuccess)
-        resp.body.scan(/\d+/)
-      else
-        raise "HTTP error code: #{resp.code} #{resp.message}"
-      end
     end
   end
 end

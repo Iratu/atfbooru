@@ -192,7 +192,7 @@ class Post < ActiveRecord::Base
     end
 
     def twitter_card_supported?
-      image_width.to_i >= 280 && image_height.to_i >= 150 && file_size <= 1.megabyte
+      image_width.to_i >= 280 && image_height.to_i >= 150
     end
 
     def has_large?
@@ -488,7 +488,8 @@ class Post < ActiveRecord::Base
     def update_tag_post_counts
       decrement_tags = tag_array_was - tag_array
 
-      if decrement_tags.size > 1 && !CurrentUser.is_builder? && CurrentUser.created_at > 1.week.ago
+      decrement_tags_except_requests = decrement_tags.reject {|tag| tag == "tagme" || tag.end_with?("_request")}
+      if decrement_tags_except_requests.size > 0 && !CurrentUser.is_builder? && CurrentUser.created_at > 1.week.ago
         self.errors.add(:updater_id, "must have an account at least 1 week old to remove tags")
         return false
       end
@@ -1193,12 +1194,14 @@ class Post < ActiveRecord::Base
 
       ModAction.create(:description => "permanently deleted post ##{id}")
       delete!(:without_mod_action => true)
-      give_favorites_to_parent
-      update_children_on_destroy
-      decrement_tag_post_counts
-      remove_from_all_pools
-      destroy
-      update_parent_on_destroy
+      Post.without_timeout do
+        give_favorites_to_parent
+        update_children_on_destroy
+        decrement_tag_post_counts
+        remove_from_all_pools
+        destroy
+        update_parent_on_destroy
+      end
     end
 
     def ban!

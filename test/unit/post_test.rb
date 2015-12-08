@@ -463,13 +463,19 @@ class PostTest < ActiveSupport::TestCase
 
       context "as a new user" do
         setup do
-          @post.update_attribute(:tag_string, "aaa bbb ccc ddd")
+          @post.update_attribute(:tag_string, "aaa bbb ccc ddd tagme")
           CurrentUser.user = FactoryGirl.create(:user)
         end
 
-        should "not allow you to remove more than 2 tags" do
+        should "not allow you to remove tags" do
           @post.update_attributes(:tag_string => "aaa")
           assert_equal(["You must have an account at least 1 week old to remove tags"], @post.errors.full_messages)
+        end
+
+        should "allow you to remove request tags" do
+          @post.update_attributes(:tag_string => "aaa bbb ccc ddd")
+          @post.reload
+          assert_equal("aaa bbb ccc ddd", @post.tag_string)
         end
       end
 
@@ -1368,6 +1374,24 @@ class PostTest < ActiveSupport::TestCase
       sub = FactoryGirl.create(:tag_subscription, :tag_query => "aaa", :name => "zzz")
       TagSubscription.process_all
       relation = Post.tag_match("sub:#{CurrentUser.name}")
+      assert_equal(1, relation.count)
+    end
+
+    should "return posts for a <search> metatag" do
+      SavedSearch.stubs(:update_listbooru_on_create)
+      post1 = FactoryGirl.create(:post, :tag_string => "aaa")
+      sub = FactoryGirl.create(:saved_search, :tag_query => "aaa", :name => "zzz", :user_id => CurrentUser.id)
+      SavedSearch.expects(:post_ids).returns([post1.id])
+      relation = Post.tag_match("search:#{CurrentUser.name}")
+      assert_equal(1, relation.count)
+    end
+
+    should "return posts for a named <search> metatag" do
+      SavedSearch.stubs(:update_listbooru_on_create)
+      post1 = FactoryGirl.create(:post, :tag_string => "aaa")
+      sub = FactoryGirl.create(:saved_search, :tag_query => "aaa", :name => "zzz", :user_id => CurrentUser.id)
+      SavedSearch.expects(:post_ids).returns([post1.id])
+      relation = Post.tag_match("search:#{CurrentUser.name}:zzz")
       assert_equal(1, relation.count)
     end
 
