@@ -513,15 +513,15 @@ class User < ActiveRecord::Base
 
     def base_upload_limit
       if created_at >= 1.month.ago
-        10
+        100
       elsif created_at >= 2.months.ago
-        20
+        200
       elsif created_at >= 3.months.ago
-        30
+        300
       elsif created_at >= 4.months.ago
-        40
+        400
       else
-        50
+        500
       end
     end
 
@@ -548,9 +548,9 @@ class User < ActiveRecord::Base
       if is_platinum?
         Danbooru.config.base_tag_query_limit * 2
       elsif is_gold?
-        Danbooru.config.base_tag_query_limit
+        Danbooru.config.base_tag_query_limit * 2
       else
-        2
+        Danbooru.config.base_tag_query_limit * 2
       end
     end
 
@@ -560,7 +560,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         20_000
       else
-        10_000
+        nil
       end
     end
 
@@ -570,7 +570,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         5
       else
-        3
+        10
       end
     end
 
@@ -594,7 +594,7 @@ class User < ActiveRecord::Base
       elsif is_gold?
         6_000
       else
-        3_000
+        9_000
       end
     end
   end
