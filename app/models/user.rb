@@ -459,9 +459,11 @@ class User < ActiveRecord::Base
   module LimitMethods
     def max_saved_searches
       if is_platinum?
-        2000
+        1_000
+      elsif is_gold?
+-        200
       else
-        250
+        100
       end
     end
 
