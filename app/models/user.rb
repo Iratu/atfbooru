@@ -575,7 +575,9 @@ class User < ActiveRecord::Base
     end
 
     def api_hourly_limit
-      if is_platinum? && api_key.present?
+	  if is_admin? && api_key.present?
+		900000
+      elsif is_platinum? && api_key.present?
         20_000
       elsif is_gold? && api_key.present?
         10_000
