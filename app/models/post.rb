@@ -586,9 +586,14 @@ class Post < ActiveRecord::Base
 
 	
 	def check_tagme(tags)
+	  if tags.split.size > 10 && tags.include?("tagme")
+		tags.gsub! 'tagme', ''
+		#tags >> "tagme"
+	  end
 	  if tags.split.size < 10 && !tags.include?("tagme")
 		tags << "tagme"
 	  end
+	  return tags
 	end
 
     def remove_negated_tags(tags)
