@@ -595,6 +595,8 @@ class Post < ActiveRecord::Base
 		#post.tag_string.gsub! 'tagme', ''
 		tags << "tagme"
 	  end
+	  return tags
+	end
 	
     def remove_negated_tags(tags)
       negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
