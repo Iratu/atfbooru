@@ -587,11 +587,12 @@ class Post < ActiveRecord::Base
 	
 	def check_tagme(tags)
 	  if tags.split.size > 10 && tags.include?("tagme")
+		tags << "z_this_is_a_system_test"
 		tags.gsub! 'tagme', ''
 		#tags >> "tagme"
 	  end
 	  if tags.split.size < 10 && !tags.include?("tagme")
-		tags << "tagme"
+		tags << "autotagme"
 	  end
 	  return tags
 	end
