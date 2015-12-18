@@ -534,7 +534,7 @@ class Post < ActiveRecord::Base
 		self.tags << "tagme"
 	  end
 	  if self.tag_count >= 11 && self.tag_string.include?("tagme")
-		post.tag_string.gsub! 'tagme', ''
+		self.post.tag_string.gsub! 'tagme', ''
 	  end
     end
 
