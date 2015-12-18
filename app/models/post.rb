@@ -587,11 +587,9 @@ class Post < ActiveRecord::Base
 	
 	def check_tagme(tags)
 	  if tags.count() > 10 && tags.include?("tagme")
-		#tags << "z_this_is_a_system_test"
-		#tags.gsub! 'tagme', ''
 		tags -= %w(tagme)
 	  end
-	  if tags.count() < 10
+	  if tags.count() < 10 && !tags.include?("tagme")
 		tags << "tagme"
 	  end
 	  return tags
