@@ -515,6 +515,7 @@ class Post < ActiveRecord::Base
       categories.each_value do |category|
         self.tag_count += 1
 
+
         case category
         when Tag.categories.general
           self.tag_count_general += 1
@@ -529,6 +530,12 @@ class Post < ActiveRecord::Base
           self.tag_count_character += 1
         end
       end
+	  if self.tag_count <= 10
+		self.tags << "tagme"
+	  end
+	  if self.tag_count >= 11 && self.tag_string.include?("tagme")
+		post.tag_string.gsub! 'tagme', ''
+	  end
     end
 
     def merge_old_changes

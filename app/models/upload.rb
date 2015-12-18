@@ -57,7 +57,7 @@ class Upload < ActiveRecord::Base
 			tag_string.gsub! 'tagme', ''
 		end
 		post.tag_string += " #{tag_string}"
-		if post.tag_string.split.size > 15 && post.tag_string.include?("tagme")
+		if post.tag_string.split.size > 10 && post.tag_string.include?("tagme")
 			post.tag_string.gsub! 'tagme', ''
 		end
 		post.save
