@@ -579,9 +579,20 @@ class Post < ActiveRecord::Base
       normalized_tags = add_automatic_tags(normalized_tags)
       normalized_tags = TagAlias.to_aliased(normalized_tags)
       normalized_tags = TagImplication.with_descendants(normalized_tags)
+	  normalized_tags = check_tagme(normalized_tags)
       normalized_tags.sort!
       set_tag_string(normalized_tags.uniq.sort.join(" "))
     end
+
+	
+	def check_tagme(tags)
+	  if tags.split.size > 10 && tags.include?("tagme")
+		post.tag_string.gsub! 'tagme', ''
+	  end
+	  if tags.split.size < 10 && !tags.include?("tagme")
+		tags << "tagme"
+	  end
+	end
 
     def remove_negated_tags(tags)
       negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
