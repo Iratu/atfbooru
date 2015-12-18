@@ -530,12 +530,7 @@ class Post < ActiveRecord::Base
           self.tag_count_character += 1
         end
       end
-	  if self.tag_count <= 10
-		self.tags << "tagme"
-	  end
-	  if self.tag_count >= 11 && self.tag_string.include?("tagme")
-		self.post.tag_string.gsub! 'tagme', ''
-	  end
+
     end
 
     def merge_old_changes
@@ -586,10 +581,21 @@ class Post < ActiveRecord::Base
       normalized_tags = add_automatic_tags(normalized_tags)
       normalized_tags = TagAlias.to_aliased(normalized_tags)
       normalized_tags = TagImplication.with_descendants(normalized_tags)
+	  normalized_tags = check_tagme(normalized_tags)
       normalized_tags.sort!
       set_tag_string(normalized_tags.uniq.sort.join(" "))
     end
 
+	
+	def check_tagme(tags)
+	  if tags.split.size > 10 && tags.include?("tagme")
+		post.tag_string.gsub! 'tagme', ''
+	  end
+	  if tags.split.size < 10 && !tags.include?("tagme")
+		#post.tag_string.gsub! 'tagme', ''
+		tags << "tagme"
+	  end
+	
     def remove_negated_tags(tags)
       negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
       negated_tags = negated_tags.map {|x| x[1..-1]}
