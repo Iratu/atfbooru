@@ -17,7 +17,7 @@ Rails.application.routes.draw do
     resources :invitations, :only => [:new, :create, :index]
     resource :tag, :only => [:edit, :update]
     namespace :post do
-      resource :queue, :only => [:show]
+      resource :queue, :only => [:show, :expunge]
       resource :approval, :only => [:create]
       resource :disapproval, :only => [:create]
       resources :posts, :only => [:delete, :undelete, :expunge, :confirm_delete] do
