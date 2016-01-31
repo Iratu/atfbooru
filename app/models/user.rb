@@ -472,7 +472,7 @@ class User < ActiveRecord::Base
     def can_upload?
       if can_upload_free?
         true
-      elsif created_at > 1.hour.ago
+      elsif created_at > 1.week.ago
         false
       else
         upload_limit > 0
@@ -480,8 +480,8 @@ class User < ActiveRecord::Base
     end
 
     def upload_limited_reason
-      if created_at > 1.hour.ago
-        "cannot upload during your first hour of registration"
+      if created_at > 1.week.ago
+        "cannot upload during your first week of registration"
       else
         "have reached your upload limit for the day"
       end
