@@ -3,8 +3,10 @@ require 'test_helper'
 class TagAliasTest < ActiveSupport::TestCase
   context "A tag alias" do
     setup do
-      user = FactoryGirl.create(:user)
-      CurrentUser.user = user
+      Timecop.travel(1.month.ago) do
+        user = FactoryGirl.create(:user)
+        CurrentUser.user = user
+      end
       CurrentUser.ip_addr = "127.0.0.1"
       MEMCACHE.flush_all
       Delayed::Worker.delay_jobs = false
@@ -58,7 +60,7 @@ class TagAliasTest < ActiveSupport::TestCase
         ta2 = FactoryGirl.build(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
         ta2.save
         assert(ta2.errors.any?, "Tag alias should be invalid")
-        assert_equal("Tag alias can not create a transitive relation with another tag alias", ta2.errors.full_messages.join)
+        assert_equal("A tag alias for bbb already exists", ta2.errors.full_messages.join)
       end
     end
 

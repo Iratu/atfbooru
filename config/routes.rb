@@ -218,10 +218,12 @@ Rails.application.routes.draw do
     end
   end
   resources :artist_commentary_versions, :only => [:index]
-  resource :related_tag, :only => [:show]
+  resource :related_tag, :only => [:show, :update]
   get "reports/user_promotions" => "reports#user_promotions"
   get "reports/janitor_trials" => "reports#janitor_trials"
   get "reports/contributors" => "reports#contributors"
+  get "reports/uploads" => "reports#uploads"
+  get "reports/similar_users" => "reports#similar_users"
   resources :saved_searches, :except => [:show] do
     collection do
       get :categories
@@ -410,6 +412,8 @@ Rails.application.routes.draw do
   get "/static/benchmark" => "static#benchmark"
   get "/static/name_change" => "static#name_change", :as => "name_change"
   get "/meta_searches/tags" => "meta_searches#tags", :as => "meta_searches_tags"
+
+  get "/intro" => redirect("/explore/posts/intro")
 
   root :to => "posts#index"
 end

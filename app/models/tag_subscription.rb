@@ -67,7 +67,7 @@ class TagSubscription < ActiveRecord::Base
   def process
     divisor = [tag_query_array.size / 2, 1].max
     post_ids = tag_query_array.inject([]) do |all, query|
-      all += Post.tag_match(query).limit(Danbooru.config.tag_subscription_post_limit / divisor).select("posts.id").order("posts.id DESC").map(&:id)
+      all += PostReadOnly.tag_match(query).limit(Danbooru.config.tag_subscription_post_limit / divisor).select("posts.id").order("posts.id DESC").map(&:id)
     end
     self.post_ids = post_ids.sort.reverse.slice(0, Danbooru.config.tag_subscription_post_limit).join(",")
   end
@@ -182,7 +182,7 @@ class TagSubscription < ActiveRecord::Base
   def self.process_all
     find_each do |tag_subscription|
       if tag_subscription.is_active?
-        time = rand(4 * 60 * 60).seconds.from_now
+        time = rand(20 * 60 * 60).seconds.from_now
         TagSubscription.delay(:run_at => time, :queue => "default", :priority => 10).process(tag_subscription.id)
       end
     end

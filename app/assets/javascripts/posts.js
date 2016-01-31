@@ -194,7 +194,11 @@
         if ($("#add-to-favorites").is(":visible")) {
           $("#add-to-favorites").click();
         } else {
-          Danbooru.notice("You have already favorited this post")
+          if (Danbooru.meta("current-user-id") == "") {
+            Danbooru.notice("You must be logged in to favorite posts");
+          } else {
+            Danbooru.notice("You have already favorited this post");
+          }
         }
         e.preventDefault();
       });
@@ -519,8 +523,10 @@
           Danbooru.error("Error: " + data.reason);
         } else {
           var $post = $("#post_" + post_id);
-          $post.data("flags", $post.data("flags").replace(/pending/, ""));
-          $post.removeClass("post-status-pending");
+          if ($post.length) {
+            $post.data("flags", $post.data("flags").replace(/pending/, ""));
+            $post.removeClass("post-status-pending");
+          }
           Danbooru.notice("Approved post #" + post_id);
           $("#pending-approval-notice").hide();
         }
