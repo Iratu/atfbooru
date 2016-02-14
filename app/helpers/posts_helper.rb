@@ -1,4 +1,15 @@
 module PostsHelper
+  def missed_post_search_count_js
+    return nil unless Danbooru.config.enable_post_search_counts
+    
+    if params[:ms] == "1" && @post_set.post_count == 0 && @post_set.is_single_tag?
+      session_id = session.id
+      digest = OpenSSL::Digest.new("sha256")
+      sig = OpenSSL::HMAC.hexdigest(digest, Danbooru.config.shared_remote_key, ",#{session_id}")
+      return render("posts/partials/index/missed_search_count", session_id: session_id, sig: sig)
+    end
+  end
+
   def post_search_count_js
     return nil unless Danbooru.config.enable_post_search_counts
     
@@ -56,7 +67,7 @@ module PostsHelper
     end
 
     if CurrentUser.is_builder? && !source_search.blank?
-      source_link + "&nbsp;".html_safe + link_to("&raquo;".html_safe, posts_path(:tags => source_search))
+      source_link + "&nbsp;".html_safe + link_to("&raquo;".html_safe, posts_path(:tags => source_search), :rel => "nofollow")
     else
       source_link
     end

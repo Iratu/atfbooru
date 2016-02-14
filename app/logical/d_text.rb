@@ -120,7 +120,7 @@ class DText
   def self.parse_post_links(str)
     str.gsub(/\{\{([^\}]+)\}\}/) do
       tags = CGI.unescapeHTML($1)
-      %{<a href="/posts?tags=#{u(tags)}">#{h(tags)}</a>}
+      %{<a rel="nofollow" href="/posts?tags=#{u(tags)}">#{h(tags)}</a>}
     end
   end
 
@@ -321,6 +321,24 @@ class DText
     end
 
     html.join("").html_safe
+  end
+
+  def self.strip(s)
+    s.gsub!(/[\r\n]+/m, " ")
+    s.gsub!(/\[\/?(?:b|i|s|u|tn|tr|td|th|thead|tbody|quote|code|spoilers|spoiler|expand|table)\]/, "")
+    s.gsub!(/\[\[([^\|\]]+)\|([^\]]+)\]\]/m, '\2')
+    s.gsub!(/\[\[([^\]]+)\]\]/, '\1')
+    s.gsub!(/\{\{([^\}]+)\}\}/, '\1')
+    s.gsub!(/("[^"]+":(https?:\/\/|\/)[^\s\r\n<>]+|https?:\/\/[^\s\r\n<>]+|"[^"]+":\[(https?:\/\/|\/)[^\s\r\n<>\]]+\])+/) do |url|
+      if url =~ /^"([^"]+)":\[(.+)\]$/
+        $1
+      elsif url =~ /^"([^"]+)":(.+)$/
+        $1
+      else
+        url
+      end
+    end
+    s
   end
 
   def self.sanitize(text)

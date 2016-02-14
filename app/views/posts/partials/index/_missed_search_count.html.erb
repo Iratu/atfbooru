@@ -1,0 +1,10 @@
+<script type="text/javascript">
+  $(function() {
+    var tags = $("#tags").val();
+    $.post("<%= Danbooru.config.report_server %>/missed_searches", {
+      session_id: "<%= session_id %>",
+      tags: tags,
+      sig: "<%= sig %>"
+    });
+  });
+</script>

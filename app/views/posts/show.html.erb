@@ -40,7 +40,7 @@
 
       <%= render "posts/partials/show/notices", :post => @post %>
 
-      <section id="image-container" <%= PostPresenter.data_attributes(@post) %>>
+      <section itemscope itemtype="http://schema.org/ImageObject" id="image-container" <%= PostPresenter.data_attributes(@post) %>>
         <div id="note-container"></div>
         <div id="note-preview"></div>
         <%= @post.presenter.image_html(self) %>
@@ -143,6 +143,7 @@
 <% end %>
 
 <% content_for(:html_header) do %>
+  <meta name="description" content="<%= @post.presenter.humanized_tag_string %>">
   <meta name="tags" content="<%= @post.tag_string %>">
   <meta name="favorites" content="<%= @post.fav_string %>">
   <meta name="pools" content="<%= @post.pool_string %>">

@@ -12,7 +12,7 @@ class TagSetPresenter < Presenter
   def tag_list_html(template, options = {})
     html = ""
     if @tags.present?
-      html << "<ul>"
+      html << '<ul itemscope itemtype="http://schema.org/ImageObject">'
       @tags.each do |tag|
         html << build_list_item(tag, template, options)
       end
@@ -105,14 +105,19 @@ private
       end
 
       if CurrentUser.user.is_gold? && current_query.present?
-        html << %{<a href="/posts?tags=#{u(current_query)}+#{u(tag)}" class="search-inc-tag">+</a> }
-        html << %{<a href="/posts?tags=#{u(current_query)}+-#{u(tag)}" class="search-exl-tag">&ndash;</a> }
+        html << %{<a rel="nofollow" href="/posts?tags=#{u(current_query)}+#{u(tag)}" class="search-inc-tag">+</a> }
+        html << %{<a rel="nofollow" href="/posts?tags=#{u(current_query)}+-#{u(tag)}" class="search-exl-tag">&ndash;</a> }
       end
     end
 
     humanized_tag = tag.tr("_", " ")
     path = options[:path_prefix] || "/posts"
-    html << %{<a class="search-tag" href="#{path}?tags=#{u(tag)}">#{h(humanized_tag)}</a> }
+    if categories[tag] == Tag.categories.artist
+      itemprop = 'itemprop="author"'
+    else
+      itemprop = nil
+    end
+    html << %{<a class="search-tag" #{itemprop} href="#{path}?tags=#{u(tag)}">#{h(humanized_tag)}</a> }
 
     unless options[:name_only]
       if counts[tag].to_i >= 10_000

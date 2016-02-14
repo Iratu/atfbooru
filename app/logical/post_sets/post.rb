@@ -26,7 +26,7 @@ module PostSets
     end
 
     def has_wiki?
-      is_single_tag? && ::WikiPage.titled(tag_string).exists?
+      is_single_tag? && ::WikiPage.titled(tag_string).exists? && wiki_page.visible?
     end
 
     def wiki_page
@@ -138,6 +138,19 @@ module PostSets
 
     def unknown_post_count?
       post_count == Danbooru.config.blank_tag_search_fast_count
+    end
+
+    def hide_from_crawler?
+      return true if !is_single_tag?
+      return true if is_pattern_search?
+      return true if page.to_i > 1
+      return true if is_metatag_search?
+      false
+    end
+
+    def is_metatag_search?
+      # filter out some common metatags
+      tag_string =~ /(?:rating|user|fav|status|order|source|score|width|height):/
     end
 
     def is_single_tag?
