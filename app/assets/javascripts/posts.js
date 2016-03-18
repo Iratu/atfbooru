@@ -148,7 +148,7 @@
 
   Danbooru.Post.nav_prev = function() {
     if ($("#search-seq-nav").length) {
-      var href = $("#search-seq-nav a[rel=prev]").attr("href");
+      var href = $("#search-seq-nav a[rel~=prev]").attr("href");
       if (href) {
         location.href = href;
       }
@@ -162,7 +162,7 @@
 
   Danbooru.Post.nav_next = function() {
     if ($("#search-seq-nav").length) {
-      var href = $("#search-seq-nav a[rel=next]").attr("href");
+      var href = $("#search-seq-nav a[rel~=next]").attr("href");
       location.href = href;
     } else {
       var href = $("#pool-nav a.active[rel=next], #favgroup-nav a.active[rel=next]").attr("href");
