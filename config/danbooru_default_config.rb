@@ -63,7 +63,7 @@ module Danbooru
     # local_flat: Store every image in one directory.
     # local_hierarchy: Store every image in a hierarchical directory, based on the post's MD5 hash. On some file systems this may be faster.
     def image_store
-      :local_flat
+      :local_hierarchy
     end
 
     # Thumbnail size
