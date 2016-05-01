@@ -154,7 +154,7 @@ class AnonymousUser
   end
 
   def tag_query_limit
-    2
+    5
   end
 
   def favorite_limit
