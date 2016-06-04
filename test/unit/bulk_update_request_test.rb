@@ -14,7 +14,7 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
 
     should "create a forum topic" do
       assert_difference("ForumTopic.count", 1) do
-        BulkUpdateRequest.create(:title => "abc", :reason => "zzz", :script => "create alias aaa -> bbb")
+        BulkUpdateRequest.create(:title => "abc", :reason => "zzz", :script => "create alias aaa -> bbb", :skip_secondary_validations => true)
       end
     end
 
@@ -42,9 +42,7 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
       should "handle errors gracefully" do
         @req.stubs(:update_forum_topic_for_approve).raises(RuntimeError.new("blah"))
         assert_difference("Dmail.count", 1) do
-          CurrentUser.scoped(@admin, "127.0.0.1") do
-            @req.approve!
-          end
+          @req.approve!(@admin.id)
         end
         assert_match(/Exception: RuntimeError/, Dmail.last.body)
         assert_match(/Message: blah/, Dmail.last.body)
@@ -56,13 +54,13 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
 
       should "update the topic when processed" do
         assert_difference("ForumPost.count") do
-          CurrentUser.scoped(@admin, "127.0.0.1") do
-            @req.approve!
-          end
+          @req.approve!(@admin.id)
         end
       end
 
       should "update the topic when rejected" do
+        @req.approver_id = @admin.id
+
         assert_difference("ForumPost.count") do
           @req.reject!
         end
