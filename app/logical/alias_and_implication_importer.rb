@@ -87,7 +87,7 @@ private
             raise "Error: #{tag_alias.errors.full_messages.join("; ")} (create alias #{tag_alias.antecedent_name} -> #{tag_alias.consequent_name})"
           end
           tag_alias.rename_wiki_and_artist if rename_aliased_pages?
-          tag_alias.delay(:queue => "default").process!(false)
+          tag_alias.delay(:queue => "default").approve!(CurrentUser.id)
 
         when :create_implication
           tag_implication = TagImplication.create(:forum_topic_id => forum_id, :status => "pending", :antecedent_name => token[1], :consequent_name => token[2], :skip_secondary_validations => skip_secondary_validations)
