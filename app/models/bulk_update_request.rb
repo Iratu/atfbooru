@@ -11,7 +11,7 @@ class BulkUpdateRequest < ActiveRecord::Base
   validates_inclusion_of :status, :in => %w(pending approved rejected)
   validate :script_formatted_correctly
   validate :forum_topic_id_not_invalid
-  validate :validate_script
+  validate :validate_script, :on => :create
   attr_accessible :user_id, :forum_topic_id, :script, :title, :reason, :skip_secondary_validations
   attr_accessible :status, :approver_id, :as => [:admin]
   before_validation :initialize_attributes, :on => :create
@@ -34,9 +34,9 @@ class BulkUpdateRequest < ActiveRecord::Base
   extend SearchMethods
 
   def approve!(approver_id)
+    self.approver_id = approver_id
     AliasAndImplicationImporter.new(script, forum_topic_id, "1", true).process!
     self.status = "approved"
-    self.approver_id = approver_id
     self.skip_secondary_validations = true
     save
     update_forum_topic_for_approve
@@ -71,7 +71,7 @@ class BulkUpdateRequest < ActiveRecord::Base
 
   def update_topic_on_failure(x)
     if forum_topic_id
-      body = "Bulk update request ##{id} failed: #{x.to_s}"
+      body = "\"Bulk update request ##{id}\":/bulk_update_requests?search%5Bid%5D=#{id} failed: #{x.to_s}"
       ForumPost.create(:body => body, :topic_id => forum_topic_id)
     end
   end
@@ -137,7 +137,7 @@ class BulkUpdateRequest < ActiveRecord::Base
   def update_forum_topic_for_approve
     if forum_topic
       forum_topic.posts.create(
-        :body => "The bulk update request ##{id} has been approved."
+        :body => "The \"bulk update request ##{id}\":/bulk_update_requests?search%5Bid%5D=#{id} has been approved."
       )
     end
   end
@@ -145,7 +145,7 @@ class BulkUpdateRequest < ActiveRecord::Base
   def update_forum_topic_for_reject
     if forum_topic
       forum_topic.posts.create(
-        :body => "The bulk update request ##{id} has been rejected."
+        :body => "The \"bulk update request ##{id}\":/bulk_update_requests?search%5Bid%5D=#{id} has been rejected."
       )
     end
   end

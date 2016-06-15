@@ -14,6 +14,9 @@ class BulkUpdateRequestsController < ApplicationController
     respond_with(@bulk_update_request, :location => bulk_update_requests_path)
   end
 
+  def show
+  end
+
   def edit
   end
 
@@ -28,8 +31,7 @@ class BulkUpdateRequestsController < ApplicationController
   end
 
   def approve
-    @bulk_update_request.approve!(CurrentUse.user.id)
-    flash[:notice] = "Bulk update request approved"
+    @bulk_update_request.approve!(CurrentUser.user.id)
     respond_with(@bulk_update_request, :location => bulk_update_requests_path)
   end
 
