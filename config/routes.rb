@@ -225,6 +225,8 @@ Rails.application.routes.draw do
   get "reports/contributors" => "reports#contributors"
   get "reports/uploads" => "reports#uploads"
   get "reports/similar_users" => "reports#similar_users"
+  get "reports/post_versions" => "reports#post_versions"
+  post "reports/post_versions_create" => "reports#post_versions_create"
   resources :saved_searches, :except => [:show] do
     collection do
       get :categories
@@ -257,6 +259,7 @@ Rails.application.routes.draw do
   resource :tag_implication_request, :only => [:new, :create]
   resources :tag_subscriptions do
     member do
+      post :migrate
       get :posts
     end
   end

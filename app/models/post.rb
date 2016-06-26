@@ -12,6 +12,7 @@ class Post < ActiveRecord::Base
   after_save :create_version
   after_save :update_parent_on_save
   after_save :apply_post_metatags
+  after_save :expire_essential_tag_string_cache
   after_create :update_iqdb_async
   after_commit :pg_notify
   before_save :merge_old_changes
@@ -112,14 +113,14 @@ class Post < ActiveRecord::Base
 
     def seo_tag_string
       if Danbooru.config.enable_seo_post_urls && !CurrentUser.user.disable_tagged_filenames?
-        "--#{seo_tags}--"
+        "__#{seo_tags}__"
       else
         nil
       end
     end
 
     def seo_tags
-      @seo_tags ||= humanized_essential_tag_string.gsub(/[^a-z0-9]+/, "-").gsub(/(?:^-+)|(?:-+$)/, "").gsub(/-{2,}/, "-")
+      @seo_tags ||= humanized_essential_tag_string.gsub(/[^a-z0-9]+/, "_").gsub(/(?:^_+)|(?:_+$)/, "").gsub(/_{2,}/, "_")
     end
 
     def preview_file_url
@@ -802,8 +803,12 @@ class Post < ActiveRecord::Base
       end
     end
 
+    def expire_essential_tag_string_cache
+      Cache.delete("hets-#{id}")
+    end
+
     def humanized_essential_tag_string
-      @humanized_essential_tag_string ||= begin
+      @humanized_essential_tag_string ||= Cache.get("hets-#{id}", 1.hour.to_i) do
         string = []
 
         if character_tags.any?
