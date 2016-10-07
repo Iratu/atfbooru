@@ -17,7 +17,11 @@ Rails.application.routes.draw do
     resources :invitations, :only => [:new, :create, :index]
     resource :tag, :only => [:edit, :update]
     namespace :post do
-      resource :queue, :only => [:show, :expunge, :confirm_delete]
+      resource :queue, :only => [:show] do
+        member do
+          get :random
+        end
+      end
       resource :approval, :only => [:create]
       resource :disapproval, :only => [:create]
       resources :posts, :only => [:delete, :undelete, :expunge, :confirm_delete] do
@@ -232,12 +236,14 @@ Rails.application.routes.draw do
       get :categories
     end
   end
+  resource :saved_search_category_change, :only => [:new, :create]
   resource :session do
     collection do
       get :sign_out
     end
   end
   resource :source, :only => [:show]
+  resources :super_voters, :only => [:index]
   resources :tags do
     resource :correction, :only => [:new, :create, :show], :controller => "tag_corrections"
     collection do
@@ -293,6 +299,7 @@ Rails.application.routes.draw do
       post :reject
     end
   end
+  resource :user_revert, :only => [:new, :create]
   resources :wiki_pages do
     member do
       put :revert
@@ -420,4 +427,6 @@ Rails.application.routes.draw do
   get "/intro" => redirect("/explore/posts/intro")
 
   root :to => "posts#index"
+
+  get "*other", :to => "static#not_found"
 end

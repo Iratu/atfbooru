@@ -1,4 +1,6 @@
 class SavedSearch < ActiveRecord::Base
+  UNCATEGORIZED_NAME = "Uncategorized"
+
   module ListbooruMethods
     extend ActiveSupport::Concern
 
@@ -25,6 +27,15 @@ class SavedSearch < ActiveRecord::Base
         user.saved_searches.each do |saved_search|
           sqs.send_message("create\n#{user_id}\n#{saved_search.category}\n#{saved_search.tag_query}", :delay_seconds => 30)
         end
+
+        true
+      end
+
+      def rename_listbooru(user_id, old_category, new_category)
+        return false unless Danbooru.config.listbooru_enabled?
+
+        sqs = SqsService.new(Danbooru.config.aws_sqs_queue_url)
+        sqs.send_message("rename\n#{user_id}\n#{old_category}\n#{new_category}\n")
 
         true
       end
@@ -69,36 +80,58 @@ class SavedSearch < ActiveRecord::Base
   before_validation :normalize
 
   def self.tagged(tags)
-    where(:tag_query => SavedSearch.normalize(tags)).first
+    where(:tag_query => normalize(tags)).first
   end
 
   def self.normalize(tag_query)
     Tag.scan_query(tag_query).join(" ")
   end
 
+  def self.normalize_category(category)
+    category.to_s.strip.gsub(/\s+/, "_").downcase
+  end
+
+  def self.rename(user_id, old_category, new_category)
+    user = User.find(user_id)
+    old_category = normalize_category(old_category)
+    new_category = normalize_category(new_category)
+    user.saved_searches.where(category: old_category).update_all(category: new_category)
+    rename_listbooru(user_id, old_category, new_category)
+  end
+
   def self.post_ids(user_id, name = nil)
     return [] unless Danbooru.config.listbooru_enabled?
 
-    params = {
-      "key" => Danbooru.config.listbooru_auth_key,
-      "user_id" => user_id,
-      "name" => name
-    }
-    uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
-    uri.query = URI.encode_www_form(params)
+    if name
+      hash_name = Cache.hash(name)
+    else
+      hash_name = nil
+    end
 
-    Net::HTTP.start(uri.host, uri.port) do |http|
-      resp = http.request_get(uri.request_uri)
-      if resp.is_a?(Net::HTTPSuccess)
-        resp.body.scan(/\d+/).map(&:to_i)
-      else
-        raise "HTTP error code: #{resp.code} #{resp.message}"
+    body = Cache.get("ss-pids-#{user_id}-#{hash_name}", 60) do
+      params = {
+        "key" => Danbooru.config.listbooru_auth_key,
+        "user_id" => user_id,
+        "name" => name
+      }
+      uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
+      uri.query = URI.encode_www_form(params)
+
+      Net::HTTP.start(uri.host, uri.port) do |http|
+        resp = http.request_get(uri.request_uri)
+        if resp.is_a?(Net::HTTPSuccess)
+          resp.body
+        else
+          raise "HTTP error code: #{resp.code} #{resp.message}"
+        end
       end
     end
+
+    body.to_s.scan(/\d+/).map(&:to_i)
   end
 
   def normalize
-    self.category = category.strip.gsub(/\s+/, "_").downcase if category
+    self.category = SavedSearch.normalize_category(category) if category
     self.tag_query = SavedSearch.normalize(tag_query)
   end
 

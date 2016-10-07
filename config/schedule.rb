@@ -24,6 +24,10 @@ every 1.month, :at => "2:00 am" do
 end
 
 if environment == "production"
+  every 30.minutes do
+    runner "PostUpdate.push"
+  end
+
   every 1.hour do
     runner "AmazonBackup.execute"
   end

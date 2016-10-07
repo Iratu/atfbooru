@@ -13,17 +13,11 @@ class SuperVoter < ActiveRecord::Base
 
   def self.init!
     prune!
-    report = Reports::UserSimilarity.new(User.admins.first.id)
-    report.prime
-    report.fetch_similar_user_ids.scan(/\S+/).in_groups_of(2).each do |user_id, score|
-      unless where("user_id = ?", user_id.to_i).exists?
-        create(:user_id => user_id)
-      end
-    end
+    report = PostVoteSimilarity.new(User.admins.first.id)
 
-    User.admins.each do |user|
-      unless where("user_id = ?", user.id).exists?
-        create(:user_id => user.id)
+    report.calculate_positive(15).each do |element|
+      unless SuperVoter.where("user_id = ?", element.user_id).exists?
+        SuperVoter.create(:user_id => element.user_id)
       end
     end
   end

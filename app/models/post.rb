@@ -1,4 +1,5 @@
 require 'danbooru/has_bit_flags'
+require 'google/apis/pubsub_v1'
 
 class Post < ActiveRecord::Base
   class ApprovalError < Exception ; end
@@ -14,7 +15,7 @@ class Post < ActiveRecord::Base
   after_save :apply_post_metatags
   after_save :expire_essential_tag_string_cache
   after_create :update_iqdb_async
-  after_commit :pg_notify
+  after_commit :notify_pubsub
   before_save :merge_old_changes
   before_save :normalize_tags
   before_save :update_tag_post_counts
@@ -44,7 +45,7 @@ class Post < ActiveRecord::Base
   has_many :favorites, :dependent => :destroy
   validates_uniqueness_of :md5
   validate :post_is_not_its_own_parent
-  attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :last_noted_at, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :janitor, :moderator, :admin, :default]
+  attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :janitor, :moderator, :admin, :default]
   attr_accessible :is_rating_locked, :is_note_locked, :as => [:builder, :janitor, :moderator, :admin]
   attr_accessible :is_status_locked, :as => [:admin]
 
@@ -158,6 +159,16 @@ class Post < ActiveRecord::Base
     def is_animated_gif?
       if file_ext =~ /gif/i
         return Magick::Image.ping(file_path).length > 1
+      else
+        return false
+      end
+    end
+    
+    def is_animated_png?
+      if file_ext =~ /png/i
+        apng = APNGInspector.new(file_path)
+        apng.inspect!
+        return apng.animated?
       else
         return false
       end
@@ -618,7 +629,7 @@ class Post < ActiveRecord::Base
     def add_automatic_tags(tags)
       return tags if !Danbooru.config.enable_dimension_autotagging
 
-      tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize animated_gif flash webm mp4)
+      tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize animated_gif animated_png flash webm mp4)
 
       if has_dimensions?
         if image_width >= 10_000 || image_height >= 10_000
@@ -650,6 +661,10 @@ class Post < ActiveRecord::Base
       if is_animated_gif?
         tags << "animated_gif"
       end
+      
+      if is_animated_png?
+        tags << "animated_png"
+      end
 
       if is_flash?
         tags << "flash"
@@ -671,7 +686,7 @@ class Post < ActiveRecord::Base
     end
 
     def filter_metatags(tags)
-      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent):/i}
+      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|source):/i}
       @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-favgroup|favgroup):/i}
       apply_pre_metatags
       return tags
@@ -754,6 +769,15 @@ class Post < ActiveRecord::Base
             remove_parent_loops
           end
 
+        when /^source:none$/i
+          self.source = nil
+
+        when /^source:"(.*)"$/i
+          self.source = $1
+
+        when /^source:(.*)$/i
+          self.source = $1
+
         when /^rating:([qse])/i
           unless is_rating_locked?
             self.rating = $1.downcase
@@ -771,7 +795,7 @@ class Post < ActiveRecord::Base
     end
 
     def remove_tag(tag)
-      set_tag_string((tag_array - tag).join(" "))
+      set_tag_string((tag_array - Array(tag)).join(" "))
     end
 
     def has_dup_tag?
@@ -1033,11 +1057,13 @@ class Post < ActiveRecord::Base
   module CountMethods
     def fix_post_counts
       post.set_tag_counts
-      post.update_column(:tag_count, post.tag_count)
-      post.update_column(:tag_count_general, post.tag_count_general)
-      post.update_column(:tag_count_artist, post.tag_count_artist)
-      post.update_column(:tag_count_copyright, post.tag_count_copyright)
-      post.update_column(:tag_count_character, post.tag_count_character)
+      post.update_columns(
+        :tag_count => post.tag_count,
+        :tag_count_general => post.tag_count_general,
+        :tag_count_artist => post.tag_count_artist,
+        :tag_count_copyright => post.tag_count_copyright,
+        :tag_count_character => post.tag_count_character
+      )
     end
 
     def get_count_from_cache(tags)
@@ -1303,10 +1329,16 @@ class Post < ActiveRecord::Base
       end
 
       Post.transaction do
-        update_column(:is_deleted, true)
-        update_column(:is_pending, false)
-        update_column(:is_flagged, false)
-        update_column(:is_banned, true) if options[:ban] || has_tag?("banned_artist")
+        self.is_deleted = true
+        self.is_pending = false
+        self.is_flagged = false
+        self.is_banned = true if options[:ban] || has_tag?("banned_artist")
+        update_columns(
+          :is_deleted => is_deleted,
+          :is_pending => is_pending,
+          :is_flagged => is_flagged,
+          :is_banned => is_banned
+        )
         give_favorites_to_parent if options[:move_favorites]
         update_parent_on_save
 
@@ -1385,8 +1417,10 @@ class Post < ActiveRecord::Base
       save!
     end
 
-    def pg_notify
-      execute_sql("notify changes_posts, '#{id}'")
+    def notify_pubsub
+      return unless Danbooru.config.google_api_project
+
+      PostUpdate.insert(id)
     end
   end
 
@@ -1622,23 +1656,7 @@ class Post < ActiveRecord::Base
   
   module PixivMethods
     def parse_pixiv_id
-      if source =~ %r!http://i\d\.pixiv\.net/img-inf/img/\d+/\d+/\d+/\d+/\d+/\d+/(\d+)_s.jpg!
-        self.pixiv_id = $1
-      elsif source =~ %r!http://img\d+\.pixiv\.net/img/[^\/]+/(\d+)!
-        self.pixiv_id = $1
-      elsif source =~ %r!http://i\d\.pixiv\.net/img\d+/img/[^\/]+/(\d+)!
-        self.pixiv_id = $1
-      elsif source =~ %r!http://i\d\.pixiv\.net/img-original/img/(?:\d+\/)+(\d+)_p!
-        self.pixiv_id = $1
-      elsif source =~ %r!http://i\d\.pixiv\.net/c/\d+x\d+/img-master/img/(?:\d+\/)+(\d+)_p!
-        self.pixiv_id = $1
-      elsif source =~ /pixiv\.net/ && source =~ /illust_id=(\d+)/
-        self.pixiv_id = $1
-      elsif source =~ %r!http://i\d\.pixiv\.net/img-zip-ugoira/img/(?:\d+\/)+(\d+)_ugoira!
-        self.pixiv_id = $1
-      else
-        self.pixiv_id = nil
-      end
+      self.pixiv_id = Sources::Strategies::Pixiv.illust_id_from_url(source)
     end
   end
 
@@ -1756,13 +1774,13 @@ class Post < ActiveRecord::Base
 
   def update_column(name, value)
     ret = super(name, value)
-    pg_notify
+    notify_pubsub
     ret
   end
 
   def update_columns(attributes)
     ret = super(attributes)
-    pg_notify
+    notify_pubsub
     ret
   end
 end

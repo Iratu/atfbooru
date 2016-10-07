@@ -4,7 +4,7 @@ module Danbooru
   class Configuration
     # The version of this Danbooru.
     def version
-      "2.103.0"
+      "2.105.0"
     end
 
     # The name of this Danbooru.
@@ -49,14 +49,20 @@ module Danbooru
       "choujin-steiner"
     end
 
-    # Set to true to give all new users gold access.
-    def start_as_gold?
-      false
-    end
-
-    # Set to true to give all new users contributor access.
-    def start_as_contributor?
-      false
+    # Set the default level, permissions, and other settings for new users here.
+    def customize_new_user(user)
+      # user.level = User::Levels::MEMBER
+      # user.can_approve_posts = false
+      # user.can_upload_free = false
+      # user.is_super_voter = false
+      #
+      # user.base_upload_limit = 10
+      # user.comment_threshold = -1
+      # user.blacklisted_tags = ["spoilers", "guro", "scat", "furry -rating:s"].join("\n")
+      # user.default_image_size = "large"
+      # user.per_page = 20
+      # user.disable_tagged_filenames = false
+      true
     end
 
     # What method to use to store images.
@@ -267,6 +273,14 @@ module Danbooru
       nil
     end
 
+    def pixiv_whitecube_login
+      nil
+    end
+
+    def pixiv_whitecube_password
+      nil
+    end
+
     def tinami_login
       nil
     end
@@ -415,6 +429,14 @@ module Danbooru
     end
 
     def listbooru_auth_key
+    end
+
+    # google api options
+    def google_api_project
+    end
+
+    def google_api_json_key_path
+      "/var/www/danbooru2/shared/config/google-key.json"
     end
 
     # AWS config options

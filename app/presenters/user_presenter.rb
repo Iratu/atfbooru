@@ -36,7 +36,31 @@ class UserPresenter
       permissions << "unrestricted uploads"
     end
 
+    if user.is_super_voter?
+      permissions << "super voter"
+    end
+
     permissions.join(", ")
+  end
+
+  def posts_for_saved_search_category(category)
+    if category == SavedSearch::UNCATEGORIZED_NAME
+      ids = SavedSearch.post_ids(CurrentUser.user.id)
+    else
+      ids = SavedSearch.post_ids(CurrentUser.user.id, category)
+    end
+
+    if ids.any?
+      arel = Post.where("id in (?)", ids.map(&:to_i)).order("id desc").limit(10)
+
+      if CurrentUser.user.hide_deleted_posts?
+        arel = arel.undeleted
+      end
+
+      arel
+    else
+      Post.where("false")
+    end
   end
 
   def posts_for_subscription(subscription)
@@ -125,7 +149,7 @@ class UserPresenter
   end
 
   def post_version_count(template)
-    template.link_to(user.post_update_count, template.post_versions_path(:search => {:updater_id => user.id}))
+    template.link_to(user.post_update_count, template.post_versions_path(:lr => user.id, :search => {:updater_id => user.id}))
   end
 
   def note_version_count(template)
@@ -190,6 +214,14 @@ class UserPresenter
       user.subscriptions
     else
       user.subscriptions.select {|x| x.is_public?}
+    end
+  end
+
+  def saved_search_categories
+    if CurrentUser.user.id == user.id
+      user.unique_saved_search_categories
+    else
+      []
     end
   end
   

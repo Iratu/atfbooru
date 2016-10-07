@@ -9,7 +9,19 @@ class PostVote < ActiveRecord::Base
   after_destroy :update_post_on_destroy
 
   def self.prune!
-    where("created_at < ?", 30.days.ago).delete_all
+    where("created_at < ?", 90.days.ago).delete_all
+  end
+
+  def self.positive_user_ids
+    select_values_sql("select user_id from post_votes where score > 0 group by user_id having count(*) > 100")
+  end
+
+  def self.negative_post_ids(user_id)
+    select_values_sql("select post_id from post_votes where score < 0 and user_id = ?", user_id)
+  end
+
+  def self.positive_post_ids(user_id)
+    select_values_sql("select post_id from post_votes where score > 0 and user_id = ?", user_id)
   end
 
   def score=(x)

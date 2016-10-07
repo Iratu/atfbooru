@@ -45,7 +45,7 @@ class DText
     str.gsub!(/\[u\](.+?)\[\/u\]/i, '<u>\1</u>')
     str.gsub!(/\[tn\](.+?)\[\/tn\]/i, '<p class="tn">\1</p>')
 
-    str = parse_mentions(str)
+    str = parse_mentions(str, options)
     str = parse_links(str)
     str = parse_aliased_wiki_links(str)
     str = parse_wiki_links(str)
@@ -54,7 +54,9 @@ class DText
     str
   end
 
-  def self.parse_mentions(str)
+  def self.parse_mentions(str, options = {})
+    return if options[:disable_mentions]
+
     str.gsub!(MENTION_REGEXP) do |name| 
       next name unless name =~ /[a-z0-9]/i
 
@@ -193,7 +195,7 @@ class DText
       str.gsub!(/\[\/code\]\s*/m, "\n\n[/code]\n\n")
       str.gsub!(/\s*\[spoilers?\](?!\])\s*/m, "\n\n[spoiler]\n\n")
       str.gsub!(/\s*\[\/spoilers?\]\s*/m, "\n\n[/spoiler]\n\n")
-      str.gsub!(/^(h[1-6]\.\s*.+)$/, "\n\n\\1\n\n")
+      str.gsub!(/^(h[1-6](\#[A-z][_A-z0-9-]+)?\.\s*.+)$/, "\n\n\\1\n\n")
       str.gsub!(/\s*\[expand(\=[^\]]*)?\](?!\])\s*/m, "\n\n[expand\\1]\n\n")
       str.gsub!(/\s*\[\/expand\]\s*/m, "\n\n[/expand]\n\n")
       str.gsub!(/\s*\[table\](?!\])\s*/m, "\n\n[table]\n\n")
@@ -217,7 +219,16 @@ class DText
         else
           "<#{tag}>" + parse_inline(content, options) + "</#{tag}>"
         end
-
+      when /\A(h[1-6])\#([A-z][_A-z0-9-]+)\.\s*(.+)\Z/
+        tag = $1
+        header_id = $2
+        content = $3
+        
+        if options[:inline]
+          "<h6 id=\"dtext-#{header_id}\">" + parse_inline(content, options) + "</h6>"
+        else
+          "<#{tag} id=\"dtext-#{header_id}\">" + parse_inline(content, options) + "</#{tag}>"
+        end
       when /^\s*\*+ /
         parse_list(block, options)
 
@@ -328,6 +339,8 @@ class DText
   end
 
   def self.strip(s)
+    return "" if s.blank?
+
     s.gsub!(/[\r\n]+/m, " ")
     s.gsub!(/\[\/?(?:b|i|s|u|tn|tr|td|th|thead|tbody|quote|code|spoilers|spoiler|expand|table)\]/, "")
     s.gsub!(/\[\[([^\|\]]+)\|([^\]]+)\]\]/m, '\2')

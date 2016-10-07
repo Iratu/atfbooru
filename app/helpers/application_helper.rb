@@ -76,8 +76,7 @@ module ApplicationHelper
   end
 
   def time_tag(content, time)
-    zone = time.strftime("%z")
-    datetime = time.strftime("%Y-%m-%dT%H:%M" + zone[0, 3] + ":" + zone[3, 2])
+    datetime = time.strftime("%Y-%m-%dT%H:%M%:z")
 
     content_tag(:time, content || datetime, :datetime => datetime, :title => time.to_formatted_s)
   end
@@ -94,6 +93,8 @@ module ApplicationHelper
     user_class = user.level_class
     user_class = user_class + " user-post-approver" if user.can_approve_posts?
     user_class = user_class + " user-post-uploader" if user.can_upload_free?
+    user_class = user_class + " user-super-voter" if user.is_super_voter?
+    user_class = user_class + " user-banned" if user.is_banned?
     user_class = user_class + " with-style" if CurrentUser.user.style_usernames?
     if options[:raw_name]
       name = user.name
@@ -145,7 +146,7 @@ module ApplicationHelper
     string += '</div>'
     string.html_safe
   end
-
+  
 protected
   def nav_link_match(controller, url)
     url =~ case controller

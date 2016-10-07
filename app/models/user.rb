@@ -35,13 +35,14 @@ class User < ActiveRecord::Base
     disable_categorized_saved_searches
     is_super_voter
     disable_tagged_filenames
+    enable_recent_searches
   )
 
   include Danbooru::HasBitFlags
   has_bit_flags BOOLEAN_ATTRIBUTES, :field => "bit_prefs"
 
   attr_accessor :password, :old_password
-  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :as => [:moderator, :janitor, :gold, :member, :anonymous, :default, :builder, :admin]
+  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :as => [:moderator, :janitor, :gold, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :level, :as => :admin
   validates_length_of :name, :within => 2..100, :on => :create
   validates_format_of :name, :with => /\A[^\s:]+\Z/, :on => :create, :message => "cannot have whitespace or colons"
@@ -63,6 +64,8 @@ class User < ActiveRecord::Base
   after_save :update_cache
   after_update :update_remote_cache
   before_create :promote_to_admin_if_first_user
+  before_create :customize_new_user
+  #after_create :notify_sock_puppets
   has_many :feedback, :class_name => "UserFeedback", :dependent => :destroy
   has_many :posts, :foreign_key => "uploader_id"
   has_many :bans, lambda {order("bans.id desc")}
@@ -304,9 +307,16 @@ class User < ActiveRecord::Base
 
       if User.count == 0
         self.level = Levels::ADMIN
+        self.can_approve_posts = true
+        self.can_upload_free = true
+        self.is_super_voter = true
       else
         self.level = Levels::MEMBER
       end
+    end
+
+    def customize_new_user
+      Danbooru.config.customize_new_user(self)
     end
 
     def role
@@ -612,11 +622,11 @@ end
 
   module ApiMethods
     def hidden_attributes
-      super + [:password_hash, :bcrypt_password_hash, :email, :email_verification_key, :time_zone, :updated_at, :receive_email_notifications, :last_logged_in_at, :last_forum_read_at, :has_mail, :default_image_size, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :recent_tags, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :enable_sequential_post_navigation, :hide_deleted_posts, :per_page, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :has_saved_searches, :last_ip_addr]
+      super + [:password_hash, :bcrypt_password_hash, :email, :email_verification_key, :time_zone, :updated_at, :receive_email_notifications, :last_logged_in_at, :last_forum_read_at, :has_mail, :default_image_size, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :recent_tags, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :enable_sequential_post_navigation, :hide_deleted_posts, :per_page, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :has_saved_searches, :last_ip_addr, :bit_prefs]
     end
 
     def method_attributes
-      list = [:is_banned, :level_string]
+      list = [:is_banned, :can_approve_posts, :can_upload_free, :is_super_voter, :level_string]
       if id == CurrentUser.user.id
         list += [:remaining_api_hourly_limit]
       end
@@ -759,6 +769,35 @@ end
         q = q.where("id in (?)", params[:id].split(",").map(&:to_i))
       end
 
+      bitprefs_length = BOOLEAN_ATTRIBUTES.length
+      bitprefs_include = nil
+      bitprefs_exclude = nil
+
+      [:can_approve_posts, :can_upload_free, :is_super_voter].each do |x|
+        if params[x].present?
+          attr_idx = BOOLEAN_ATTRIBUTES.index(x.to_s)
+          if params[x] == "true"
+            bitprefs_include ||= "0"*bitprefs_length
+            bitprefs_include[attr_idx] = '1'
+          elsif params[x] == "false"
+            bitprefs_exclude ||= "0"*bitprefs_length
+            bitprefs_exclude[attr_idx] = '1'
+          end
+        end
+      end
+
+      if bitprefs_include
+        bitprefs_include.reverse!
+        q = q.where("bit_prefs::bit(:len) & :bits::bit(:len) = :bits::bit(:len)",
+                    {:len => bitprefs_length, :bits => bitprefs_include})
+      end
+
+      if bitprefs_exclude
+        bitprefs_exclude.reverse!
+        q = q.where("bit_prefs::bit(:len) & :bits::bit(:len) = 0::bit(:len)",
+                    {:len => bitprefs_length, :bits => bitprefs_exclude})
+      end
+
       if params[:current_user_first] == "true" && !CurrentUser.is_anonymous?
         q = q.order("id = #{CurrentUser.user.id.to_i} desc")
       end
@@ -790,6 +829,33 @@ end
     end
   end
 
+  module SavedSearchMethods
+    def unique_saved_search_categories
+      categories = saved_searches.pluck(:category)
+      
+      if categories.any? {|x| x.blank?}
+        categories.reject! {|x| x.blank?}
+        categories.unshift(SavedSearch::UNCATEGORIZED_NAME)
+      end
+      
+      categories.uniq!
+      categories
+    end
+  end
+
+  module SockPuppetMethods
+    def notify_sock_puppets
+      sock_puppet_suspects.each do |user|
+      end
+    end
+
+    def sock_puppet_suspects
+      if last_ip_addr.present?
+        User.where(:last_ip_addr => last_ip_addr)
+      end
+    end
+  end
+
   include BanMethods
   include NameMethods
   include PasswordMethods
@@ -805,6 +871,7 @@ end
   include CountMethods
   extend SearchMethods
   include StatisticsMethods
+  include SavedSearchMethods
 
   def initialize_default_image_size
     self.default_image_size = "large"

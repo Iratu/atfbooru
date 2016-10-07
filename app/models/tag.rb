@@ -1,6 +1,6 @@
 class Tag < ActiveRecord::Base
   COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 1000
-  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search"
+  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote"
   SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm"
   attr_accessible :category, :as => [:moderator, :janitor, :gold, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :is_locked, :as => [:moderator, :admin]
@@ -231,11 +231,15 @@ class Tag < ActiveRecord::Base
     end
 
     def scan_query(query)
-      normalize(query).scan(/\S+/).uniq
+      tagstr = normalize(query)
+      list = tagstr.scan(/-?source:".*?"/) || []
+      list + tagstr.gsub(/-?source:".*?"/, "").scan(/\S+/).uniq
     end
 
     def scan_tags(tags)
-      normalize(tags).gsub(/[%,]/, "").scan(/\S+/).uniq
+      tagstr = normalize(tags)
+      list = tagstr.scan(/source:".*?"/) || []
+      list + tagstr.gsub(/source:".*?"/, "").gsub(/[%,]/, "").scan(/\S+/).uniq
     end
 
     def parse_cast(object, type)
@@ -418,8 +422,14 @@ class Tag < ActiveRecord::Base
             q[:approver_id_neg] << user_id unless user_id.blank?
 
           when "approver"
-            user_id = User.name_to_id($2)
-            q[:approver_id] = user_id unless user_id.blank?
+            if $2 == "none"
+              q[:approver_id] = "none"              
+            elsif $2 == "any"
+              q[:approver_id] = "any"
+            else
+              user_id = User.name_to_id($2)
+              q[:approver_id] = user_id unless user_id.blank?
+            end
 
           when "commenter", "comm"
             q[:commenter_ids] ||= []
@@ -541,10 +551,12 @@ class Tag < ActiveRecord::Base
       	    q[:filesize] = parse_helper_fudged($2, :filesize)
 
           when "source"
-            q[:source] = ($2.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
+            src = $2.gsub(/\A"(.*)"\Z/, '\1')
+            q[:source] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
 
           when "-source"
-            q[:source_neg] = ($2.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
+            src = $2.gsub(/\A"(.*)"\Z/, '\1')
+            q[:source_neg] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
 
           when "date"
             q[:date] = parse_helper($2, :date)
@@ -590,6 +602,16 @@ class Tag < ActiveRecord::Base
 
           when "pixiv_id", "pixiv"
             q[:pixiv_id] = parse_helper($2)
+
+          when "upvote"
+            if CurrentUser.user.is_moderator?
+              q[:upvote] = User.name_to_id($2)
+            end
+
+          when "downvote"
+            if CurrentUser.user.is_moderator?
+              q[:downvote] = User.name_to_id($2)
+            end
 
           end
 

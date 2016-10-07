@@ -242,34 +242,40 @@ class PostQueryBuilder
     end
 
     if q[:approver_id]
-      relation = relation.where("posts.approver_id = ?", q[:approver_id])
+      if q[:approver_id] == "any"
+        relation = relation.where("posts.approver_id is not null")
+      elsif q[:approver_id] == "none"
+        relation = relation.where("posts.approver_id is null")
+      else
+        relation = relation.where("posts.approver_id = ?", q[:approver_id])
+      end
       has_constraints!
     end
 
     if q[:commenter_ids]
       q[:commenter_ids].each do |commenter_id|
-        relation = relation.where("posts.id IN (?)", Comment.where("creator_id = ?", commenter_id).select("post_id").uniq)
+        relation = relation.where("posts.id IN (?)", Comment.unscoped.where("creator_id = ?", commenter_id).select("post_id").uniq)
       end
       has_constraints!
     end
 
     if q[:noter_ids]
       q[:noter_ids].each do |noter_id|
-        relation = relation.where("posts.id IN (?)", Note.where("creator_id = ?", noter_id).select("post_id").uniq)
+        relation = relation.where("posts.id IN (?)", Note.unscoped.where("creator_id = ?", noter_id).select("post_id").uniq)
       end
       has_constraints!
     end
 
     if q[:note_updater_ids]
       q[:note_updater_ids].each do |note_updater_id|
-        relation = relation.where("posts.id IN (?)", NoteVersion.where("updater_id = ?", note_updater_id).select("post_id").uniq)
+        relation = relation.where("posts.id IN (?)", NoteVersion.unscoped.where("updater_id = ?", note_updater_id).select("post_id").uniq)
       end
       has_constraints!
     end
 
     if q[:artcomm_ids]
       q[:artcomm_ids].each do |artcomm_id|
-        relation = relation.where("posts.id IN (?)", ArtistCommentaryVersion.where("updater_id = ?", artcomm_id).select("post_id").uniq)
+        relation = relation.where("posts.id IN (?)", ArtistCommentaryVersion.unscoped.where("updater_id = ?", artcomm_id).select("post_id").uniq)
       end
       has_constraints!
     end
@@ -346,6 +352,18 @@ class PostQueryBuilder
       if favgroup
         relation = relation.where("posts.id in (?)", favgroup.post_id_array)
       end
+    end
+
+    if q[:upvote].present?
+      user_id = q[:upvote]
+      post_ids = PostVote.where(:user_id => user_id).where("score > 0").limit(400).pluck(:post_id)
+      relation = relation.where("posts.id in (?)", post_ids)
+    end
+
+    if q[:downvote].present?
+      user_id = q[:downvote]
+      post_ids = PostVote.where(:user_id => user_id).where("score < 0").limit(400).pluck(:post_id)
+      relation = relation.where("posts.id in (?)", post_ids)
     end
 
     if q[:ordfav].present?

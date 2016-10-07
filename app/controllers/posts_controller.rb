@@ -112,6 +112,7 @@ class PostsController < ApplicationController
   end
 
 private
+
   def tag_query
     params[:tags] || (params[:post] && params[:post][:tags])
   end

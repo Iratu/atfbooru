@@ -37,15 +37,20 @@ class Artist < ActiveRecord::Base
           break if url =~ /lohas\.nicoseiga\.jp\/priv\/$/i
           break if url =~ /(?:data|media)\.tumblr\.com\/[a-z0-9]+\/$/i
           break if url =~ /deviantart\.net\//i
+          break if url =~ %r!\Ahttps?://(?:mobile\.)?twitter\.com/\Z!i
         end
 
         artists.inject({}) {|h, x| h[x.name] = x; h}.values.slice(0, 20)
       end
     end
 
+    def url_array
+      urls.map(&:url)
+    end
+
     def save_url_string
       if @url_string
-        prev = urls.map(&:url)
+        prev = url_array
         curr = @url_string.scan(/\S+/).uniq
 
         duplicates = prev.select{|url| prev.count(url) > 1}.uniq
@@ -69,11 +74,11 @@ class Artist < ActiveRecord::Base
     end
 
     def url_string
-      @url_string || urls.map {|x| x.url}.join("\n")
+      @url_string || url_array.join("\n")
     end
 
     def url_string_changed?
-      url_string.scan(/\S+/) != urls.map(&:url)
+      url_string.scan(/\S+/) != url_array
     end
   end
 
@@ -491,7 +496,11 @@ class Artist < ActiveRecord::Base
     user.is_builder?
   end
 
+  def editable_by?(user)
+    user.is_builder? || (!is_banned? && is_active?)
+  end
+
   def visible?
-    !is_banned? || CurrentUser.is_moderator?
+    !is_banned? || CurrentUser.is_gold?
   end
 end
