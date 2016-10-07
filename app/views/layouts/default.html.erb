@@ -76,8 +76,9 @@
     <% if CurrentUser.is_anonymous? && session[:started_at].is_a?(ActiveSupport::TimeWithZone) && session[:started_at] < 1.minute.ago && cookies[:hide_sign_up_notice].blank? %>
       <%= render "users/sign_up_notice" %>
     <% end %>
-
-
+    <% if !CurrentUser.is_anonymous? && !CurrentUser.is_gold? && cookies[:hide_upgrade_account_notice].blank? && params[:action] != "upgrade_information" %>
+      <%= render "users/upgrade_notice" %>
+    <% end %>
     <% if CurrentUser.user.is_banned? %>
       <%= render "users/ban_notice" %>
     <% end %>

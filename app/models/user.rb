@@ -569,7 +569,7 @@ end
       elsif is_gold?
         Danbooru.config.base_tag_query_limit * 2
       else
-        Danbooru.config.base_tag_query_limit * 2
+        5
       end
     end
 
@@ -579,7 +579,7 @@ end
       elsif is_gold?
         20_000
       else
-        nil
+        10_000
       end
     end
 
@@ -589,7 +589,7 @@ end
       elsif is_gold?
         5
       else
-        10
+        3
       end
     end
 
@@ -615,7 +615,7 @@ end
       elsif is_gold?
         6_000
       else
-        9_000
+        3_000
       end
     end
   end
