@@ -2,7 +2,7 @@ $("a#add-to-favorites").show();
 $("a#remove-from-favorites").hide();
 $("#score-for-post-<%= @post.id %>").html(<%= @post.score %>);
 $("#favcount-for-post-<%= @post.id %>").html(<%= @post.fav_count %>);
-<% if CurrentUser.is_gold? %>
+<% if CurrentUser.is_member? %>
   $("#favlist").html("<%= escape_javascript(post_favlist(@post)) %>");
   <% if @post.fav_count == 0 %>
     $("#show-favlist-link, #hide-favlist-link, #favlist").hide();
