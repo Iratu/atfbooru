@@ -73,9 +73,9 @@ class WikiPagesControllerTest < ActionController::TestCase
       end
 
       should "destroy a wiki_page" do
-        assert_difference("WikiPage.count", -1) do
-          post :destroy, {:id => @wiki_page.id}, {:user_id => @mod.id}
-        end
+        post :destroy, {:id => @wiki_page.id}, {:user_id => @mod.id}
+        @wiki_page.reload
+        assert_equal(true, @wiki_page.is_deleted?)
       end
     end
 
@@ -96,6 +96,16 @@ class WikiPagesControllerTest < ActionController::TestCase
         post :revert, {:id => @wiki_page.id, :version_id => version.id}, {:user_id => @user.id}
         @wiki_page.reload
         assert_equal("1", @wiki_page.body)
+      end
+
+      should "not allow reverting to a previous version of another wiki page" do
+        @wiki_page_2 = FactoryGirl.create(:wiki_page)
+
+        post :revert, { :id => @wiki_page.id, :version_id => @wiki_page_2.versions(true).first.id }, {:user_id => @user.id}
+        @wiki_page.reload
+
+        assert_not_equal(@wiki_page.body, @wiki_page_2.body)
+        assert_response :missing
       end
     end
   end

@@ -16,6 +16,16 @@ class User < ActiveRecord::Base
     ADMIN = 50
   end
 
+  # Used for `before_filter :<role>_only`. Must have a corresponding `is_<role>?` method.
+  Roles = Levels.constants.map(&:downcase) + [
+    :anonymous,
+    :banned,
+    :approver,
+    :voter,
+    :super_voter,
+    :verified,
+  ]
+
   BOOLEAN_ATTRIBUTES = %w(
     is_banned
     has_mail
@@ -77,6 +87,7 @@ class User < ActiveRecord::Base
   has_many :note_versions, :foreign_key => "updater_id"
   has_many :dmails, lambda {order("dmails.id desc")}, :foreign_key => "owner_id"
   has_many :saved_searches
+  has_many :forum_posts, lambda {order("forum_posts.created_at")}, :foreign_key => "creator_id"
   belongs_to :inviter, :class_name => "User"
   after_update :create_mod_action
   accepts_nested_attributes_for :dmail_filter
@@ -296,6 +307,37 @@ class User < ActiveRecord::Base
           "Admin" => Levels::ADMIN
         }
       end
+
+      def level_string(value)
+        case value
+        when Levels::BLOCKED
+          "Banned"
+
+        when Levels::MEMBER
+          "Member"
+
+        when Levels::BUILDER
+          "Builder"
+
+        when Levels::GOLD
+          "Gold"
+
+        when Levels::PLATINUM
+          "Platinum"
+
+        when Levels::JANITOR
+          "Janitor"
+
+        when Levels::MODERATOR
+          "Moderator"
+
+        when Levels::ADMIN
+          "Admin"
+          
+        else
+          ""
+        end
+      end
     end
 
     def promote_to!(new_level, options = {})
@@ -346,34 +388,7 @@ class User < ActiveRecord::Base
     end
 
     def level_string(value = nil)
-      case (value || level)
-      when Levels::BLOCKED
-        "Banned"
-
-      when Levels::MEMBER
-        "Member"
-
-      when Levels::BUILDER
-        "Builder"
-
-      when Levels::GOLD
-        "Gold"
-
-      when Levels::PLATINUM
-        "Platinum"
-
-      when Levels::JANITOR
-        "Janitor"
-
-      when Levels::MODERATOR
-        "Moderator"
-
-      when Levels::ADMIN
-        "Admin"
-        
-      else
-        ""
-      end
+      User.level_string(value || level)
     end
 
     def is_anonymous?
@@ -382,6 +397,10 @@ class User < ActiveRecord::Base
 
     def is_member?
       true
+    end
+
+    def is_blocked?
+      is_banned?
     end
 
     def is_builder?
@@ -414,6 +433,10 @@ class User < ActiveRecord::Base
 
     def is_voter?
       is_gold? || is_super_voter?
+    end
+
+    def is_approver?
+      can_approve_posts?
     end
 
     def create_mod_action
@@ -466,7 +489,7 @@ class User < ActiveRecord::Base
   module ForumMethods
     def has_forum_been_updated?
       return false unless is_gold?
-      max_updated_at = ForumTopic.active.maximum(:updated_at)
+      max_updated_at = ForumTopic.permitted.active.maximum(:updated_at)
       return false if max_updated_at.nil?
       return true if last_forum_read_at.nil?
       return max_updated_at > last_forum_read_at
@@ -593,22 +616,34 @@ end
       end
     end
 
-    def api_hourly_limit
-	  if is_admin? && api_key.present?
-		900000
-      elsif is_platinum? && api_key.present?
-        20_000
+    def api_hourly_limit(idempotent = true)
+      base = if is_platinum? && api_key.present?
+        5000
       elsif is_gold? && api_key.present?
-        10_000
+        1000
       else
-        30_000
+        300
+      end
+
+      if idempotent
+        base * 10
+      else
+        base
       end
     end
 
     def remaining_api_hourly_limit
-      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr)
+      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, true)
     end
-    
+
+    def remaining_api_hourly_limit_read
+      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, true)
+    end
+
+    def remaining_api_hourly_limit_write
+      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, false)
+    end
+
     def statement_timeout
       if is_platinum?
         9_000
@@ -622,34 +657,15 @@ end
 
   module ApiMethods
     def hidden_attributes
-      super + [:password_hash, :bcrypt_password_hash, :email, :email_verification_key, :time_zone, :updated_at, :receive_email_notifications, :last_logged_in_at, :last_forum_read_at, :has_mail, :default_image_size, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :recent_tags, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :enable_sequential_post_navigation, :hide_deleted_posts, :per_page, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :has_saved_searches, :last_ip_addr, :bit_prefs]
+      super + [:password_hash, :bcrypt_password_hash, :email, :email_verification_key, :time_zone, :updated_at, :receive_email_notifications, :last_logged_in_at, :last_forum_read_at, :has_mail, :default_image_size, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :recent_tags, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :enable_sequential_post_navigation, :hide_deleted_posts, :per_page, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :has_saved_searches, :last_ip_addr, :bit_prefs, :favorite_count]
     end
 
     def method_attributes
-      list = [:is_banned, :can_approve_posts, :can_upload_free, :is_super_voter, :level_string]
+      list = super + [:is_banned, :can_approve_posts, :can_upload_free, :is_super_voter, :level_string]
       if id == CurrentUser.user.id
-        list += [:remaining_api_hourly_limit]
+        list += [:remaining_api_hourly_limit, :remaining_api_hourly_limit_read, :remaining_api_hourly_limit_write]
       end
       list
-    end
-
-    def serializable_hash(options = {})
-      options ||= {}
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-      super(options)
-    end
-
-    def to_xml(options = {}, &block)
-      # to_xml ignores the serializable_hash method
-      options ||= {}
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-      super(options, &block)
     end
 
     def to_legacy_json

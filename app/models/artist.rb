@@ -1,4 +1,6 @@
 class Artist < ActiveRecord::Base
+  class RevertError < Exception ; end
+
   before_create :initialize_creator
   before_validation :normalize_name
   after_save :create_version
@@ -6,6 +8,7 @@ class Artist < ActiveRecord::Base
   after_save :categorize_tag
   validates_uniqueness_of :name
   validate :name_is_valid
+  validate :wiki_is_empty, :on => :create
   belongs_to :creator, :class_name => "User"
   has_many :members, :class_name => "Artist", :foreign_key => "group_name", :primary_key => "name"
   has_many :urls, :dependent => :destroy, :class_name => "ArtistUrl"
@@ -173,6 +176,10 @@ class Artist < ActiveRecord::Base
     end
 
     def revert_to!(version)
+      if id != version.artist_id
+        raise RevertError.new("You cannot revert to a previous version of another artist.")
+      end
+
       self.name = version.name
       self.url_string = version.url_string
       self.is_active = version.is_active
@@ -246,6 +253,13 @@ class Artist < ActiveRecord::Base
     def notes_changed?
       !!@notes_changed
     end
+
+    def wiki_is_empty
+      if WikiPage.titled(name).exists?
+        errors.add(:name, "conflicts with a wiki page")
+        return false
+      end
+    end
   end
 
   module TagMethods
@@ -304,7 +318,7 @@ class Artist < ActiveRecord::Base
           # potential race condition but unlikely
           unless TagImplication.where(:antecedent_name => name, :consequent_name => "banned_artist").exists?
             tag_implication = TagImplication.create!(:antecedent_name => name, :consequent_name => "banned_artist", :skip_secondary_validations => true, :status => "pending")
-            tag_implication.delay(:queue => "default").process!
+            tag_implication.approve!(CurrentUser.user)
           end
 
           update_column(:is_banned, true)

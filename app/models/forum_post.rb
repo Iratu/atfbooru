@@ -16,13 +16,14 @@ class ForumPost < ActiveRecord::Base
   validates_presence_of :body, :creator_id
   validate :validate_topic_is_unlocked
   validate :topic_id_not_invalid
+  validate :topic_is_not_restricted, :on => :create
   before_destroy :validate_topic_is_unlocked
   after_save :delete_topic_if_original_post
   mentionable(
     :message_field => :body, 
     :user_field => :creator_id, 
     :title => "You were mentioned in a forum topic",
-    :body => lambda {|rec, user_name| "You were mentioned in the forum topic \"#{rec.topic.title}\":http://#{Danbooru.config.hostname}/forum_topics/#{rec.topic_id}?page=#{rec.forum_topic_page}\n\n---\n\n[i]#{rec.creator.name} said:[/i]\n\n#{ActionController::Base.helpers.excerpt(rec.body, user_name)}"}
+    :body => lambda {|rec, user_name| "You were mentioned in the forum topic \"#{rec.topic.title}\":/forum_topics/#{rec.topic_id}?page=#{rec.forum_topic_page}\n\n---\n\n[i]#{rec.creator.name} said:[/i]\n\n#{ActionController::Base.helpers.excerpt(rec.body, user_name)}"}
   )
 
   module SearchMethods
@@ -54,16 +55,20 @@ class ForumPost < ActiveRecord::Base
       where("forum_posts.is_deleted = false")
     end
 
+    def permitted
+      joins(:topic).where("forum_topics.min_level <= ?", CurrentUser.level)
+    end
+
     def search(params)
-      q = where("true")
+      q = permitted
       return q if params.blank?
 
       if params[:creator_id].present?
-        q = q.where("creator_id = ?", params[:creator_id].to_i)
+        q = q.where("forum_posts.creator_id = ?", params[:creator_id].to_i)
       end
 
       if params[:topic_id].present?
-        q = q.where("topic_id = ?", params[:topic_id].to_i)
+        q = q.where("forum_posts.topic_id = ?", params[:topic_id].to_i)
       end
 
       if params[:topic_title_matches].present?
@@ -86,7 +91,30 @@ class ForumPost < ActiveRecord::Base
     end
   end
 
+  module ApiMethods
+    def as_json(options = {})
+      if CurrentUser.user.level < topic.min_level
+        options[:only] = [:id]
+      end
+
+      super(options)
+    end
+
+    def to_xml(options = {})
+      if CurrentUser.user.level < topic.min_level
+        options[:only] = [:id]
+      end
+
+      super(options)
+    end
+    
+    def hidden_attributes
+      super + [:text_index]
+    end
+  end
+
   extend SearchMethods
+  include ApiMethods
 
   def self.new_reply(params)
     if params[:topic_id]
@@ -117,8 +145,18 @@ class ForumPost < ActiveRecord::Base
     end
   end
 
+  def topic_is_not_restricted
+    if topic && !topic.visible?(creator)
+      errors.add(:topic, "restricted")
+    end
+  end
+
   def editable_by?(user)
-    creator_id == user.id || user.is_moderator?
+    (creator_id == user.id || user.is_moderator?) && visible?(user)
+  end
+
+  def visible?(user)
+    user.is_moderator? || (topic.visible?(user) && !is_deleted?)
   end
 
   def update_topic_updated_at_on_create
@@ -214,9 +252,5 @@ class ForumPost < ActiveRecord::Base
     dup.tap do |x|
       x.body = x.quoted_response
     end
-  end
-
-  def hidden_attributes
-    super + [:text_index]
   end
 end

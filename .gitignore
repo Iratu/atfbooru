@@ -1,6 +1,8 @@
 .bundle
 config/database.yml
 config/danbooru_local_config.rb
+config/application.yml
+config/newrelic.yml
 db/*.sqlite3
 log/*.log
 tmp/*

@@ -4,19 +4,25 @@ class TagImplication < ActiveRecord::Base
   before_save :update_descendant_names
   after_save :update_descendant_names_for_parents
   after_destroy :update_descendant_names_for_parents
+  after_save :create_mod_action
   belongs_to :creator, :class_name => "User"
   belongs_to :approver, :class_name => "User"
   belongs_to :forum_topic
   before_validation :initialize_creator, :on => :create
   before_validation :normalize_names
+  validates_format_of :status, :with => /\A(active|deleted|pending|processing|queued|error: .*)\Z/
   validates_presence_of :creator_id, :antecedent_name, :consequent_name
+  validates :creator, presence: { message: "must exist" }, if: lambda { creator_id.present? }
+  validates :approver, presence: { message: "must exist" }, if: lambda { approver_id.present? }
+  validates :forum_topic, presence: { message: "must exist" }, if: lambda { forum_topic_id.present? }
   validates_uniqueness_of :antecedent_name, :scope => :consequent_name
   validate :absence_of_circular_relation
   validate :antecedent_is_not_aliased
   validate :consequent_is_not_aliased
   validate :antecedent_and_consequent_are_different
   validate :wiki_pages_present, :on => :create
-  attr_accessible :antecedent_name, :consequent_name, :descendant_names, :forum_topic_id, :status, :forum_topic, :skip_secondary_validations
+  attr_accessible :antecedent_name, :consequent_name, :forum_topic_id, :skip_secondary_validations
+  attr_accessible :status, :approver_id, :as => [:admin]
 
   module DescendantMethods
     extend ActiveSupport::Concern
@@ -52,7 +58,7 @@ class TagImplication < ActiveRecord::Base
     def update_descendant_names!
       clear_descendants_cache
       update_descendant_names
-      update_column(:descendant_names, descendant_names)
+      update({ :descendant_names => descendant_names }, :as => CurrentUser.role)
     end
 
     def update_descendant_names_for_parents
@@ -132,11 +138,10 @@ class TagImplication < ActiveRecord::Base
     tries = 0
 
     begin
-      admin = CurrentUser.user || approver || User.admins.first
-      CurrentUser.scoped(admin, "127.0.0.1") do
-        update_column(:status, "processing")
+      CurrentUser.scoped(approver, CurrentUser.ip_addr) do
+        update({ :status => "processing" }, :as => approver.role)
         update_posts
-        update_column(:status, "active")
+        update({ :status => "active" }, :as => approver.role)
         update_descendant_names_for_parents
         update_forum_topic_for_approve if update_topic
       end
@@ -148,8 +153,11 @@ class TagImplication < ActiveRecord::Base
       end
 
       update_forum_topic_for_error(e)
-      update_column(:status, "error: #{e}")
-      NewRelic::Agent.notice_error(e, :custom_params => {:tag_implication_id => id, :antecedent_name => antecedent_name, :consequent_name => consequent_name})
+      update({ :status => "error: #{e}" }, :as => CurrentUser.role)
+
+      if Rails.env.production?
+        NewRelic::Agent.notice_error(e, :custom_params => {:tag_implication_id => id, :antecedent_name => antecedent_name, :consequent_name => consequent_name})
+      end
     end
   end
 
@@ -274,15 +282,34 @@ class TagImplication < ActiveRecord::Base
     end
   end
 
-  def approve!(approver_id)
-    self.status = "queued"
-    self.approver_id = approver_id
-    save
-    delay(:queue => "default").process!(true)
+  def approve!(approver = CurrentUser.user, update_topic: true)
+    update({ :status => "queued", :approver_id => approver.id }, :as => approver.role)
+    delay(:queue => "default").process!(update_topic)
   end
 
   def reject!
+    update({ :status => "deleted", }, :as => CurrentUser.role)
     update_forum_topic_for_reject
     destroy
+  end
+
+  def create_mod_action
+    implication = %Q("tag implication ##{id}":[#{Rails.application.routes.url_helpers.tag_implication_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
+
+    if id_changed?
+      ModAction.create(:description => "created #{status} #{implication}")
+    else
+      # format the changes hash more nicely.
+      change_desc = changes.except(:updated_at).map do |attribute, values|
+        old, new = values[0], values[1]
+        if old.nil?
+          %Q(set #{attribute} to "#{new}")
+        else
+          %Q(changed #{attribute} from "#{old}" to "#{new}")
+        end
+      end.join(", ")
+
+      ModAction.create(:description => "updated #{implication}\n#{change_desc}")
+    end
   end
 end

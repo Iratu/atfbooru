@@ -34,6 +34,22 @@ module Danbooru
       contact_email
     end
 
+    def source_code_url
+      "https://github.com/r888888888/danbooru"
+    end
+
+    def commit_url(hash)
+      "#{source_code_url}/commit/#{hash}"
+    end
+
+    def releases_url
+      "#{source_code_url}/releases"
+    end
+
+    def issues_url
+      "#{source_code_url}/issues"
+    end
+
     # Stripped of any special characters.
     def safe_app_name
       app_name.gsub(/[^a-zA-Z0-9_-]/, "_")
@@ -225,6 +241,14 @@ module Danbooru
       nil
     end
 
+    def upload_notice_wiki_page
+      "help:upload_notice"
+    end
+
+    def flag_notice_wiki_page
+      "help:flag_notice"
+    end
+
     # The number of posts displayed per page.
     def posts_per_page
       20
@@ -317,27 +341,8 @@ module Danbooru
       true
     end
 
-    def iqdb_hostname_and_port
-      # ["localhost", 4000]
-      nil
-    end
-
-    def iqdb_file
-      # /var/www/danbooru2/shared/iqdb.db
-      nil
-    end
-
     def shared_dir_path
       "/var/www/danbooru2/shared"
-    end
-
-    def coinbase_secret
-    end
-
-    def coinbase_api_key
-    end
-
-    def coinbase_api_secret
     end
 
     def stripe_secret_key
@@ -352,16 +357,11 @@ module Danbooru
     def twitter_api_secret
     end
 
-    def shared_remote_key
-    end
-
-    def report_server
-    end
-
     def enable_post_search_counts
       false
     end
 
+    # you should override this
     def email_key
       "zDMSATq0W3hmA5p3rKTgD"
     end
@@ -420,7 +420,14 @@ module Danbooru
       false
     end
 
-    # listbooru options
+    # reportbooru options - see https://github.com/r888888888/reportbooru
+    def reportbooru_server
+    end
+
+    def reportbooru_key
+    end
+
+    # listbooru options - see https://github.com/r888888888/listbooru
     def listbooru_enabled?
       false
     end
@@ -429,6 +436,13 @@ module Danbooru
     end
 
     def listbooru_auth_key
+    end
+
+    # iqdbs options - see https://github.com/r888888888/iqdbs
+    def iqdbs_auth_key
+    end
+
+    def iqdbs_server
     end
 
     # google api options
@@ -441,11 +455,9 @@ module Danbooru
 
     # AWS config options
     def aws_access_key_id
-      nil
     end
 
     def aws_secret_access_key
-      nil
     end
 
     def aws_ses_enabled?
@@ -454,7 +466,6 @@ module Danbooru
 
     def aws_ses_options
       # {:smtp_server_name => "smtp server", :user_name => "user name", :ses_smtp_user_name => "smtp user name", :ses_smtp_password => "smtp password"}
-      nil
     end
 
     def aws_s3_enabled?
@@ -479,6 +490,9 @@ module Danbooru
     end
 
     def aws_sqs_region
+    end
+
+    def aws_sqs_iqdb_url
     end
   end
 end

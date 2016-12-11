@@ -48,7 +48,6 @@ gem 'radix62', '~> 1.0.1'
 gem 'streamio-ffmpeg'
 gem 'rubyzip', :require => "zip"
 gem 'stripe'
-gem 'coinbase'
 gem 'twitter'
 gem 'aws-sdk', '~> 2'
 gem 'responders'
@@ -57,6 +56,7 @@ gem 'dtext_rb', :git => "https://github.com/r888888888/dtext_rb.git", :require =
 gem 'google-api-client'
 gem 'cityhash'
 gem 'bigquery', :git => "https://github.com/abronte/BigQuery.git", :ref => "b92b4e0b54574e3fde7ad910f39a67538ed387ad"
+gem 'memcache_mock'
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"
@@ -67,9 +67,10 @@ group :production, :staging do
 end
 
 group :production do
+  gem 'unicorn-worker-killer'
   gem 'newrelic_rpm'
-  # gem 'unicorn-worker-killer'
   gem 'gctools', :platforms => :ruby
+  gem 'capistrano-deploytags', '~> 1.0.0', require: false
 end
 
 group :development do

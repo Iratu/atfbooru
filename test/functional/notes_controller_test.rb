@@ -47,6 +47,13 @@ class NotesControllerTest < ActionController::TestCase
         @note.reload
         assert_equal("xyz", @note.body)
       end
+
+      should "not allow changing the post id to another post" do
+        @other = FactoryGirl.create(:post)
+        post :update, {:format => "json", :id => @note.id, :note => {:post_id => @other.id}}, {:user_id => @user.id}
+
+        assert_not_equal(@other.id, @note.reload.post_id)
+      end
     end
 
     context "destroy action" do
@@ -76,6 +83,16 @@ class NotesControllerTest < ActionController::TestCase
         post :revert, {:id => @note.id, :version_id => @note.versions(true).first.id}, {:user_id => @user.id}
         @note.reload
         assert_equal("000", @note.body)
+      end
+
+      should "not allow reverting to a previous version of another note" do
+        @note2 = FactoryGirl.create(:note, :body => "note 2")
+
+        post :revert, { :id => @note.id, :version_id => @note2.versions(true).first.id }, {:user_id => @user.id}
+        @note.reload
+
+        assert_not_equal(@note.body, @note2.body)
+        assert_response :missing
       end
     end
   end

@@ -86,23 +86,7 @@ class Dmail < ActiveRecord::Base
     end
     
     def method_attributes
-      list = [:hash]
-      list
-    end
-    
-    def serializable_hash(options = {})
-      options ||= {}
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-      super(options)
-    end
-    
-    def to_xml(options = {}, &block)
-      # to_xml ignores the serializable_hash method
-      options ||= {}
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-      super(options, &block)
+      super + [:key]
     end
   end
   
@@ -238,12 +222,13 @@ class Dmail < ActiveRecord::Base
     end
   end
   
-  def hash
-    Digest::SHA1.hexdigest("#{title} #{body}")
+  def key
+    digest = OpenSSL::Digest.new("sha256")
+    OpenSSL::HMAC.hexdigest(digest, Danbooru.config.email_key, "#{title} #{body}")
   end
   
   def visible_to?(user, key)
-    owner_id == user.id || (user.is_moderator? && key == self.hash)
+    owner_id == user.id || (user.is_moderator? && key == self.key)
   end
 
 end

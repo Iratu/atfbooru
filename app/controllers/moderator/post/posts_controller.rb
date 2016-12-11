@@ -1,7 +1,7 @@
 module Moderator
   module Post
     class PostsController < ApplicationController
-      before_filter :post_approvers_only, :only => [:delete, :undelete, :move_favorites, :ban, :unban, :confirm_delete, :confirm_move_favorites, :confirm_ban, :expunge]
+      before_filter :approver_only, :only => [:delete, :undelete, :move_favorites, :ban, :unban, :confirm_delete, :confirm_move_favorites, :confirm_ban]
       #before_filter :moderator_only, :only => [:expunge]
       rescue_from ::PostFlag::Error, ::Post::ApprovalError, :with => :rescue_exception
 
@@ -51,7 +51,14 @@ module Moderator
         if params[:commit] == "Ban"
           @post.ban!
         end
-        redirect_to(post_path(@post), :notice => "Post was banned")
+
+        respond_to do |fmt|
+          fmt.html do
+            redirect_to(post_path(@post), :notice => "Post was banned")
+          end
+
+          fmt.js
+        end
       end
 
       def unban

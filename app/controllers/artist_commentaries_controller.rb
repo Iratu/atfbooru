@@ -1,6 +1,6 @@
 class ArtistCommentariesController < ApplicationController
   respond_to :html, :xml, :json, :js
-  before_filter :member_only
+  before_filter :member_only, :except => [:index]
 
   def index
     @commentaries = ArtistCommentary.search(params[:search]).order("artist_commentaries.id desc").paginate(params[:page], :limit => params[:limit])
@@ -24,8 +24,8 @@ class ArtistCommentariesController < ApplicationController
   end
 
   def revert
-    @artist_commentary = ArtistCommentary.find_by_post_id(params[:id])
-    @version = ArtistCommentaryVersion.find(params[:version_id])
+    @artist_commentary = ArtistCommentary.find_by_post_id!(params[:id])
+    @version = @artist_commentary.versions.find(params[:version_id])
     @artist_commentary.revert_to!(@version)
     respond_with(@artist_commentary)
   end

@@ -17,6 +17,36 @@ class TagAliasTest < ActiveSupport::TestCase
       CurrentUser.ip_addr = nil
     end
 
+    context "on validation" do
+      subject do
+        FactoryGirl.create(:tag, :name => "aaa")
+        FactoryGirl.create(:tag, :name => "bbb")
+        FactoryGirl.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
+      end
+
+      should allow_value('active').for(:status)
+      should allow_value('deleted').for(:status)
+      should allow_value('pending').for(:status)
+      should allow_value('processing').for(:status)
+      should allow_value('queued').for(:status)
+      should allow_value('error: derp').for(:status)
+
+      should_not allow_value('ACTIVE').for(:status)
+      should_not allow_value('error').for(:status)
+      should_not allow_value('derp').for(:status)
+
+      should allow_value(nil).for(:forum_topic_id)
+      should_not allow_value(-1).for(:forum_topic_id).with_message("must exist", against: :forum_topic)
+
+      should allow_value(nil).for(:approver_id)
+      should_not allow_value(-1).for(:approver_id).with_message("must exist", against: :approver)
+
+      should_not allow_value(nil).for(:creator_id)
+      should_not allow_value(-1).for(:creator_id).with_message("must exist", against: :creator)
+
+      should_not allow_mass_assignment_of(:status).as(:member)
+    end
+
     should "populate the creator information" do
       ta = FactoryGirl.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
       assert_equal(CurrentUser.user.id, ta.creator_id)
@@ -107,25 +137,30 @@ class TagAliasTest < ActiveSupport::TestCase
       setup do
         @admin = FactoryGirl.create(:admin_user)
         @topic = FactoryGirl.create(:forum_topic)
-        @alias = FactoryGirl.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :forum_topic => @topic)
+        @alias = FactoryGirl.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :forum_topic => @topic, :status => "pending")
       end
 
       context "and conflicting wiki pages" do
         setup do
           @wiki1 = FactoryGirl.create(:wiki_page, :title => "aaa")
           @wiki2 = FactoryGirl.create(:wiki_page, :title => "bbb")
+          @alias.approve!(@admin)
+          @admin.reload # reload to get the forum post the approval created.
         end
 
-        should "update the topic when processed" do
-          assert_difference("ForumPost.count") do
-            @alias.rename_wiki_and_artist
-          end
+        should "update the forum topic when approved" do
+          assert(@topic.posts.last, @admin.forum_posts.last)
+          assert_match(/The tag alias .* been approved/, @admin.forum_posts.last.body)
+        end
+
+        should "warn about conflicting wiki pages when approved" do
+          assert_match(/has conflicting wiki pages/, @admin.forum_posts.last.body)
         end
       end
 
       should "update the topic when processed" do
         assert_difference("ForumPost.count") do
-          @alias.process!
+          @alias.approve!(@admin)
         end
       end
 
@@ -133,6 +168,15 @@ class TagAliasTest < ActiveSupport::TestCase
         assert_difference("ForumPost.count") do
           @alias.reject!
         end
+      end
+
+      should "update the topic when failed" do
+        @alias.stubs(:sleep).returns(true)
+        @alias.stubs(:update_posts).raises(Exception, "oh no")
+        @alias.approve!(@admin)
+
+        assert_match(/error: oh no/, @alias.status)
+        assert_match(/The tag alias .* failed during processing/, @admin.forum_posts.last.body)
       end
     end
   end
