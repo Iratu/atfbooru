@@ -1,7 +1,6 @@
 class NotesController < ApplicationController
   respond_to :html, :xml, :json, :js
   before_filter :member_only, :except => [:index, :show]
-  before_filter :pass_html_id, :only => [:create]
 
   def search
   end
@@ -20,7 +19,7 @@ class NotesController < ApplicationController
   end
 
   def create
-    @note = Note.create(params[:note])
+    @note = Note.create(create_params)
     respond_with(@note) do |fmt|
       fmt.json do
         if @note.errors.any?
@@ -34,7 +33,7 @@ class NotesController < ApplicationController
 
   def update
     @note = Note.find(params[:id])
-    @note.update_attributes(params[:note])
+    @note.update_attributes(update_params)
     respond_with(@note) do |format|
       format.json do
         if @note.errors.any?
@@ -54,16 +53,18 @@ class NotesController < ApplicationController
 
   def revert
     @note = Note.find(params[:id])
-    @version = NoteVersion.find(params[:version_id])
+    @version = @note.versions.find(params[:version_id])
     @note.revert_to!(@version)
     respond_with(@note)
   end
 
 private
-  def pass_html_id
-    if params[:note] && params[:note][:html_id]
-      response.headers["X-Html-Id"] = params[:note][:html_id]
-    end
+  def update_params
+    params.require(:note).permit(:x, :y, :width, :height, :body)
+  end
+
+  def create_params
+    params.require(:note).permit(:x, :y, :width, :height, :body, :post_id, :html_id)
   end
 
   def index_by_post

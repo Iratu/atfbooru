@@ -1,7 +1,7 @@
 class WikiPagesController < ApplicationController
   respond_to :html, :xml, :json, :js
   before_filter :member_only, :except => [:index, :show, :show_or_new]
-  before_filter :moderator_only, :only => [:destroy]
+  before_filter :builder_only, :only => [:destroy]
   before_filter :normalize_search_params, :only => [:index]
   rescue_from ActiveRecord::StatementInvalid, :with => :rescue_exception
   rescue_from ActiveRecord::RecordNotFound, :with => :rescue_exception
@@ -39,7 +39,7 @@ class WikiPagesController < ApplicationController
       @wiki_page = WikiPage.find(params[:id])
     else
       @wiki_page = WikiPage.find_by_title(params[:id])
-      if @wiki_page.nil?
+      if @wiki_page.nil? && request.format.symbol == :html
         redirect_to show_or_new_wiki_pages_path(:title => params[:id])
         return
       end
@@ -61,13 +61,13 @@ class WikiPagesController < ApplicationController
 
   def destroy
     @wiki_page = WikiPage.find(params[:id])
-    @wiki_page.destroy
+    @wiki_page.update_attribute(:is_deleted, true)
     respond_with(@wiki_page)
   end
 
   def revert
     @wiki_page = WikiPage.find(params[:id])
-    @version = WikiPageVersion.find(params[:version_id])
+    @version = @wiki_page.versions.find(params[:version_id])
     @wiki_page.revert_to!(@version)
     flash[:notice] = "Page was reverted"
     respond_with(@wiki_page)

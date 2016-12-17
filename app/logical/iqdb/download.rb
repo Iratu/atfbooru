@@ -6,17 +6,44 @@ module Iqdb
       @source = source
     end
 
-    def download_and_find_similar
-      tempfile = Tempfile.new("iqdb-#{$PROCESS_ID}")
-      @download = Downloads::File.new(source, tempfile.path, :get_thumbnail => true)
-      @download.download!
+    def get_referer(url)
+      headers = {}
+      datums = {}
 
-      if Danbooru.config.iqdb_hostname_and_port
-        @matches = Iqdb::Server.default.query(3, @download.file_path).matches
+      Downloads::RewriteStrategies::Base.strategies.each do |strategy|
+        url, headers, datums = strategy.new(url).rewrite(url, headers, datums)
       end
-    ensure
-      tempfile.close
-      tempfile.unlink
+
+      [url, headers["Referer"]]
+    end
+
+    def find_similar
+      if Danbooru.config.iqdbs_server
+        url, ref = get_referer(source)
+        params = {
+          "key" => Danbooru.config.iqdbs_auth_key,
+          "url" => url,
+          "ref" => ref
+        }
+        uri = URI.parse("#{Danbooru.config.iqdbs_server}/similar")
+        uri.query = URI.encode_www_form(params)
+
+        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
+          resp = http.request_get(uri.request_uri)
+          if resp.is_a?(Net::HTTPSuccess)
+            json = JSON.parse(resp.body)
+            if json.is_a?(Array)
+              @matches = json
+            else
+              @matches = []
+            end
+          else
+            raise "HTTP error code: #{resp.code} #{resp.message}"
+          end
+        end
+      else
+        raise NotImplementedError
+      end
     end
   end
 end

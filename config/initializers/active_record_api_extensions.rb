@@ -3,18 +3,26 @@ module Danbooru
     module ActiveRecordApi
       extend ActiveSupport::Concern
 
-      def serializable_hash(options = {})
+      def as_json(options = {})
         options ||= {}
         options[:except] ||= []
         options[:except] += hidden_attributes
+
+        options[:methods] ||= []
+        options[:methods] += method_attributes
+
         super(options)
       end
 
       def to_xml(options = {}, &block)
-        # to_xml ignores serializable_hash
         options ||= {}
+
         options[:except] ||= []
         options[:except] += hidden_attributes
+
+        options[:methods] ||= []
+        options[:methods] += method_attributes
+
         super(options, &block)
       end
 
@@ -22,7 +30,17 @@ module Danbooru
       def hidden_attributes
         [:uploader_ip_addr, :updater_ip_addr, :creator_ip_addr, :ip_addr]
       end
+
+      def method_attributes
+        []
+      end
     end
+  end
+end
+
+class Delayed::Job
+  def hidden_attributes
+    [:handler]
   end
 end
 

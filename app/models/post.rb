@@ -4,29 +4,34 @@ require 'google/apis/pubsub_v1'
 class Post < ActiveRecord::Base
   class ApprovalError < Exception ; end
   class DisapprovalError < Exception ; end
+  class RevertError < Exception ; end
   class SearchError < Exception ; end
 
-  attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
-  after_destroy :remove_iqdb_async
-  after_destroy :delete_files
-  after_destroy :delete_remote_files
-  after_save :create_version
-  after_save :update_parent_on_save
-  after_save :apply_post_metatags
-  after_save :expire_essential_tag_string_cache
-  after_create :update_iqdb_async
-  after_commit :notify_pubsub
-  before_save :merge_old_changes
-  before_save :normalize_tags
+  before_validation :initialize_uploader, :on => :create
+  before_validation :merge_old_changes
+  before_validation :normalize_tags
+  before_validation :strip_source
+  before_validation :parse_pixiv_id
+  before_validation :blank_out_nonexistent_parents
+  before_validation :remove_parent_loops
+  validates_uniqueness_of :md5
+  validates_inclusion_of :rating, in: %w(s q e), message: "rating must be s, q, or e"
+  validate :post_is_not_its_own_parent
+  validate :updater_can_change_rating
   before_save :update_tag_post_counts
   before_save :set_tag_counts
   before_save :set_pool_category_pseudo_tags
   before_create :autoban
-  before_validation :strip_source
-  before_validation :initialize_uploader, :on => :create
-  before_validation :parse_pixiv_id
-  before_validation :blank_out_nonexistent_parents
-  before_validation :remove_parent_loops
+  after_create :update_iqdb_async
+  after_save :create_version
+  after_save :update_parent_on_save
+  after_save :apply_post_metatags
+  after_save :expire_essential_tag_string_cache
+  after_destroy :remove_iqdb_async
+  after_destroy :delete_files
+  after_destroy :delete_remote_files
+  after_commit :notify_pubsub
+
   belongs_to :updater, :class_name => "User"
   belongs_to :approver, :class_name => "User"
   belongs_to :uploader, :class_name => "User"
@@ -43,11 +48,10 @@ class Post < ActiveRecord::Base
   has_many :children, lambda {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
   has_many :favorites, :dependent => :destroy
-  validates_uniqueness_of :md5
-  validate :post_is_not_its_own_parent
   attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :janitor, :moderator, :admin, :default]
   attr_accessible :is_rating_locked, :is_note_locked, :as => [:builder, :janitor, :moderator, :admin]
   attr_accessible :is_status_locked, :as => [:admin]
+  attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
 
   module FileMethods
     def distribute_files
@@ -130,6 +134,10 @@ class Post < ActiveRecord::Base
       end
 
       "/data/preview/#{file_path_prefix}#{md5}.jpg"
+    end
+
+    def complete_preview_file_url
+      "http://#{Danbooru.config.hostname}#{preview_file_url}"
     end
 
     def file_url_for(user)
@@ -270,7 +278,7 @@ class Post < ActiveRecord::Base
 
   module ApprovalMethods
     def is_approvable?
-      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && approver_id != CurrentUser.id
+      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && !PostApproval.approved?(CurrentUser.id, id)
     end
 
     def flag!(reason, options = {})
@@ -310,7 +318,7 @@ class Post < ActiveRecord::Base
         raise ApprovalError.new("You cannot approve a post you uploaded")
       end
 
-      if approver_id == CurrentUser.id
+      if approver_id == CurrentUser.id || PostApproval.approved?(CurrentUser.id, id)
         errors.add(:approver, "have already approved this post")
         raise ApprovalError.new("You have previously approved this post and cannot approve it again")
       end
@@ -320,6 +328,13 @@ class Post < ActiveRecord::Base
       self.is_pending = false
       self.is_deleted = false
       self.approver_id = CurrentUser.id
+
+      PostApproval.create(user_id: CurrentUser.id, post_id: id)
+
+      if is_deleted_was == true
+        ModAction.create(:description => "undeleted post ##{id}")
+      end
+
       save!
     end
 
@@ -471,6 +486,20 @@ class Post < ActiveRecord::Base
         
       when %r{\Ahttps?://pic0[1-4]\.nijie\.info/nijie_picture/(?:diff/main/)?\d+_(\d+)_(?:\d+{10}|\d+_\d+{14})}i
         "http://nijie.info/view.php?id=#{$1}"
+
+      # http://ayase.yande.re/image/2d0d229fd8465a325ee7686fcc7f75d2/yande.re%20192481%20animal_ears%20bunny_ears%20garter_belt%20headphones%20mitha%20stockings%20thighhighs.jpg
+      # https://yuno.yande.re/image/1764b95ae99e1562854791c232e3444b/yande.re%20281544%20cameltoe%20erect_nipples%20fundoshi%20horns%20loli%20miyama-zero%20sarashi%20sling_bikini%20swimsuits.jpg
+      # https://files.yande.re/image/2a5d1d688f565cb08a69ecf4e35017ab/yande.re%20349790%20breast_hold%20kurashima_tomoyasu%20mahouka_koukou_no_rettousei%20naked%20nipples.jpg
+      # https://files.yande.re/sample/0d79447ce2c89138146f64ba93633568/yande.re%20290757%20sample%20seifuku%20thighhighs%20tsukudani_norio.jpg
+      when %r{\Ahttps?://(?:ayase\.|yuno\.|files\.)?yande\.re/(?:sample|image)/[a-z0-9]{32}/yande\.re%20(?<post_id>[0-9]+)%20}i
+        "https://yande.re/post/show/#{$~[:post_id]}"
+
+      # https://yande.re/jpeg/0c9ec0ffcaa40470093cb44c3fd40056/yande.re%2064649%20animal_ears%20cameltoe%20fixme%20nekomimi%20nipples%20ryohka%20school_swimsuit%20see_through%20shiraishi_nagomi%20suzuya%20swimsuits%20tail%20thighhighs.jpg
+      # https://yande.re/jpeg/22577d2344fe694cf47f80563031b3cd.jpg
+      # https://yande.re/image/b4b1d11facd1700544554e4805d47bb6/.png
+      # https://yande.re/sample/ceb6a12e87945413a95b90fada406f91/.jpg
+      when %r{\Ahttps?://(?:ayase\.|yuno\.|files\.)?yande\.re/(?:image|jpeg|sample)/(?<md5>[a-z0-9]{32})(?:/yande\.re.*|/?\.(?:jpg|png))\Z}i
+        "https://yande.re/post?tags=md5:#{$~[:md5]}"
         
       when %r{\Ahttps?://(?:o|image-proxy-origin)\.twimg\.com/\d/proxy\.jpg\?t=(\w+)&}i
         str = Base64.decode64($1)
@@ -601,8 +630,8 @@ class Post < ActiveRecord::Base
       normalized_tags = remove_negated_tags(normalized_tags)
       normalized_tags = normalized_tags.map {|x| Tag.find_or_create_by_name(x).name}
       normalized_tags = %w(tagme) if normalized_tags.empty?
-      normalized_tags = add_automatic_tags(normalized_tags)
       normalized_tags = TagAlias.to_aliased(normalized_tags)
+      normalized_tags = add_automatic_tags(normalized_tags)
       normalized_tags = TagImplication.with_descendants(normalized_tags)
 	  normalized_tags = check_tagme(normalized_tags)
       normalized_tags.sort!
@@ -623,6 +652,7 @@ class Post < ActiveRecord::Base
     def remove_negated_tags(tags)
       negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
       negated_tags = negated_tags.map {|x| x[1..-1]}
+      negated_tags = TagAlias.to_aliased(negated_tags)
       return tags - negated_tags
     end
 
@@ -682,12 +712,16 @@ class Post < ActiveRecord::Base
         tags << "ugoira"
       end
 
+      characters = tags.grep(/\A(.+)_\(cosplay\)\Z/) { $1 }
+      tags += characters
+      tags << "cosplay" if characters.present?
+
       return tags
     end
 
     def filter_metatags(tags)
-      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|source):/i}
-      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-favgroup|favgroup):/i}
+      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|source|-?locked):/i}
+      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-favgroup|favgroup|upvote|downvote):/i}
       apply_pre_metatags
       return tags
     end
@@ -725,6 +759,9 @@ class Post < ActiveRecord::Base
 
         when /^-fav:(.+)$/i
           remove_favorite!(CurrentUser.user)
+
+        when /^(up|down)vote:(.+)$/i
+          vote!($1)
 
         when /^child:(.+)$/i
           child = Post.find($1)
@@ -779,9 +816,16 @@ class Post < ActiveRecord::Base
           self.source = $1
 
         when /^rating:([qse])/i
-          unless is_rating_locked?
-            self.rating = $1.downcase
-          end
+          self.rating = $1.downcase
+
+        when /^(-?)locked:notes?$/i
+          assign_attributes({ is_note_locked: $1 != "-" }, as: CurrentUser.role)
+
+        when /^(-?)locked:rating$/i
+          assign_attributes({ is_rating_locked: $1 != "-" }, as: CurrentUser.role)
+
+        when /^(-?)locked:status$/i
+          assign_attributes({ is_status_locked: $1 != "-" }, as: CurrentUser.role)
         end
       end
     end
@@ -953,6 +997,12 @@ class Post < ActiveRecord::Base
         groups.uniq
       end
     end
+
+    def remove_from_fav_groups
+      FavoriteGroup.for_post(id).find_each do |group|
+        group.remove!(self)
+      end
+    end
   end
 
   module UploaderMethods
@@ -1030,12 +1080,16 @@ class Post < ActiveRecord::Base
     end
 
     def vote!(score)
-      if can_be_voted_by?(CurrentUser.user)
-        vote = PostVote.create(:post_id => id, :score => score)
-        self.score += vote.score
-      else
+      unless CurrentUser.is_voter?
+        raise PostVote::Error.new("You do not have permission to vote")
+      end
+
+      unless can_be_voted_by?(CurrentUser.user)
         raise PostVote::Error.new("You have already voted for this post")
       end
+
+      PostVote.create(:post_id => id, :score => score)
+      reload # PostVote.create modifies our score. Reload to get the new score.
     end
 
     def unvote!
@@ -1045,11 +1099,7 @@ class Post < ActiveRecord::Base
         vote = PostVote.where("post_id = ? and user_id = ?", id, CurrentUser.user.id).first
         vote.destroy
 
-        if vote.score > 0
-          self.score -= vote.score
-        else
-          self.score += vote.score
-        end
+        self.reload
       end
     end
   end
@@ -1307,6 +1357,7 @@ class Post < ActiveRecord::Base
         update_children_on_destroy
         decrement_tag_post_counts
         remove_from_all_pools
+        remove_from_fav_groups
         destroy
         update_parent_on_destroy
       end
@@ -1359,7 +1410,7 @@ class Post < ActiveRecord::Base
       end
 
       if !CurrentUser.is_admin? 
-        if approver_id == CurrentUser.id
+        if approver_id == CurrentUser.id || PostApproval.approved?(CurrentUser.id, id)
           raise ApprovalError.new("You have previously approved this post and cannot undelete it")
         elsif uploader_id == CurrentUser.id
           raise ApprovalError.new("You cannot undelete a post you uploaded")
@@ -1406,6 +1457,10 @@ class Post < ActiveRecord::Base
     end
 
     def revert_to(target)
+      if id != target.post_id
+        raise RevertError.new("You cannot revert to a previous version of another post.")
+      end
+
       self.tag_string = target.tags
       self.rating = target.rating
       self.source = target.source
@@ -1462,7 +1517,7 @@ class Post < ActiveRecord::Base
 
   module ApiMethods
     def hidden_attributes
-      list = [:tag_index]
+      list = super + [:tag_index]
       if !visible?
         list += [:md5, :file_ext]
       end
@@ -1470,7 +1525,7 @@ class Post < ActiveRecord::Base
     end
 
     def method_attributes
-      list = [:uploader_name, :has_large, :tag_string_artist, :tag_string_character, :tag_string_copyright, :tag_string_general, :has_visible_children]
+      list = super + [:uploader_name, :has_large, :tag_string_artist, :tag_string_character, :tag_string_copyright, :tag_string_general, :has_visible_children]
       if visible?
         list += [:file_url, :large_file_url, :preview_file_url]
       end
@@ -1481,25 +1536,11 @@ class Post < ActiveRecord::Base
       [ :pixiv_ugoira_frame_data ]
     end
 
-    def serializable_hash(options = {})
+    def as_json(options = {})
       options ||= {}
       options[:include] ||= []
       options[:include] += associated_attributes
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-      unless options[:builder]
-        options[:methods] ||= []
-        options[:methods] += method_attributes
-      end
-      hash = super(options)
-      hash
-    end
-
-    def to_xml(options = {}, &block)
-      options ||= {}
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-      super(options, &block)
+      super(options)
     end
 
     def to_legacy_json
@@ -1656,7 +1697,7 @@ class Post < ActiveRecord::Base
   
   module PixivMethods
     def parse_pixiv_id
-      self.pixiv_id = Sources::Strategies::Pixiv.illust_id_from_url(source)
+      self.pixiv_id = Sources::Strategies::Pixiv.new(source).illust_id_from_url
     end
   end
 
@@ -1665,36 +1706,32 @@ class Post < ActiveRecord::Base
 
     module ClassMethods
       def remove_iqdb(post_id)
-        Iqdb::Server.new(*Danbooru.config.iqdb_hostname_and_port).remove(post_id)
-        Iqdb::Command.new(Danbooru.config.iqdb_file).remove(post_id)
+        if Danbooru.config.aws_sqs_iqdb_url
+          client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
+          client.send_message("remove\n#{post_id}")
+        end
       end
     end
 
     def update_iqdb_async
-      if Danbooru.config.iqdb_hostname_and_port && File.exists?(preview_file_path)
-        Danbooru.config.all_server_hosts.each do |host|
-          if has_tag?("ugoira")
-            run_at = 10.seconds.from_now
-          else
-            run_at = Time.now
-          end
-
-          delay(:queue => host, :run_at => run_at).update_iqdb
-        end
+      if File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
+        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
+        client.send_message("update\n#{id}\n#{complete_preview_file_url}")
       end
     end
 
     def remove_iqdb_async
-      if Danbooru.config.iqdb_hostname_and_port && File.exists?(preview_file_path)
-        Danbooru.config.all_server_hosts.each do |host|
-          Post.delay(:queue => host).remove_iqdb(id)
-        end
+      if File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
+        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
+        client.send_message("remove\n#{id}")
       end
     end
 
     def update_iqdb
-      Iqdb::Server.new(*Danbooru.config.iqdb_hostname_and_port).add(self)
-      Iqdb::Command.new(Danbooru.config.iqdb_file).add(self)
+      if Danbooru.config.aws_sqs_iqdb_url
+        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
+        client.send_message("update\n#{id}\n#{complete_preview_file_url}")
+      end
     end
   end
   
@@ -1770,6 +1807,15 @@ class Post < ActiveRecord::Base
 
     self.tag_string = tags.join(" ")
     save
+  end
+
+  def updater_can_change_rating
+    if rating_changed? && is_rating_locked?
+      # Don't forbid changes if the rating lock was just now set in the same update.
+      if !is_rating_locked_changed?
+        errors.add(:rating, "is locked and cannot be changed. Unlock the post first.")
+      end
+    end
   end
 
   def update_column(name, value)

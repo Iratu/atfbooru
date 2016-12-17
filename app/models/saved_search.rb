@@ -117,7 +117,7 @@ class SavedSearch < ActiveRecord::Base
       uri = URI.parse("#{Danbooru.config.listbooru_server}/users")
       uri.query = URI.encode_www_form(params)
 
-      Net::HTTP.start(uri.host, uri.port) do |http|
+      Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
         resp = http.request_get(uri.request_uri)
         if resp.is_a?(Net::HTTPSuccess)
           resp.body
@@ -151,5 +151,9 @@ class SavedSearch < ActiveRecord::Base
     if user.saved_searches.count == 0
       user.update_attribute(:has_saved_searches, false)
     end
+  end
+
+  def tag_query_array
+    Tag.scan_tags(tag_query)
   end
 end

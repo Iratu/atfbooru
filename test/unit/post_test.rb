@@ -107,7 +107,7 @@ class PostTest < ActiveSupport::TestCase
   end
 
   context "Parenting:" do
-    context "Assignining a parent to a post" do
+    context "Assigning a parent to a post" do
       should "update the has_children flag on the parent" do
         p1 = FactoryGirl.create(:post)
         assert(!p1.has_children?, "Parent should not have any children")
@@ -329,10 +329,30 @@ class PostTest < ActiveSupport::TestCase
         end
       end
 
-      should "be undeleted" do
-        @post.undelete!
-        @post.reload
-        assert_equal(false, @post.is_deleted?)
+      context "when undeleted" do
+        should "be undeleted" do
+          @post.undelete!
+          assert_equal(false, @post.reload.is_deleted?)
+        end
+
+        should "create a mod action" do
+          assert_difference("ModAction.count", 1) do
+            @post.undelete!
+          end
+        end
+      end
+
+      context "when approved" do
+        should "be undeleted" do
+          @post.approve!
+          assert_equal(false, @post.reload.is_deleted?)
+        end
+
+        should "create a mod action" do
+          assert_difference("ModAction.count", 1) do
+            @post.approve!
+          end
+        end
       end
 
       should "be appealed" do
@@ -460,7 +480,7 @@ class PostTest < ActiveSupport::TestCase
 
       context "as a new user" do
         setup do
-          @post.update_attribute(:tag_string, "aaa bbb ccc ddd tagme")
+          @post.update(:tag_string => "aaa bbb ccc ddd tagme")
           CurrentUser.user = FactoryGirl.create(:user)
         end
 
@@ -478,8 +498,10 @@ class PostTest < ActiveSupport::TestCase
 
       context "with a banned artist" do
         setup do
-          @artist = FactoryGirl.create(:artist)
-          @artist.ban!
+          CurrentUser.scoped(FactoryGirl.create(:admin_user)) do
+            @artist = FactoryGirl.create(:artist)
+            @artist.ban!
+          end
           @post = FactoryGirl.create(:post, :tag_string => @artist.name)
         end
 
@@ -493,9 +515,9 @@ class PostTest < ActiveSupport::TestCase
           CurrentUser.user = FactoryGirl.create(:builder_user)
           Delayed::Worker.delay_jobs = false
           @post = Post.find(@post.id)
-          @post.update_attribute(:tag_string, "art:abc")
+          @post.update(:tag_string => "art:abc")
           @post = Post.find(@post.id)
-          @post.update_attribute(:tag_string, "copy:abc")
+          @post.update(:tag_string => "copy:abc")
           @post.reload
         end
 
@@ -522,7 +544,7 @@ class PostTest < ActiveSupport::TestCase
         setup do
           FactoryGirl.create(:tag_alias, :antecedent_name => "abc", :consequent_name => "xyz")
           @post = Post.find(@post.id)
-          @post.update_attribute(:tag_string, "art:abc")
+          @post.update(:tag_string => "art:abc")
           @post.reload
         end
 
@@ -543,6 +565,27 @@ class PostTest < ActiveSupport::TestCase
             @parent.reload
             assert_equal(@parent.id, @post.parent_id)
             assert(@parent.has_children?)
+          end
+
+          should "not allow self-parenting" do
+            @post.update(:tag_string => "parent:#{@post.id}")
+            assert_nil(@post.parent_id)
+          end
+
+          should "clear the parent with parent:none" do
+            @post.update(:parent_id => @parent.id)
+            assert_equal(@parent.id, @post.parent_id)
+
+            @post.update(:tag_string => "parent:none")
+            assert_nil(@post.parent_id)
+          end
+
+          should "clear the parent with -parent:1234" do
+            @post.update(:parent_id => @parent.id)
+            assert_equal(@parent.id, @post.parent_id)
+
+            @post.update(:tag_string => "-parent:#{@parent.id}")
+            assert_nil(@post.parent_id)
           end
         end
 
@@ -622,7 +665,7 @@ class PostTest < ActiveSupport::TestCase
 
         context "for a rating" do
           context "that is valid" do
-            should "update the rating" do
+            should "update the rating if the post is unlocked" do
               @post.update_attributes(:tag_string => "aaa rating:e")
               @post.reload
               assert_equal("e", @post.rating)
@@ -636,13 +679,34 @@ class PostTest < ActiveSupport::TestCase
               assert_equal("q", @post.rating)
             end
           end
+
+          context "that is locked" do
+            should "change the rating if locked in the same update" do
+              @post.update({ :tag_string => "rating:e", :is_rating_locked => true }, :as => :builder)
+
+              assert(@post.valid?)
+              assert_equal("e", @post.reload.rating)
+            end
+
+            should "not change the rating if locked previously" do
+              @post.is_rating_locked = true
+              @post.save
+
+              @post.update(:tag_string => "rating:e")
+
+              assert(@post.invalid?)
+              assert_not_equal("e", @post.reload.rating)
+            end
+          end
         end
 
         context "for a fav" do
-          should "add the current user to the post's favorite listing" do
+          should "add/remove the current user to the post's favorite listing" do
             @post.update_attributes(:tag_string => "aaa fav:self")
-            @post.reload
             assert_equal("fav:#{@user.id}", @post.fav_string)
+
+            @post.update_attributes(:tag_string => "aaa -fav:self")
+            assert_equal("", @post.fav_string)
           end
         end
 
@@ -659,6 +723,147 @@ class PostTest < ActiveSupport::TestCase
             assert(@post.has_children?)
           end
         end
+
+        context "for a source" do
+          should "set the source with source:foo_bar_baz" do
+            @post.update(:tag_string => "source:foo_bar_baz")
+            assert_equal("foo_bar_baz", @post.source)
+          end
+
+          should 'set the source with source:"foo bar baz"' do
+            @post.update(:tag_string => 'source:"foo bar baz"')
+            assert_equal("foo bar baz", @post.source)
+          end
+
+          should 'strip the source with source:"  foo bar baz  "' do
+            @post.update(:tag_string => 'source:"  foo bar baz  "')
+            assert_equal("foo bar baz", @post.source)
+          end
+
+          should "clear the source with source:none" do
+            @post.update(:source => "foobar")
+            @post.update(:tag_string => "source:none")
+            assert_nil(@post.source)
+          end
+
+          should "set the pixiv id with source:https://img18.pixiv.net/img/evazion/14901720.png" do
+            @post.update(:tag_string => "source:https://img18.pixiv.net/img/evazion/14901720.png")
+            assert_equal(14901720, @post.pixiv_id)
+          end
+        end
+
+        context "of" do
+          setup do
+            @builder = FactoryGirl.build(:builder_user)
+          end
+
+          context "locked:notes" do
+            context "by a member" do
+              should "not lock the notes" do
+                @post.update(:tag_string => "locked:notes")
+                assert_equal(false, @post.is_note_locked)
+              end
+            end
+
+            context "by a builder" do
+              should "lock/unlock the notes" do
+                CurrentUser.scoped(@builder) do
+                  @post.update(:tag_string => "locked:notes")
+                  assert_equal(true, @post.is_note_locked)
+
+                  @post.update(:tag_string => "-locked:notes")
+                  assert_equal(false, @post.is_note_locked)
+                end
+              end
+            end
+          end
+
+          context "locked:rating" do
+            context "by a member" do
+              should "not lock the rating" do
+                @post.update(:tag_string => "locked:rating")
+                assert_equal(false, @post.is_rating_locked)
+              end
+            end
+
+            context "by a builder" do
+              should "lock/unlock the rating" do
+                CurrentUser.scoped(@builder) do
+                  @post.update(:tag_string => "locked:rating")
+                  assert_equal(true, @post.is_rating_locked)
+
+                  @post.update(:tag_string => "-locked:rating")
+                  assert_equal(false, @post.is_rating_locked)
+                end
+              end
+            end
+          end
+
+          context "locked:status" do
+            context "by a member" do
+              should "not lock the status" do
+                @post.update(:tag_string => "locked:status")
+                assert_equal(false, @post.is_status_locked)
+              end
+            end
+
+            context "by an admin" do
+              should "lock/unlock the status" do
+                CurrentUser.scoped(FactoryGirl.build(:admin_user)) do
+                  @post.update(:tag_string => "locked:status")
+                  assert_equal(true, @post.is_status_locked)
+
+                  @post.update(:tag_string => "-locked:status")
+                  assert_equal(false, @post.is_status_locked)
+                end
+              end
+            end
+          end
+        end
+
+        context "of" do
+          setup do
+            @gold = FactoryGirl.build(:gold_user)
+          end
+
+          context "upvote:self or downvote:self" do
+            context "by a member" do
+              should "not upvote the post" do
+                assert_raises PostVote::Error do
+                  @post.update(:tag_string => "upvote:self")
+                end
+
+                assert_equal(0, @post.score)
+              end
+
+              should "not downvote the post" do
+                assert_raises PostVote::Error do
+                  @post.update(:tag_string => "downvote:self")
+                end
+
+                assert_equal(0, @post.score)
+              end
+            end
+
+            context "by a gold user" do
+              should "upvote the post" do
+                CurrentUser.scoped(FactoryGirl.create(:gold_user)) do
+                  @post.update(:tag_string => "tag1 tag2 upvote:self")
+                  assert_equal(false, @post.errors.any?)
+                  assert_equal(1, @post.score)
+                end
+              end
+
+              should "downvote the post" do
+                CurrentUser.scoped(FactoryGirl.create(:gold_user)) do
+                  @post.update(:tag_string => "tag1 tag2 downvote:self")
+                  assert_equal(false, @post.errors.any?)
+                  assert_equal(-1, @post.score)
+                end
+              end
+            end
+          end
+        end
       end
 
       context "tagged with a negated tag" do
@@ -667,6 +872,13 @@ class PostTest < ActiveSupport::TestCase
           @post.update_attributes(:tag_string => "aaa bbb ccc -bbb")
           @post.reload
           assert_equal("aaa ccc", @post.tag_string)
+        end
+
+        should "resolve aliases" do
+          FactoryGirl.create(:tag_alias, :antecedent_name => "/tr", :consequent_name => "translation_request")
+          @post.update(:tag_string => "aaa translation_request -/tr")
+
+          assert_equal("aaa", @post.tag_string)
         end
       end
 
@@ -737,6 +949,20 @@ class PostTest < ActiveSupport::TestCase
 
         should "have the appropriate file type tag added automatically" do
           assert_match(/flash/, @post.tag_string)
+        end
+      end
+
+      context "with *_(cosplay) tags" do
+        setup do
+          @post.add_tag("hakurei_reimu_(cosplay)")
+          @post.add_tag("hatsune_miku_(cosplay)")
+          @post.save
+        end
+
+        should "add the character tags and the cosplay tag" do
+          assert(@post.has_tag?("hakurei_reimu"))
+          assert(@post.has_tag?("hatsune_miku"))
+          assert(@post.has_tag?("cosplay"))
         end
       end
 
@@ -1001,6 +1227,26 @@ class PostTest < ActiveSupport::TestCase
             assert_equal(18557054, @post.pixiv_id)
             @post.pixiv_id = nil
           end
+
+          context "but doesn't have a pixiv id" do
+            should "not save the pixiv id" do
+              @post.pixiv_id = 1234
+              @post.update(source: "http://i1.pixiv.net/novel-cover-original/img/2016/11/03/20/10/58/7436075_f75af69f3eacd1656d3733c72aa959cf.jpg")
+              assert_equal(nil, @post.pixiv_id)
+
+              @post.pixiv_id = 1234
+              @post.update(source: "http://i2.pixiv.net/background/img/2016/10/30/12/27/30/7059005_da9946b806c10d391a81ed1117cd33d6.jpg")
+              assert_equal(nil, @post.pixiv_id)
+
+              @post.pixiv_id = 1234
+              @post.update(source: "http://i1.pixiv.net/img15/img/omega777/novel/2612734.jpg")
+              assert_equal(nil, @post.pixiv_id)
+
+              @post.pixiv_id = 1234
+              @post.update(source: "http://img08.pixiv.net/profile/nice/1408837.jpg")
+              assert_equal(nil, @post.pixiv_id)
+            end
+          end
         end
 
         should "normalize pixiv links" do
@@ -1057,6 +1303,24 @@ class PostTest < ActiveSupport::TestCase
           assert_equal("http://www.hentai-foundry.com/pictures/user/AnimeFlux/219123", @post.normalized_source)
         end
       end
+    end
+  end
+
+  context "Updating:" do
+    context "A rating unlocked post" do
+      setup { @post = FactoryGirl.create(:post) }
+      subject { @post }
+
+      should_not allow_value("S", "safe", "derp").for(:rating)
+      should allow_value("s", "q", "e").for(:rating)
+    end
+
+    context "A rating locked post" do
+      setup { @post = FactoryGirl.create(:post, :is_rating_locked => true) }
+      subject { @post }
+
+      should_not allow_value("S", "safe", "derp").for(:rating)
+      should_not allow_value("s", "q", "e").for(:rating)
     end
   end
 
@@ -1567,8 +1831,16 @@ class PostTest < ActiveSupport::TestCase
       end
     end
 
+    should "not allow members to vote" do
+      @user = FactoryGirl.create(:user)
+      @post = FactoryGirl.create(:post)
+      CurrentUser.scoped(@user) do
+        assert_raises(PostVote::Error) { @post.vote!("up") }
+      end
+    end
+
     should "not allow duplicate votes" do
-      user = FactoryGirl.create(:user)
+      user = FactoryGirl.create(:gold_user)
       post = FactoryGirl.create(:post)
       CurrentUser.scoped(user, "127.0.0.1") do
         assert_nothing_raised {post.vote!("up")}
@@ -1580,14 +1852,29 @@ class PostTest < ActiveSupport::TestCase
     end
 
     should "allow undoing of votes" do
-      user = FactoryGirl.create(:user)
+      user = FactoryGirl.create(:gold_user)
       post = FactoryGirl.create(:post)
+
+      # We deliberately don't call post.reload until the end to verify that
+      # post.unvote! returns the correct score even when not forcibly reloaded.
       CurrentUser.scoped(user, "127.0.0.1") do
         post.vote!("up")
+        assert_equal(1, post.score)
+
         post.unvote!
-        post.reload
         assert_equal(0, post.score)
+
         assert_nothing_raised {post.vote!("down")}
+        assert_equal(-1, post.score)
+
+        post.unvote!
+        assert_equal(0, post.score)
+
+        assert_nothing_raised {post.vote!("up")}
+        assert_equal(1, post.score)
+
+        post.reload
+        assert_equal(1, post.score)
       end
     end
   end
@@ -1689,6 +1976,34 @@ class PostTest < ActiveSupport::TestCase
   end
 
   context "Reverting: " do
+    context "a post that is rating locked" do
+      setup do
+        @post = FactoryGirl.create(:post, :rating => "s")
+        Timecop.travel(2.hours.from_now) do
+          @post.update({ :rating => "q", :is_rating_locked => true }, :as => :builder)
+        end
+      end
+
+      should "not revert the rating" do
+        assert_raises ActiveRecord::RecordInvalid do
+          @post.revert_to!(@post.versions.first)
+        end
+
+        assert_equal(["Rating is locked and cannot be changed. Unlock the post first."], @post.errors.full_messages)
+        assert_equal(@post.versions.last.rating, @post.reload.rating)
+      end
+
+      should "revert the rating after unlocking" do
+        @post.update({ :rating => "e", :is_rating_locked => false }, :as => :builder)
+        assert_nothing_raised do
+          @post.revert_to!(@post.versions.first)
+        end
+
+        assert(@post.valid?)
+        assert_equal(@post.versions.first.rating, @post.rating)
+      end
+    end
+
     context "a post that has been updated" do
       setup do
         @post = FactoryGirl.create(:post, :rating => "q", :tag_string => "aaa")

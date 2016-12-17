@@ -62,7 +62,8 @@ class ArtistTest < ActiveSupport::TestCase
       setup do
         @post = FactoryGirl.create(:post, :tag_string => "aaa")
         @artist = FactoryGirl.create(:artist, :name => "aaa")
-        @artist.ban!
+        @admin = FactoryGirl.create(:admin_user)
+        CurrentUser.scoped(@admin) { @artist.ban! }
         @post.reload
       end
 
@@ -89,6 +90,11 @@ class ArtistTest < ActiveSupport::TestCase
         assert_equal(1, TagImplication.where(:antecedent_name => "aaa", :consequent_name => "banned_artist").count)
         assert_equal("aaa banned_artist", @post.tag_string)
       end
+
+      should "set the approver of the banned_artist implication" do
+        ta = TagImplication.where(:antecedent_name => "aaa", :consequent_name => "banned_artist").first
+        assert_equal(@admin.id, ta.approver.id)
+      end
     end
 
     should "create a new wiki page to store any note information" do
@@ -99,6 +105,18 @@ class ArtistTest < ActiveSupport::TestCase
       assert_equal("testing", artist.notes)
       assert_equal("testing", artist.wiki_page.body)
       assert_equal(artist.name, artist.wiki_page.title)
+    end
+
+    context "when a wiki page with the same name already exists" do
+      setup do
+        @wiki_page = FactoryGirl.create(:wiki_page, :title => "aaa")
+        @artist = FactoryGirl.build(:artist, :name => "aaa")
+      end
+
+      should "not validate" do
+        @artist.save
+        assert_equal(["Name conflicts with a wiki page"], @artist.errors.full_messages)
+      end
     end
 
     should "update the wiki page when notes are assigned" do

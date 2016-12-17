@@ -7,13 +7,18 @@ FactoryGirl.define do
     default_image_size "large"
     base_upload_limit 10
     level 20
+    created_at {Time.now}
     last_logged_in_at {Time.now}
     favorite_count 0
     bit_prefs 0
 
     factory(:banned_user) do
       is_banned true
-      ban {|x| x.association(:ban)}
+      after(:create) { |user| create(:ban, user: user) }
+    end
+
+    factory(:member_user) do
+      level 20
     end
 
     factory(:gold_user) do

@@ -5,8 +5,14 @@ class ForumTopic < ActiveRecord::Base
     2 => "Bugs & Features"
   }
 
+  MIN_LEVELS = {
+    None: 0,
+    Moderator: User::Levels::MODERATOR,
+    Admin: User::Levels::ADMIN,
+  }
+
   attr_accessible :title, :original_post_attributes, :category_id, :as => [:member, :builder, :gold, :platinum, :janitor, :moderator, :admin, :default]
-  attr_accessible :is_sticky, :is_locked, :is_deleted, :as => [:admin, :moderator]
+  attr_accessible :is_sticky, :is_locked, :is_deleted, :min_level, :as => [:admin, :moderator]
   belongs_to :creator, :class_name => "User"
   belongs_to :updater, :class_name => "User"
   has_many :posts, lambda {order("forum_posts.id asc")}, :class_name => "ForumPost", :foreign_key => "topic_id", :dependent => :destroy
@@ -18,6 +24,7 @@ class ForumTopic < ActiveRecord::Base
   validates_presence_of :title, :creator_id
   validates_associated :original_post
   validates_inclusion_of :category_id, :in => CATEGORIES.keys
+  validates_inclusion_of :min_level, :in => MIN_LEVELS.values
   accepts_nested_attributes_for :original_post
   after_update :update_orignal_post
 
@@ -56,8 +63,12 @@ class ForumTopic < ActiveRecord::Base
       where("is_deleted = false")
     end
 
+    def permitted
+      where("min_level <= ?", CurrentUser.level)
+    end
+
     def search(params)
-      q = where("true")
+      q = permitted
       return q if params.blank?
 
       if params[:title_matches].present?
@@ -120,7 +131,11 @@ class ForumTopic < ActiveRecord::Base
   include SubscriptionMethods
 
   def editable_by?(user)
-    creator_id == user.id || user.is_moderator?
+    (creator_id == user.id || user.is_moderator?) && visible?(user)
+  end
+
+  def visible?(user)
+    user.level >= min_level
   end
 
   def initialize_is_deleted
@@ -142,9 +157,25 @@ class ForumTopic < ActiveRecord::Base
   def presenter(forum_posts)
     @presenter ||= ForumTopicPresenter.new(self, forum_posts)
   end
-  
+
+  def as_json(options = {})
+    if CurrentUser.user.level < min_level
+      options[:only] = [:id]
+    end
+
+    super(options)
+  end
+
+  def to_xml(options = {})
+    if CurrentUser.user.level < min_level
+      options[:only] = [:id]
+    end
+
+    super(options)
+  end
+
   def hidden_attributes
-    super + [:text_index]
+    super + [:text_index, :min_level]
   end
 
   def merge(topic)

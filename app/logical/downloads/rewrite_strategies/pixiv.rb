@@ -8,9 +8,12 @@ module Downloads
       end
 
       def rewrite(url, headers, data = {})
-        if url =~ /https?:\/\/(?:\w+\.)?pixiv\.net/
+        if url =~ /\Ahttps?:\/\/(?:\w+\.)?pixiv\.net/
           url, headers = rewrite_headers(url, headers)
           url, headers = rewrite_cdn(url, headers)
+        end
+
+        if url =~ /\Ahttps?:\/\/(?:\w+\.)?pixiv\.net/ && source.illust_id_from_url
           url, headers = rewrite_html_pages(url, headers)
           url, headers = rewrite_thumbnails(url, headers)
           url, headers = rewrite_old_small_manga_pages(url, headers)
@@ -103,7 +106,7 @@ module Downloads
       # Cache the source data so it gets fetched at most once.
       def source
         @source ||= begin
-          source = ::Sources::Strategies::Pixiv.new(url)
+          source = ::Sources::Site.new(url)
           source.get
 
           source

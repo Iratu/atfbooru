@@ -1,11 +1,19 @@
 #!/bin/bash
 
-# Run: curl -s https://raw.githubusercontent.com/Iratu/atfbooru/master/INSTALL.debian > install.sh ; chmod +x install.sh ; ./install.sh
+# Run: curl -L -s https://raw.githubusercontent.com/r888888888/danbooru/master/INSTALL.debian -o install.sh ; chmod +x install.sh ; ./install.sh
 
 if [[ "$(whoami)" != "root" ]] ; then
   echo "You must run this script as root"
   exit 1
 fi
+
+verlte() {
+  [ "$1" = "`echo -e "$1\n$2" | sort -V | head -n1`" ]
+}
+
+verlt() {
+  [ "$1" = "$2" ] && return 1 || verlte $1 $2
+}
 
 echo "* DANBOORU INSTALLATION SCRIPT"
 echo "*"
@@ -20,13 +28,13 @@ if [[ -z "$HOSTNAME" ]] ; then
   exit 1
 fi
 
-export RUBY_VERSION=2.1.5
-export GITHUB_INSTALL_SCRIPTS=https://raw.githubusercontent.com/Iratu/atfbooru/master/script/install
+export RUBY_VERSION=2.3.1
+export GITHUB_INSTALL_SCRIPTS=https://raw.githubusercontent.com/r888888888/danbooru/master/script/install
 
 # Install packages
 echo "* Installing packages..."
 apt-get update
-apt-get -y install build-essential automake libssl-dev libxml2-dev libxslt-dev ncurses-dev sudo libreadline-dev flex bison ragel memcached libmemcached-dev git curl libcurl4-openssl-dev imagemagick libmagickcore-dev libmagickwand-dev sendmail-bin sendmail postgresql postgresql-contrib libpq-dev nginx ssh
+apt-get -y install build-essential automake libssl-dev libxml2-dev libxslt-dev ncurses-dev sudo libreadline-dev flex bison ragel memcached libmemcached-dev git curl libcurl4-openssl-dev imagemagick libmagickcore-dev libmagickwand-dev sendmail-bin sendmail postgresql postgresql-contrib libpq-dev postgresql-server-dev-all nginx ssh coreutils ffmpeg mkvtoolnix
 
 if [ $? -ne 0 ]; then
   echo "* Error installing packages; aborting"
@@ -37,6 +45,15 @@ fi
 useradd -m danbooru
 chsh -s /bin/bash danbooru
 usermod -G danbooru,sudo danbooru
+
+# Set up Postgres
+export PG_VERSION=`pg_config --version | egrep -o '[0-9]{1,}\.[0-9]{1,}'`
+if verlte 9.5 $PG_VERSION ; then
+	# only do this on postgres 9.5 and above
+	git clone https://github.com/r888888888/test_parser.git /tmp/test_parser
+	cd /tmp/test_parser
+	make install
+fi
 
 # Install rbenv
 echo "* Installing rbenv..."
@@ -64,14 +81,14 @@ sudo -u danbooru bash -l -c 'gem install --no-ri --no-rdoc bundler'
 echo "* Install configuration scripts..."
 
 # Update PostgreSQL
-curl -L -s $GITHUB_INSTALL_SCRIPTS/postgresql_hba_conf -o /etc/postgresql/9.1/main/pg_hba.conf
+curl -L -s $GITHUB_INSTALL_SCRIPTS/postgresql_hba_conf -o /etc/postgresql/$PG_VERSION/main/pg_hba.conf
 /etc/init.d/postgresql restart
 sudo -u postgres createuser -s danbooru
 sudo -u danbooru createdb danbooru2
 
 # Setup nginx
-curl -L -s $GITHUB_INSTALL_SCRIPTS/nginx.danbooru.conf -o /etc/nginx/conf.d/danbooru.conf
-sed -i -e "s/__hostname__/$HOSTNAME/g" /etc/nginx/conf.d/danbooru.conf
+curl -L -s $GITHUB_INSTALL_SCRIPTS/nginx.danbooru.conf -o /etc/nginx/sites-enabled/danbooru.conf
+sed -i -e "s/__hostname__/$HOSTNAME/g" /etc/nginx/sites-enabled/danbooru.conf
 /etc/init.d/nginx restart
 
 # Setup logrotate
@@ -84,20 +101,13 @@ passwd danbooru
 echo "* Setting up SSH keys for the danbooru account"
 sudo -u danbooru ssh-keygen
 
-echo "* Setting up danbooru app..."
-sudo -u danbooru git clone https://github.com/Iratu/atfbooru ~danbooru/danbooru
-sudo -u danbooru bash -l -c 'cd ~/danbooru ; bundle'
-
-echo "* Creating a new local git branch called develop"
-sudo -u danbooru bash -l -c 'cd ~/danbooru ; git checkout -b develop'
-
 mkdir -p /var/www/danbooru2/shared/config
 mkdir -p /var/www/danbooru2/shared/data
 mkdir -p /var/www/danbooru2/shared/data/preview
 mkdir -p /var/www/danbooru2/shared/data/sample
 chown -R danbooru:danbooru /var/www/danbooru2
-sudo -u danbooru bash -l -c 'cp ~/danbooru/script/install/database.yml.templ /var/www/danbooru2/shared/config/database.yml'
-sudo -u danbooru bash -l -c 'cp ~/danbooru/script/install/danbooru_local_config.rb.templ /var/www/danbooru2/shared/config/danbooru_local_config.rb'
+curl -L -s $GITHUB_INSTALL_SCRIPTS/database.yml.templ -o /var/www/danbooru2/shared/config/database.yml
+curl -L -s $GITHUB_INSTALL_SCRIPTS/danbooru_local_config.rb.templ -o /var/www/danbooru2/shared/config/danbooru_local_config.rb
 
 echo "* Almost done! You are now ready to deploy Danbooru onto this server."
 echo "* Log into Github and fork https://github.com/r888888888/danbooru into"
@@ -113,6 +123,7 @@ echo "* On the remote server you will want to modify this file:"
 echo "*"
 echo "*   /var/www/danbooru2/shared/config/danbooru_local_config.rb"
 echo "*"
+read -p "Press [enter] to continue..."
 echo "* Commit your changes and push them to your fork. You are now ready to"
 echo "* deploy with the following command:"
 echo "*"
@@ -121,6 +132,8 @@ echo "*"
 echo "* You can also run a server locally without having to deal with deploys"
 echo "* by running the following command:"
 echo "*"
+echo "*   bundle install"
+echo "*   bundle exec rake db:create db:migrate"
 echo "*   bundle exec rails server"
 echo "*"
 echo "* This will start a web process running on port 3000 that you can"

@@ -1,4 +1,6 @@
 class Note < ActiveRecord::Base
+  class RevertError < Exception ; end
+
   attr_accessor :updater_id, :updater_ip_addr, :html_id
   belongs_to :post
   belongs_to :creator, :class_name => "User"
@@ -79,23 +81,8 @@ class Note < ActiveRecord::Base
       super + [:body_index]
     end
 
-    def serializable_hash(options = {})
-      options ||= {}
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-      unless options[:builder]
-        options[:methods] ||= []
-        options[:methods] += [:creator_name]
-      end
-      hash = super(options)
-      hash
-    end
-
-    def to_xml(options = {}, &block)
-      options ||= {}
-      options[:methods] ||= []
-      options[:methods] += [:creator_name]
-      super(options, &block)
+    def method_attributes
+      super + [:creator_name]
     end
   end
 
@@ -204,6 +191,10 @@ class Note < ActiveRecord::Base
   end
 
   def revert_to(version)
+    if id != version.note_id
+      raise RevertError.new("You cannot revert to a previous version of another note.")
+    end
+
     self.x = version.x
     self.y = version.y
     self.post_id = version.post_id
