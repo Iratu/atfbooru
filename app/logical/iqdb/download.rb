@@ -17,6 +17,28 @@ module Iqdb
       [url, headers["Referer"]]
     end
 
+	def add_image(post_id, imgurl)
+	  if Danbooru.config.iqdbs_server
+        params = {
+          "key" => Danbooru.config.iqdbs_auth_key,
+          "url" => imgurl,
+          "pid" => post_id
+        }
+        uri = URI.parse("#{Danbooru.config.iqdbs_server}/similar")
+        uri.query = URI.encode_www_form(params)
+
+        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
+          #resp = http.request_get(uri.request_uri)
+        end
+      else
+        raise NotImplementedError
+      end
+	end
+	
+	def remove_image(post_id)
+	
+	end
+	
     def find_similar
       if Danbooru.config.iqdbs_server
         url, ref = get_referer(source)

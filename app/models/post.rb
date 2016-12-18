@@ -1706,7 +1706,9 @@ class Post < ActiveRecord::Base
 
     module ClassMethods
       def remove_iqdb(post_id)
-        if Danbooru.config.aws_sqs_iqdb_url
+	    if Danbooru.config.iqdbs_skip_sqs
+		  @download.remove_image(post_id)
+        elsif Danbooru.config.aws_sqs_iqdb_url
           client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
           client.send_message("remove\n#{post_id}")
         end
@@ -1728,7 +1730,9 @@ class Post < ActiveRecord::Base
     end
 
     def update_iqdb
-      if Danbooru.config.aws_sqs_iqdb_url
+	    if Danbooru.config.iqdbs_skip_sqs
+		  @download.add_image(id, complete_preview_file_url)
+        elsif Danbooru.config.aws_sqs_iqdb_url
         client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
         client.send_message("update\n#{id}\n#{complete_preview_file_url}")
       end
