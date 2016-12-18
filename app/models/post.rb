@@ -1716,7 +1716,9 @@ class Post < ActiveRecord::Base
     end
 
     def update_iqdb_async
-      if File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
+      	if Danbooru.config.iqdbs_skip_sqs
+		  @download.add_image(id, complete_preview_file_url)
+        elsif File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
         client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
         client.send_message("update\n#{id}\n#{complete_preview_file_url}")
       end
