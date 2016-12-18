@@ -30,7 +30,7 @@ module Iqdb
         Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
           resp = http.request_get(uri.request_uri)
           if resp.is_a?(Net::HTTPSuccess)
-            raise "OK"
+            json = JSON.parse(resp.body)
           else
             raise "HTTP error code: #{resp.code} #{resp.message}"
           end
