@@ -24,13 +24,13 @@ module Iqdb
           "url" => imgurl,
           "pid" => post_id
         }
-        uri = URI.parse("#{Danbooru.config.iqdbs_server}/similar")
+        uri = URI.parse("#{Danbooru.config.iqdbs_server}/update")
         uri.query = URI.encode_www_form(params)
 
         Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
           resp = http.request_get(uri.request_uri)
           if resp.is_a?(Net::HTTPSuccess)
-            json = JSON.parse(resp.body)
+            raise "OK"
           else
             raise "HTTP error code: #{resp.code} #{resp.message}"
           end
