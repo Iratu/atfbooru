@@ -1,0 +1,16 @@
+module Iqdb
+  class Importer
+    def import!
+      Post.find_each do |post|
+        IO.popen("iqdb command /var/www/danbooru2/shared/iqdb.db", "w+") do |io|
+          if File.exists?(post.preview_file_path)
+            hex = post.id.to_s(16)
+            io.puts "add 0 #{hex}:#{post.preview_file_path}"
+          end
+          io.puts "quit"
+          io.read
+        end
+      end
+    end
+  end
+end
