@@ -111,10 +111,10 @@ class Upload < ActiveRecord::Base
     end
 
     def validate_video_duration
-	  if CurrentUser.can_approve_posts? && is_video? && video.duration > 1200
-        raise "video must not be longer than 20 minutes"
-      elsif !CurrentUser.can_approve_posts? && is_video? && video.duration > 600
-        raise "video must not be longer than 10 minutes"
+	  if CurrentUser.can_approve_posts? && is_video? && video.duration > 3600
+        raise "video must not be longer than 60 minutes"
+      elsif !CurrentUser.can_approve_posts? && is_video? && video.duration > 1800
+        raise "video must not be longer than 30 minutes"
       end
     end
   end
