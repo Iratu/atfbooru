@@ -52,12 +52,10 @@ class User < ActiveRecord::Base
   has_bit_flags BOOLEAN_ATTRIBUTES, :field => "bit_prefs"
 
   attr_accessor :password, :old_password
-  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :as => [:moderator, :janitor, :gold, :member, :anonymous, :default, :builder, :admin]
+  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :as => [:moderator, :janitor, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :level, :as => :admin
-  validates_length_of :name, :within => 2..100, :on => :create
-  validates_format_of :name, :with => /\A[^\s:]+\Z/, :on => :create, :message => "cannot have whitespace or colons"
-  validates_format_of :name, :with => /\A[^_].*[^_]\Z/, :on => :create, :message => "cannot begin or end with an underscore"
-  validates_uniqueness_of :name, :case_sensitive => false
+
+  validates :name, user_name: true, on: :create
   validates_uniqueness_of :email, :case_sensitive => false, :if => lambda {|rec| rec.email.present? && rec.email_changed? }
   validates_length_of :password, :minimum => 5, :if => lambda {|rec| rec.new_record? || rec.password.present?}
   validates_inclusion_of :default_image_size, :in => %w(large original)
@@ -68,6 +66,7 @@ class User < ActiveRecord::Base
   validate :validate_ip_addr_is_not_banned, :on => :create
   before_validation :normalize_blacklisted_tags
   before_validation :set_per_page
+  before_validation :normalize_email
   before_create :encrypt_password_on_create
   before_update :encrypt_password_on_update
   before_create :initialize_default_boolean_attributes
@@ -83,11 +82,13 @@ class User < ActiveRecord::Base
   has_one :api_key
   has_one :dmail_filter
   has_one :super_voter
+  has_one :token_bucket
   has_many :subscriptions, lambda {order("tag_subscriptions.name")}, :class_name => "TagSubscription", :foreign_key => "creator_id"
   has_many :note_versions, :foreign_key => "updater_id"
   has_many :dmails, lambda {order("dmails.id desc")}, :foreign_key => "owner_id"
   has_many :saved_searches
   has_many :forum_posts, lambda {order("forum_posts.created_at")}, :foreign_key => "creator_id"
+  has_many :user_name_change_requests, lambda {visible.order("user_name_change_requests.created_at desc")}
   belongs_to :inviter, :class_name => "User"
   after_update :create_mod_action
   accepts_nested_attributes_for :dmail_filter
@@ -149,6 +150,10 @@ class User < ActiveRecord::Base
 
       def id_to_pretty_name(user_id)
         id_to_name(user_id).gsub(/([^_])_+(?=[^_])/, "\\1 \\2")
+      end
+
+      def normalize_name(name)
+        name.to_s.mb_chars.downcase.strip.tr(" ", "_").to_s
       end
     end
 
@@ -296,6 +301,10 @@ class User < ActiveRecord::Base
     extend ActiveSupport::Concern
 
     module ClassMethods
+      def system
+        Danbooru.config.system_user
+      end
+
       def level_hash
         return {
           "Member" => Levels::MEMBER,
@@ -362,25 +371,7 @@ class User < ActiveRecord::Base
     end
 
     def role
-      case level
-      when Levels::MEMBER
-        :member
-
-      when Levels::GOLD
-        :gold
-
-      when Levels::BUILDER
-        :builder
-
-      when Levels::MODERATOR
-        :moderator
-
-      when Levels::JANITOR
-        :janitor
-
-      when Levels::ADMIN
-        :admin
-      end
+      level_string.downcase.to_sym
     end
 
     def level_string_was
@@ -441,7 +432,7 @@ class User < ActiveRecord::Base
 
     def create_mod_action
       if level_changed?
-        ModAction.create(:description => %{"#{name}":/users/#{id} level changed #{level_string_was} -> #{level_string}})
+        ModAction.log(%{"#{name}":/users/#{id} level changed #{level_string_was} -> #{level_string}})
       end
     end
     
@@ -473,6 +464,10 @@ class User < ActiveRecord::Base
       else
         raise User::Error.new("Verification key does not match")
       end
+    end
+
+    def normalize_email
+      self.email = nil if email.blank?
     end
   end
 
@@ -616,32 +611,31 @@ end
       end
     end
 
-    def api_hourly_limit(idempotent = true)
-      base = if is_platinum? && api_key.present?
-        5000
+    def api_regen_multiplier
+      # regen this amount per second
+      if is_platinum? && api_key.present?
+        4
       elsif is_gold? && api_key.present?
-        1000
+        2
       else
-        300
-      end
-
-      if idempotent
-        base * 10
-      else
-        base
+        1
       end
     end
 
-    def remaining_api_hourly_limit
-      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, true)
+    def api_burst_limit
+      # can make this many api calls at once before being bound by
+      # api_regen_multiplier refilling your pool
+      if is_platinum? && api_key.present?
+        60
+      elsif is_gold? && api_key.present?
+        30
+      else
+        10
+      end
     end
 
-    def remaining_api_hourly_limit_read
-      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, true)
-    end
-
-    def remaining_api_hourly_limit_write
-      ApiLimiter.remaining_hourly_limit(CurrentUser.ip_addr, false)
+    def remaining_api_limit
+      token_bucket.try(:token_count) || api_burst_limit
     end
 
     def statement_timeout
@@ -663,7 +657,7 @@ end
     def method_attributes
       list = super + [:is_banned, :can_approve_posts, :can_upload_free, :is_super_voter, :level_string]
       if id == CurrentUser.user.id
-        list += [:remaining_api_hourly_limit, :remaining_api_hourly_limit_read, :remaining_api_hourly_limit_write]
+        list += [:remaining_api_limit, :api_burst_limit]
       end
       list
     end
@@ -692,7 +686,7 @@ end
     end
 
     def pool_version_count
-      PoolVersion.for_user(id).count
+      PoolArchive.for_user(id).count
     end
 
     def forum_post_count
@@ -739,6 +733,16 @@ end
 
     def admins
       where("level = ?", Levels::ADMIN)
+    end
+
+    # UserDeletion#rename renames deleted users to `user_<1234>~`. Tildes
+    # are appended if the username is taken.
+    def deleted
+      where("name ~ 'user_[0-9]+~*'")
+    end
+
+    def undeleted
+      where("name !~ 'user_[0-9]+~*'")
     end
 
     def with_email(email)
@@ -845,20 +849,6 @@ end
     end
   end
 
-  module SavedSearchMethods
-    def unique_saved_search_categories
-      categories = saved_searches.pluck(:category)
-      
-      if categories.any? {|x| x.blank?}
-        categories.reject! {|x| x.blank?}
-        categories.unshift(SavedSearch::UNCATEGORIZED_NAME)
-      end
-      
-      categories.uniq!
-      categories
-    end
-  end
-
   module SockPuppetMethods
     def notify_sock_puppets
       sock_puppet_suspects.each do |user|
@@ -887,7 +877,6 @@ end
   include CountMethods
   extend SearchMethods
   include StatisticsMethods
-  include SavedSearchMethods
 
   def initialize_default_image_size
     self.default_image_size = "large"
@@ -906,7 +895,7 @@ end
   end
 
   def hide_favorites?
-    enable_privacy_mode? && CurrentUser.user.id != id
+    !CurrentUser.is_admin? && enable_privacy_mode? && CurrentUser.user.id != id
   end
 
   def initialize_default_boolean_attributes

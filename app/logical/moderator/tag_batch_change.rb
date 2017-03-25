@@ -12,7 +12,7 @@ module Moderator
 
       CurrentUser.without_safe_mode do
         CurrentUser.scoped(updater, updater_ip_addr) do
-          ModAction.create(:description => "processed mass update: #{antecedent} -> #{consequent}")
+          ModAction.log("processed mass update: #{antecedent} -> #{consequent}")
 
           ::Post.tag_match(antecedent).where("true /* Moderator::TagBatchChange#perform */").find_each do |post|
             post.reload
@@ -21,13 +21,14 @@ module Moderator
           end
 
           tags = Tag.scan_tags(antecedent, :strip_metatags => true)
-          conds = tags.map {|x| "tag_query like ?"}.join(" AND ")
-          conds = [conds, *tags.map {|x| "%#{x}%"}]
-          SavedSearch.where(*conds).find_each do |ss|
-            ss.tag_query = (ss.tag_query_array - tags + antecedent).uniq.join(" ")
-            ss.save
+          conds = tags.map {|x| "query like ?"}.join(" AND ")
+          conds = [conds, *tags.map {|x| "%#{x.to_escaped_for_sql_like}%"}]
+          if SavedSearch.enabled?
+            SavedSearch.where(*conds).find_each do |ss|
+              ss.query = (ss.query_array - tags + [consequent]).uniq.join(" ")
+              ss.save
+            end
           end
-
         end
       end
     end

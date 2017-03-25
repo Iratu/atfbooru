@@ -89,12 +89,8 @@ class Note < ActiveRecord::Base
   extend SearchMethods
   include ApiMethods
 
-  def presenter
-    @presenter ||= NotePresenter.new(self)
-  end
-
   def initialize_creator
-    self.creator_id = CurrentUser.id
+    self.creator_id ||= CurrentUser.id
   end
 
   def initialize_updater
@@ -147,7 +143,8 @@ class Note < ActiveRecord::Base
   end
 
   def create_version
-    CurrentUser.user.increment!(:note_update_count)
+    User.where(id: CurrentUser.id).update_all("note_update_count = note_update_count + 1")
+    CurrentUser.reload
 
     if merge_version?
       merge_version

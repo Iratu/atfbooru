@@ -1,6 +1,9 @@
 require 'test_helper'
+require 'helpers/saved_search_test_helper'
 
 class TagAliasTest < ActiveSupport::TestCase
+  include SavedSearchTestHelper
+
   context "A tag alias" do
     setup do
       Timecop.travel(1.month.ago) do
@@ -9,7 +12,7 @@ class TagAliasTest < ActiveSupport::TestCase
       end
       CurrentUser.ip_addr = "127.0.0.1"
       MEMCACHE.flush_all
-      Delayed::Worker.delay_jobs = false
+      mock_saved_search_service!
     end
 
     teardown do
@@ -71,13 +74,13 @@ class TagAliasTest < ActiveSupport::TestCase
       assert_nil(Cache.get("ta:aaa"))
     end
 
-    should "move saved searches" do
+    should "zzz move saved searches" do
       tag1 = FactoryGirl.create(:tag, :name => "...")
       tag2 = FactoryGirl.create(:tag, :name => "bbb")
-      ss = FactoryGirl.create(:saved_search, :tag_query => "123 ... 456", :user => CurrentUser.user)
+      ss = FactoryGirl.create(:saved_search, :query => "123 ... 456", :user => CurrentUser.user)
       ta = FactoryGirl.create(:tag_alias, :antecedent_name => "...", :consequent_name => "bbb")
       ss.reload
-      assert_equal("123 bbb 456", ss.tag_query)
+      assert_equal(%w(123 456 bbb), ss.query.scan(/\S+/).sort)
     end
 
     should "update any affected posts when saved" do

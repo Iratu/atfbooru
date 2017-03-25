@@ -1,6 +1,69 @@
 require 'danbooru_image_resizer/danbooru_image_resizer'
 
 namespace :images do
+  desc "Reset S3 + Storage Class"
+  task :reset_s3, [:min_id, :max_id] => :environment do |t, args|
+    min_id = args[:min_id] # 1
+    max_id = args[:max_id] # 50_000
+
+    credentials = Aws::Credentials.new(Danbooru.config.aws_access_key_id, Danbooru.config.aws_secret_access_key)
+    Aws.config.update({
+      region: "us-east-1",
+      credentials: credentials
+    })
+    client = Aws::S3::Client.new
+    bucket = Danbooru.config.aws_s3_bucket_name
+
+    Post.where("id >= ? and id <= ?", min_id, max_id).find_each do |post|
+      key = File.basename(post.file_path)
+      begin
+        client.copy_object(bucket: bucket, key: key, acl: "public-read", storage_class: "STANDARD", copy_source: "/#{bucket}/#{key}", metadata_directive: "COPY")
+        puts "copied #{post.id}"
+      rescue Aws::S3::Errors::InvalidObjectState
+        puts "invalid state #{post.id}"
+      rescue Aws::S3::Errors::NoSuchKey
+        puts "missing #{post.id}"
+      end
+    end
+  end
+
+  desc "restore from glacier"
+  task :restore_glacier, [:min_id, :max_id] => :environment do |t, args|
+    min_id = args[:min_id] # 10_001
+    max_id = args[:max_id] # 50_000
+
+    credentials = Aws::Credentials.new(Danbooru.config.aws_access_key_id, Danbooru.config.aws_secret_access_key)
+    Aws.config.update({
+      region: "us-east-1",
+      credentials: credentials
+    })
+    client = Aws::S3::Client.new
+    bucket = Danbooru.config.aws_s3_bucket_name
+
+    Post.where("id >= ? and id <= ?", min_id, max_id).find_each do |post|
+      key = "preview/" + File.basename(post.preview_file_path)
+      begin
+        client.restore_object(
+          bucket: bucket,
+          key: key,
+          restore_request: {
+            days: 1,
+            glacier_job_parameters: {
+              tier: "Bulk"
+            }
+          }
+        )
+        puts "restored #{post.id}"
+      rescue Aws::S3::Errors::InvalidObjectState
+        puts "already glaciered #{post.id}"
+      rescue Aws::S3::Errors::NoSuchKey
+        puts "missing #{post.id}"
+      rescue Aws::S3::Errors::RestoreAlreadyInProgress
+        puts "already restoring #{post.id}"
+      end
+    end
+  end
+
   desc "Redownload an image from Pixiv"
   task :download_pixiv => :environment do
     post_id = ENV["id"]
@@ -41,16 +104,7 @@ namespace :images do
     upload.generate_resizes(post.file_path)
     post.distribute_files
   end
-  
-  desc "Finds advertisement images that don't exist"
-  task :find_missing_ads => :environment do
-    Advertisement.where("status = 'active'").each do |ad|
-      if !File.exists?(ad.image_path)
-        puts ad.image_path
-      end
-    end
-  end
-  
+    
   desc "Generate thumbnail-sized images of posts"
   task :generate_preview => :environment do
     Post.where("image_width > ?", Danbooru.config.small_image_width).find_each do |post|

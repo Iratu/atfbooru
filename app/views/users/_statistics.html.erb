@@ -25,7 +25,7 @@
       <% if user.is_banned? && user.recent_ban %>
         <tr>
           <th>Ban reason</th>
-          <td><%= format_text presenter.ban_reason %></td>
+          <td><%= format_text presenter.ban_reason, :ragel => true %></td>
         </tr>
       <% end %>
 
@@ -58,7 +58,7 @@
         <th>Post Changes</th>
         <td>
           <%= presenter.post_version_count(self) %>
-          <% if CurrentUser.is_janitor? %>
+          <% if CurrentUser.is_moderator? && UserRevert.can_revert?(user)%>
             [<%= link_to "revert all", new_user_revert_path(user_id: user.id) %>]
           <% end %>
         </td>
@@ -84,10 +84,12 @@
         <td><%= presenter.artist_commentary_version_count(self) %></td>
       </tr>
 
-      <tr>
-        <th>Pool Changes</th>
-        <td><%= presenter.pool_version_count(self) %></td>
-      </tr>
+      <% if PoolArchive.enabled? %>
+        <tr>
+          <th>Pool Changes</th>
+          <td><%= presenter.pool_version_count(self) %></td>
+        </tr>
+      <% end %>
 
       <tr>
         <th>Forum Posts</th>
@@ -109,9 +111,7 @@
           <th>Appeals</th>
           <td><%= presenter.appeal_count(self) %></td>
         </tr>
-      <% end %>
 
-      <% if CurrentUser.user.id == user.id || CurrentUser.is_moderator? %>
         <tr>
           <th>Flags</th>
           <td><%= presenter.flag_count(self) %></td>
@@ -122,36 +122,52 @@
         <th>Feedback</th>
         <td><%= presenter.feedbacks(self) %></td>    </tbody>
       </tr>
-
-      <tr>
-        <th>Subscriptions</th>
-        <td>
-          <% presenter.subscriptions.each do |subscription| %>
-            <p>
-              <strong><%= link_to subscription.pretty_name, posts_path(:tags => "sub:#{user.name}:#{subscription.name}") %></strong>
-              &ndash;
-              <%= presenter.tag_links_for_subscription(self, subscription) %>
-            </p>
-          <% end %>
-        </td>
-      </tr>
       
-      <% if CurrentUser.is_moderator? && presenter.previous_names.present? %>
+      <% if presenter.previous_names(self).present? %>
         <tr>
           <th>Previous Names</th>
-          <td><%= presenter.previous_names %></td>
+          <td><%= presenter.previous_names(self) %></td>
         </tr>
       <% end %>
 
-      <% if CurrentUser.user.id == user.id %>
+      <% if CurrentUser.id == user.id %>
+        <% if CurrentUser.has_saved_searches? %>
+          <tr>
+            <th>Saved Searches</th>
+            <td>
+              <% SavedSearch.labels_for(CurrentUser.user.id).each do |label| %>
+                <%= link_to label, posts_path(tags: "search:#{label}") %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+
+        <tr>
+          <th>Subscriptions</th>
+          <td>
+            <% presenter.subscriptions.each do |subscription| %>
+              <p>
+                <strong><%= link_to subscription.pretty_name, posts_path(:tags => "sub:#{user.name}:#{subscription.name}") %></strong>
+                &ndash;
+                <%= presenter.tag_links_for_subscription(self, subscription) %>
+              </p>
+            <% end %>
+          </td>
+        </tr>
+
         <tr>
           <th>API Key</th>
           <td>
-            <% if CurrentUser.user.api_key %>
-              <%= CurrentUser.user.api_key.key %>
-            <% else %>
-              <%= link_to "Generate key", new_api_key_path %>
-            <% end %>
+            <%= link_to (CurrentUser.api_key ? "View" : "Generate"), user_api_key_path(CurrentUser.user) %>
+            (<%= link_to "help", wiki_pages_path(title: "help:api") %>)
+          </td>
+        </tr>
+
+        <tr>
+          <th>API Limits</th>
+          <td>
+            <%= CurrentUser.user.remaining_api_limit %>
+            / <%= CurrentUser.user.api_burst_limit %> <span class="hint">(may not be up to date)</span>
           </td>
         </tr>
       <% end %>

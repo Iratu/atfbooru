@@ -1,7 +1,6 @@
 class DmailsController < ApplicationController
   respond_to :html, :xml, :json
   before_filter :member_only
-  rescue_from User::PrivilegeError, :with => :access_denied
 
   def new
     if params[:respond_to_id]
@@ -9,7 +8,7 @@ class DmailsController < ApplicationController
       check_privilege(parent)
       @dmail = parent.build_response(:forward => params[:forward])
     else
-      @dmail = Dmail.new(params[:dmail])
+      @dmail = Dmail.new(create_params)
     end
 
     respond_with(@dmail)
@@ -39,7 +38,7 @@ class DmailsController < ApplicationController
   end
 
   def create
-    @dmail = Dmail.create_split(params[:dmail].merge(:creator_ip_addr => request.remote_ip))
+    @dmail = Dmail.create_split(create_params)
     respond_with(@dmail)
   end
 
@@ -65,5 +64,9 @@ private
     if !dmail.visible_to?(CurrentUser.user, params[:key])
       raise User::PrivilegeError
     end
+  end
+
+  def create_params
+    params.fetch(:dmail, {}).permit(:title, :body, :to_name, :to_id)
   end
 end

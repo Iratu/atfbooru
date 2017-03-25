@@ -14,15 +14,15 @@ class Post < ActiveRecord::Base
   before_validation :parse_pixiv_id
   before_validation :blank_out_nonexistent_parents
   before_validation :remove_parent_loops
-  validates_uniqueness_of :md5
+  validates_uniqueness_of :md5, :on => :create
   validates_inclusion_of :rating, in: %w(s q e), message: "rating must be s, q, or e"
+  validate :tag_names_are_valid
   validate :post_is_not_its_own_parent
   validate :updater_can_change_rating
   before_save :update_tag_post_counts
   before_save :set_tag_counts
   before_save :set_pool_category_pseudo_tags
   before_create :autoban
-  after_create :update_iqdb_async
   after_save :create_version
   after_save :update_parent_on_save
   after_save :apply_post_metatags
@@ -30,6 +30,7 @@ class Post < ActiveRecord::Base
   after_destroy :remove_iqdb_async
   after_destroy :delete_files
   after_destroy :delete_remote_files
+  after_commit :update_iqdb_async, :on => :create
   after_commit :notify_pubsub
 
   belongs_to :updater, :class_name => "User"
@@ -41,10 +42,9 @@ class Post < ActiveRecord::Base
   has_one :pixiv_ugoira_frame_data, :class_name => "PixivUgoiraFrameData", :dependent => :destroy
   has_many :flags, :class_name => "PostFlag", :dependent => :destroy
   has_many :appeals, :class_name => "PostAppeal", :dependent => :destroy
-  has_many :versions, lambda {order("post_versions.updated_at ASC, post_versions.id ASC")}, :class_name => "PostVersion", :dependent => :destroy
   has_many :votes, :class_name => "PostVote", :dependent => :destroy
   has_many :notes, :dependent => :destroy
-  has_many :comments, lambda {order("comments.id")}, :dependent => :destroy
+  has_many :comments, lambda {includes(:creator, :updater).order("comments.id")}, :dependent => :destroy
   has_many :children, lambda {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
   has_many :favorites, :dependent => :destroy
@@ -105,12 +105,20 @@ class Post < ActiveRecord::Base
     end
 
     def file_url
-      "/data/#{seo_tag_string}#{file_path_prefix}#{md5}.#{file_ext}"
+       if Danbooru.config.use_s3_proxy?(self)
+         "/cached/data/#{seo_tag_string}#{file_path_prefix}#{md5}.#{file_ext}"
+       else
+         "/data/#{seo_tag_string}#{file_path_prefix}#{md5}.#{file_ext}"
+       end
     end
 
     def large_file_url
       if has_large?
-        "/data/sample/#{seo_tag_string}#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
+        if Danbooru.config.use_s3_proxy?(self)
+          "/cached/data/sample/#{seo_tag_string}#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
+        else
+          "/data/sample/#{seo_tag_string}#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
+        end
       else
         file_url
       end
@@ -173,7 +181,7 @@ class Post < ActiveRecord::Base
     end
     
     def is_animated_png?
-      if file_ext =~ /png/i
+      if file_ext =~ /png/i && File.exists?(file_path)
         apng = APNGInspector.new(file_path)
         apng.inspect!
         return apng.animated?
@@ -332,7 +340,7 @@ class Post < ActiveRecord::Base
       PostApproval.create(user_id: CurrentUser.id, post_id: id)
 
       if is_deleted_was == true
-        ModAction.create(:description => "undeleted post ##{id}")
+        ModAction.log("undeleted post ##{id}")
       end
 
       save!
@@ -531,10 +539,6 @@ class Post < ActiveRecord::Base
       @tag_array_was ||= Tag.scan_tags(tag_string_was)
     end
 
-    def increment_tag_post_counts
-      Tag.where(:name => tag_array).update_all("post_count = post_count + 1") if tag_array.any?
-    end
-
     def decrement_tag_post_counts
       Tag.where(:name => tag_array).update_all("post_count = post_count - 1") if tag_array.any?
     end
@@ -632,6 +636,7 @@ class Post < ActiveRecord::Base
       normalized_tags = %w(tagme) if normalized_tags.empty?
       normalized_tags = TagAlias.to_aliased(normalized_tags)
       normalized_tags = add_automatic_tags(normalized_tags)
+      normalized_tags = normalized_tags + TagImplication.automatic_tags_for(normalized_tags)
       normalized_tags = TagImplication.with_descendants(normalized_tags)
 	  normalized_tags = check_tagme(normalized_tags)
       normalized_tags.sort!
@@ -711,10 +716,6 @@ class Post < ActiveRecord::Base
       if is_ugoira?
         tags << "ugoira"
       end
-
-      characters = tags.grep(/\A(.+)_\(cosplay\)\Z/) { $1 }
-      tags += characters
-      tags << "cosplay" if characters.present?
 
       return tags
     end
@@ -842,10 +843,6 @@ class Post < ActiveRecord::Base
       set_tag_string((tag_array - Array(tag)).join(" "))
     end
 
-    def has_dup_tag?
-      has_tag?("duplicate")
-    end
-
     def tag_categories
       @tag_categories ||= Tag.categories_for(tag_array)
     end
@@ -971,14 +968,12 @@ class Post < ActiveRecord::Base
     rescue PostVote::Error
     end
 
-    def favorited_user_ids
-      fav_string.scan(/\d+/)
-    end
-
+    # users who favorited this post, ordered by users who favorited it first
     def favorited_users
-      favorited_user_ids.map {|id| User.find(id)}.select do |x|
-        !x.hide_favorites?
-      end
+      favorited_user_ids = fav_string.scan(/\d+/).map(&:to_i)
+      visible_users = User.find(favorited_user_ids).reject(&:hide_favorites?)
+      ordered_users = visible_users.index_by(&:id).slice(*favorited_user_ids).values
+      ordered_users
     end
 
     def favorite_groups(active_id=nil)
@@ -1088,7 +1083,7 @@ class Post < ActiveRecord::Base
         raise PostVote::Error.new("You have already voted for this post")
       end
 
-      PostVote.create(:post_id => id, :score => score)
+      PostVote.create!(:post_id => id, :score => score)
       reload # PostVote.create modifies our score. Reload to get the new score.
     end
 
@@ -1320,13 +1315,6 @@ class Post < ActiveRecord::Base
       end
     end
 
-    def post_is_not_its_own_parent
-      if !new_record? && id == parent_id
-        errors[:base] << "Post cannot have itself as a parent"
-        false
-      end
-    end
-
     def parent_exists?
       Post.exists?(parent_id)
     end
@@ -1341,6 +1329,12 @@ class Post < ActiveRecord::Base
     def has_visible_children
       has_visible_children?
     end
+
+    def children_ids
+      if has_children?
+        children.map{|p| p.id}.join(' ')
+      end
+    end
   end
 
   module DeletionMethods
@@ -1350,7 +1344,7 @@ class Post < ActiveRecord::Base
         return false
       end
 
-      ModAction.create(:description => "permanently deleted post ##{id}")
+      ModAction.log("permanently deleted post ##{id}")
       delete!(:without_mod_action => true)
       Post.without_timeout do
         give_favorites_to_parent
@@ -1365,12 +1359,12 @@ class Post < ActiveRecord::Base
 
     def ban!
       update_column(:is_banned, true)
-      ModAction.create(:description => "banned post ##{id}")
+      ModAction.log("banned post ##{id}")
     end
 
     def unban!
       update_column(:is_banned, false)
-      ModAction.create(:description => "unbanned post ##{id}")
+      ModAction.log("unbanned post ##{id}")
     end
 
     def delete!(options = {})
@@ -1395,9 +1389,9 @@ class Post < ActiveRecord::Base
 
         unless options[:without_mod_action]
           if options[:reason]
-            ModAction.create(:description => "deleted post ##{id}, reason: #{options[:reason]}")
+            ModAction.log("deleted post ##{id}, reason: #{options[:reason]}")
           else
-            ModAction.create(:description => "deleted post ##{id}")
+            ModAction.log("deleted post ##{id}")
           end
         end
       end
@@ -1419,19 +1413,24 @@ class Post < ActiveRecord::Base
 
       self.is_deleted = false
       self.approver_id = CurrentUser.id
+      flags.each {|x| x.resolve!}
       save
       Post.expire_cache_for_all(tag_array)
-      ModAction.create(:description => "undeleted post ##{id}")
+      ModAction.log("undeleted post ##{id}")
     end
   end
 
   module VersionMethods
+    def versions
+      if PostArchive.enabled?
+        PostArchive.where(post_id: id).order("updated_at ASC, id asc")
+      else
+        raise "Archive service not configured"
+      end
+    end
+
     def create_version(force = false)
       if new_record? || rating_changed? || source_changed? || parent_id_changed? || tag_string_changed? || force
-        if merge_version?
-          delete_previous_version
-        end
-
         create_new_version
       end
     end
@@ -1442,18 +1441,8 @@ class Post < ActiveRecord::Base
     end
 
     def create_new_version
-      CurrentUser.user.increment!(:post_update_count)
-      versions.create(
-        :rating => rating,
-        :source => source,
-        :tags => tag_string,
-        :parent_id => parent_id
-      )
-    end
-
-    def delete_previous_version
-      prev = versions.last
-      prev.destroy
+      User.where(id: CurrentUser.id).update_all("post_update_count = post_update_count + 1")
+      PostArchive.queue(self) if PostArchive.enabled?
     end
 
     def revert_to(target)
@@ -1480,10 +1469,6 @@ class Post < ActiveRecord::Base
   end
 
   module NoteMethods
-    def last_noted_at_as_integer
-      last_noted_at.to_i
-    end
-
     def has_notes?
       last_noted_at.present?
     end
@@ -1525,7 +1510,7 @@ class Post < ActiveRecord::Base
     end
 
     def method_attributes
-      list = super + [:uploader_name, :has_large, :tag_string_artist, :tag_string_character, :tag_string_copyright, :tag_string_general, :has_visible_children]
+      list = super + [:uploader_name, :has_large, :tag_string_artist, :tag_string_character, :tag_string_copyright, :tag_string_general, :has_visible_children, :children_ids]
       if visible?
         list += [:file_url, :large_file_url, :preview_file_url]
       end
@@ -1586,6 +1571,20 @@ class Post < ActiveRecord::Base
   end
 
   module SearchMethods
+    # returns one single post
+    def random
+      key = Digest::MD5.hexdigest(Time.now.to_f.to_s)
+      random_up(key) || random_down(key)
+    end
+
+    def random_up(key)
+      where("md5 < ?", key).reorder("md5 desc").first
+    end
+
+    def random_down(key)
+      where("md5 >= ?", key).reorder("md5 asc").first
+    end
+
     def pending
       where("is_pending = ?", true)
     end
@@ -1606,10 +1605,6 @@ class Post < ActiveRecord::Base
       where("is_deleted = ?", true)
     end
 
-    def commented_before(date)
-      where("last_commented_at < ?", date).order("last_commented_at DESC")
-    end
-
     def has_notes
       where("last_noted_at is not null")
     end
@@ -1624,10 +1619,6 @@ class Post < ActiveRecord::Base
       else
         where("posts.id NOT IN (SELECT pd.post_id FROM post_disapprovals pd WHERE pd.user_id = ?)", CurrentUser.id)
       end
-    end
-
-    def hidden_from_moderation
-      where("id IN (SELECT pd.post_id FROM post_disapprovals pd WHERE pd.user_id = ?)", CurrentUser.id)
     end
 
     def raw_tag_match(tag)
@@ -1646,53 +1637,6 @@ class Post < ActiveRecord::Base
         PostQueryBuilder.new(query).build
       end
     end
-
-    def positive
-      where("score > 1")
-    end
-
-    def negative
-      where("score < -1")
-    end
-
-    def updater_name_matches(name)
-      where("updater_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
-    end
-
-    def after_id(num)
-      if num.present?
-        where("id > ?", num.to_i).reorder("id asc")
-      else
-        where("true")
-      end
-    end
-
-    def before_id(num)
-      if num.present?
-        where("id < ?", num.to_i).reorder("id desc")
-      else
-        where("true")
-      end
-    end
-
-    def search(params)
-      q = where("true")
-      return q if params.blank?
-
-      if params[:before_id].present?
-        q = q.before_id(params[:before_id].to_i)
-      end
-
-      if params[:after_id].present?
-        q = q.after_id(params[:after_id].to_i)
-      end
-
-      if params[:tag_match].present?
-        q = q.tag_match(params[:tag_match])
-      end
-
-      q
-    end
   end
   
   module PixivMethods
@@ -1705,6 +1649,14 @@ class Post < ActiveRecord::Base
     extend ActiveSupport::Concern
 
     module ClassMethods
+      def iqdb_sqs_service
+        SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
+      end
+
+      def iqdb_enabled?
+        Danbooru.config.aws_sqs_iqdb_url.present?
+      end
+
       def remove_iqdb(post_id)
 	    if Danbooru.config.iqdbs_skip_sqs?
 		  remove_image(post_id)
@@ -1779,6 +1731,40 @@ class Post < ActiveRecord::Base
 
 
   end
+
+  module ValidationMethods
+    def post_is_not_its_own_parent
+      if !new_record? && id == parent_id
+        errors[:base] << "Post cannot have itself as a parent"
+        false
+      end
+    end
+
+    def updater_can_change_rating
+      if rating_changed? && is_rating_locked?
+        # Don't forbid changes if the rating lock was just now set in the same update.
+        if !is_rating_locked_changed?
+          errors.add(:rating, "is locked and cannot be changed. Unlock the post first.")
+        end
+      end
+    end
+
+    def tag_names_are_valid
+      # only validate new tags; allow invalid names for tags that already exist.
+      added_tags = tag_array - tag_array_was
+      new_tags = added_tags - Tag.where(name: added_tags).pluck(:name)
+
+      new_tags.each do |name|
+        tag = Tag.new
+        tag.name = name
+        tag.valid?
+
+        tag.errors.messages.each do |attribute, messages|
+          errors[:tag_string] << "tag #{attribute} #{messages.join(';')}"
+        end
+      end
+    end
+  end
   
   include FileMethods
   include ImageMethods
@@ -1799,6 +1785,7 @@ class Post < ActiveRecord::Base
   extend SearchMethods
   include PixivMethods
   include IqdbMethods
+  include ValidationMethods
   include Danbooru::HasBitFlags
 
   BOOLEAN_ATTRIBUTES = %w(
@@ -1852,15 +1839,6 @@ class Post < ActiveRecord::Base
 
     self.tag_string = tags.join(" ")
     save
-  end
-
-  def updater_can_change_rating
-    if rating_changed? && is_rating_locked?
-      # Don't forbid changes if the rating lock was just now set in the same update.
-      if !is_rating_locked_changed?
-        errors.add(:rating, "is locked and cannot be changed. Unlock the post first.")
-      end
-    end
   end
 
   def update_column(name, value)

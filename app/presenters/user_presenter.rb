@@ -44,11 +44,11 @@ class UserPresenter
   end
 
   def posts_for_saved_search_category(category)
-    if category == SavedSearch::UNCATEGORIZED_NAME
-      ids = SavedSearch.post_ids(CurrentUser.user.id)
-    else
-      ids = SavedSearch.post_ids(CurrentUser.user.id, category)
+    if !SavedSearch.enabled?
+      return Post.where("false")
     end
+
+    ids = SavedSearch.post_ids(CurrentUser.user.id, category)
 
     if ids.any?
       arel = Post.where("id in (?)", ids.map(&:to_i)).order("id desc").limit(10)
@@ -81,7 +81,7 @@ class UserPresenter
     if user.can_upload_free?
       return "none"
     end
-    
+
     dcon = [user.deletion_confidence(60), 15].min
     multiplier = (1 - (dcon / 15.0))
     max_count = [(user.base_upload_limit * multiplier).ceil, 5].max
@@ -144,8 +144,8 @@ class UserPresenter
   end
 
   def commented_posts_count(template)
-    count = CurrentUser.without_safe_mode { Post.fast_count("commenter:#{user.name} order:comment") }
-    template.link_to(count, template.posts_path(:tags => "commenter:#{user.name} order:comment"))
+    count = CurrentUser.without_safe_mode { Post.fast_count("commenter:#{user.name}") }
+    template.link_to(count, template.posts_path(:tags => "commenter:#{user.name} order:comment_bumped"))
   end
 
   def post_version_count(template)
@@ -157,7 +157,7 @@ class UserPresenter
   end
 
   def noted_posts_count(template)
-    count = CurrentUser.without_safe_mode { Post.fast_count("noteupdater:#{user.name} order:note") }
+    count = CurrentUser.without_safe_mode { Post.fast_count("noteupdater:#{user.name}") }
     template.link_to(count, template.posts_path(:tags => "noteupdater:#{user.name} order:note"))
   end
 
@@ -178,7 +178,11 @@ class UserPresenter
   end
 
   def pool_version_count(template)
-    template.link_to(user.pool_version_count, template.pool_versions_path(:search => {:updater_id => user.id}))
+    if PoolArchive.enabled?
+      template.link_to(user.pool_version_count, template.pool_versions_path(:search => {:updater_id => user.id}))
+    else
+      "N/A"
+    end
   end
 
   def inviter(template)
@@ -217,15 +221,15 @@ class UserPresenter
     end
   end
 
-  def saved_search_categories
+  def saved_search_labels
     if CurrentUser.user.id == user.id
-      user.unique_saved_search_categories
+      SavedSearch.labels_for(CurrentUser.user.id)
     else
       []
     end
   end
   
-  def previous_names
-    UserNameChangeRequest.approved.where("user_id = ?", user.id).map(&:original_name).join(", ")
+  def previous_names(template)
+    user.user_name_change_requests.map { |req| template.link_to req.original_name, req }.join(", ").html_safe
   end
 end

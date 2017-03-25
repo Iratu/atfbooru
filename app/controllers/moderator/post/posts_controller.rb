@@ -3,7 +3,7 @@ module Moderator
     class PostsController < ApplicationController
       before_filter :approver_only, :only => [:delete, :undelete, :move_favorites, :ban, :unban, :confirm_delete, :confirm_move_favorites, :confirm_ban]
       #before_filter :moderator_only, :only => [:expunge]
-      rescue_from ::PostFlag::Error, ::Post::ApprovalError, :with => :rescue_exception
+      skip_before_filter :api_check
 
       def confirm_delete
         @post = ::Post.find(params[:id])

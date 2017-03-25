@@ -1,10 +1,16 @@
 class Tag < ActiveRecord::Base
   COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 1000
-  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote"
+  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype"
   SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm"
-  attr_accessible :category, :as => [:moderator, :janitor, :gold, :member, :anonymous, :default, :builder, :admin]
+  attr_accessible :category, :as => [:moderator, :janitor, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :is_locked, :as => [:moderator, :admin]
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
+  has_one :antecedent_alias, lambda {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
+  has_many :consequent_aliases, lambda {active}, :class_name => "TagAlias", :foreign_key => "consequent_name", :primary_key => "name"
+  has_many :antecedent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "antecedent_name", :primary_key => "name"
+  has_many :consequent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "consequent_name", :primary_key => "name"
+
+  validates :name, uniqueness: true, tag_name: true, on: :create
 
   module ApiMethods
     def to_legacy_json
@@ -79,12 +85,6 @@ class Tag < ActiveRecord::Base
     end
   end
 
-  module ViewCountMethods
-    def increment_view_count(name)
-      Cache.incr("tvc:#{Cache.sanitize(name)}")
-    end
-  end
-
   module CategoryMethods
     module ClassMethods
       def categories
@@ -106,9 +106,15 @@ class Tag < ActiveRecord::Base
       end
 
       def categories_for(tag_names, options = {})
-        Array(tag_names).inject({}) do |hash, tag_name|
-          hash[tag_name] = category_for(tag_name, options)
-          hash
+        if options[:disable_caching]
+          Array(tag_names).inject({}) do |hash, tag_name|
+            hash[tag_name] = select_category_for(tag_name)
+            hash
+          end
+        else
+          Cache.get_multi(Array(tag_names), "tc") do |tag|
+            Tag.select_category_for(tag)
+          end
         end
       end
     end
@@ -185,7 +191,7 @@ class Tag < ActiveRecord::Base
 
   module NameMethods
     def normalize_name(name)
-      name.mb_chars.downcase.tr(" ", "_").gsub(/\A[-~]+/, "").gsub(/\*/, "").to_s
+      name.to_s.mb_chars.downcase.strip.tr(" ", "_").to_s
     end
 
     def find_or_create_by_name(name, options = {})
@@ -233,13 +239,13 @@ class Tag < ActiveRecord::Base
     def scan_query(query)
       tagstr = normalize(query)
       list = tagstr.scan(/-?source:".*?"/) || []
-      list + tagstr.gsub(/-?source:".*?"/, "").scan(/\S+/).uniq
+      list + tagstr.gsub(/-?source:".*?"/, "").scan(/[^[:space:]]+/).uniq
     end
 
     def scan_tags(tags, options = {})
       tagstr = normalize(tags)
       list = tagstr.scan(/source:".*?"/) || []
-      list += tagstr.gsub(/source:".*?"/, "").gsub(/[%,]/, "").scan(/\S+/).uniq
+      list += tagstr.gsub(/source:".*?"/, "").scan(/[^[:space:]]+/).uniq
       if options[:strip_metatags]
         list = list.map {|x| x.sub(/^[-~]/, "")}
       end
@@ -487,11 +493,13 @@ class Tag < ActiveRecord::Base
 
           when "-favgroup"
             favgroup_id = FavoriteGroup.name_to_id($2)
-            q[:favgroup_neg] = favgroup_id
+            q[:favgroups_neg] ||= []
+            q[:favgroups_neg] << favgroup_id
 
           when "favgroup"
             favgroup_id = FavoriteGroup.name_to_id($2)
-            q[:favgroup] = favgroup_id
+            q[:favgroups] ||= []
+            q[:favgroups] << favgroup_id
 
           when "-fav"
             q[:tags][:exclude] << "fav:#{User.name_to_id($2)}"
@@ -604,6 +612,12 @@ class Tag < ActiveRecord::Base
           when "status"
             q[:status] = $2.downcase
 
+          when "filetype"
+            q[:filetype] = $2.downcase
+
+          when "-filetype"
+            q[:filetype_neg] = $2.downcase
+
           when "pixiv_id", "pixiv"
             q[:pixiv_id] = parse_helper($2)
 
@@ -683,20 +697,6 @@ class Tag < ActiveRecord::Base
     def related_tag_array
       update_related_if_outdated
       related_tags.to_s.split(/ /).in_groups_of(2)
-    end
-  end
-
-  module SuggestionMethods
-    def find_suggestions(query)
-      query_tokens = query.split(/_/)
-
-      if query_tokens.size == 2
-        search_for = query_tokens.reverse.join("_").to_escaped_for_sql_like
-      else
-        search_for = "%" + query.to_escaped_for_sql_like + "%"
-      end
-
-      Tag.where(["name LIKE ? ESCAPE E'\\\\' AND post_count > 0 AND name <> ?", search_for, query]).order("post_count DESC").limit(6).select("name").map(&:name).sort
     end
   end
 
@@ -781,12 +781,10 @@ class Tag < ActiveRecord::Base
 
   include ApiMethods
   include CountMethods
-  extend ViewCountMethods
   include CategoryMethods
   extend StatisticsMethods
   extend NameMethods
   extend ParseMethods
   include RelationMethods
-  extend SuggestionMethods
   extend SearchMethods
 end

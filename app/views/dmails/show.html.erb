@@ -9,13 +9,19 @@
         <li><strong>Recipient</strong>: <%= link_to_user @dmail.to %></li>
         <li><strong>Date</strong>: <%= compact_time(@dmail.created_at) %></li>
         <% if CurrentUser.user.is_moderator? %>
-          <li><strong>Sender IP</strong>: <%= @dmail.creator_ip_addr %></li>
+          <li><strong>Sender IP</strong>: <%= link_to_ip @dmail.creator_ip_addr %></li>
         <% end %>
       </ul>
 
       <h3>Body</h3>
       <div class="prose">
         <%= format_text(@dmail.body, :ragel => true) %>
+
+        <% if @dmail.is_automated? %>
+          <p class="tn">
+            This is an automated message. Responses will not be seen. If you have any questions either message a moderator or ask in the forum.
+          </p>
+        <% end %>
       </div>
 
       <p>

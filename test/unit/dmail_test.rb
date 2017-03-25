@@ -6,7 +6,7 @@ class DmailTest < ActiveSupport::TestCase
       MEMCACHE.flush_all
       @user = FactoryGirl.create(:user)
       CurrentUser.user = @user
-      CurrentUser.ip_addr = "127.0.0.1"
+      CurrentUser.ip_addr = "1.2.3.4"
       ActionMailer::Base.delivery_method = :test
       ActionMailer::Base.perform_deliveries = true
       ActionMailer::Base.deliveries = []
@@ -112,6 +112,11 @@ class DmailTest < ActiveSupport::TestCase
       end
     end
 
+    should "record the creator's ip addr" do
+      dmail = FactoryGirl.create(:dmail, owner: @user)
+      assert_equal(CurrentUser.ip_addr, dmail.creator_ip_addr.to_s)
+    end
+
     should "send an email if the user wants it" do
       user = FactoryGirl.create(:user, :receive_email_notifications => true)
       assert_difference("ActionMailer::Base.deliveries.size", 1) do
@@ -146,6 +151,27 @@ class DmailTest < ActiveSupport::TestCase
 
       recipient.reload
       assert(!recipient.has_mail?)
+    end
+
+    context "that is automated" do
+      setup do
+        @bot = FactoryGirl.create(:user)
+        Danbooru.config.stubs(:system_user).returns(@bot)
+      end
+
+      should "only create a copy for the recipient" do
+        Dmail.create_automated(to: @user, title: "test", body: "test")
+
+        assert @user.dmails.exists?(from: @bot, title: "test", body: "test")
+        assert !@bot.dmails.exists?(from: @bot, title: "test", body: "test")
+      end
+
+      should "fail gracefully if recipient doesn't exist" do
+        assert_nothing_raised do
+          dmail = Dmail.create_automated(to_name: "this_name_does_not_exist", title: "test", body: "test")
+          assert_equal(["can't be blank"], dmail.errors[:to_id])
+        end
+      end
     end
   end
 end

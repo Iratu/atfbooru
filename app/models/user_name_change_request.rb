@@ -3,12 +3,8 @@ class UserNameChangeRequest < ActiveRecord::Base
   validates_inclusion_of :status, :in => %w(pending approved rejected)
   belongs_to :user
   belongs_to :approver, :class_name => "User"
-  validate :uniqueness_of_desired_name
   validate :not_limited, :on => :create
-  validates_length_of :desired_name, :within => 2..100, :on => :create
-  validates_format_of :desired_name, :with => /\A[^\s:]+\Z/, :on => :create, :message => "cannot have whitespace or colons"
-  before_validation :normalize_name
-  # after_create :notify_admins
+  validates :desired_name, user_name: true
   attr_accessible :status, :user_id, :original_name, :desired_name, :change_reason, :rejection_reason, :approver_id
   
   def self.pending
@@ -18,6 +14,16 @@ class UserNameChangeRequest < ActiveRecord::Base
   def self.approved
     where(:status => "approved")
   end
+
+  def self.visible(viewer = CurrentUser.user)
+    if viewer.is_admin?
+      all
+    elsif viewer.is_member?
+      joins(:user).merge(User.undeleted).where("user_name_change_requests.status = 'approved' OR user_name_change_requests.user_id = ?", viewer.id)
+    else
+      none
+    end
+  end
   
   def rejected?
     status == "rejected"
@@ -26,36 +32,32 @@ class UserNameChangeRequest < ActiveRecord::Base
   def approved?
     status == "approved"
   end
+
+  def pending?
+    status == "pending"
+  end
   
-  def normalize_name
-    self.desired_name = desired_name.strip.gsub(/ /, "_")
+  def desired_name=(name)
+    super(User.normalize_name(name))
   end
   
   def feedback
     UserFeedback.for_user(user_id).order("id desc")
   end
   
-  def notify_admins
-    title = "#{original_name} is requesting a name change to #{desired_name}"
-    body = title + "\n\n\"See request\":/user_name_change_requests/#{id}"
-    User.admins.find_each do |user|
-      Dmail.create_split(:title => title, :body => body, :to_id => user.id)
-    end
-  end
-  
   def approve!
     update_attributes(:status => "approved", :approver_id => CurrentUser.user.id)
     user.update_attribute(:name, desired_name)
     body = "Your name change request has been approved. Be sure to log in with your new user name."
-    Dmail.create_split(:title => "Name change request approved", :body => body, :to_id => user_id)
+    Dmail.create_automated(:title => "Name change request approved", :body => body, :to_id => user_id)
     UserFeedback.create(:user_id => user_id, :category => "neutral", :body => "Name changed from #{original_name} to #{desired_name}")
-    ModAction.create(:description => "Name changed from #{original_name} to #{desired_name}")
+    ModAction.log("Name changed from #{original_name} to #{desired_name}")
   end
   
   def reject!(reason)
     update_attributes(:status => "rejected", :rejection_reason => reason)
     body = "Your name change request has been rejected for the following reason: #{rejection_reason}"
-    Dmail.create_split(:title => "Name change request rejected", :body => body, :to_id => user_id)
+    Dmail.create_automated(:title => "Name change request rejected", :body => body, :to_id => user_id)
   end
   
   def not_limited
@@ -66,13 +68,12 @@ class UserNameChangeRequest < ActiveRecord::Base
       return true
     end
   end
-  
-  def uniqueness_of_desired_name
-    if User.find_by_name(desired_name)
-      errors.add(:desired_name, "already exists")
-      return false
+
+  def hidden_attributes
+    if CurrentUser.is_admin? || user == CurrentUser.user
+      []
     else
-      return true
+      super + [:change_reason, :rejection_reason]
     end
   end
 end

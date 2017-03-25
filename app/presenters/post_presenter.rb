@@ -88,11 +88,17 @@ class PostPresenter < Presenter
       data-file-url="#{post.file_url}"
       data-large-file-url="#{post.large_file_url}"
       data-preview-file-url="#{post.preview_file_url}"
+      data-source="#{h(post.source)}"
+      data-normalized-source="#{h(post.normalized_source)}"
     }.html_safe
   end
 
   def initialize(post)
     @post = post
+  end
+
+  def tag_set_presenter
+    @tag_set_presenter ||= TagSetPresenter.new(@post.tag_array)
   end
 
   def preview_html
@@ -170,13 +176,15 @@ class PostPresenter < Presenter
   end
 
   def tag_list_html(template, options = {})
-    @tag_set_presenter ||= TagSetPresenter.new(@post.tag_array)
-    @tag_set_presenter.tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
+    tag_set_presenter.tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
   end
 
   def split_tag_list_html(template, options = {})
-    @tag_set_presenter ||= TagSetPresenter.new(@post.tag_array)
-    @tag_set_presenter.split_tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
+    tag_set_presenter.split_tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
+  end
+
+  def inline_tag_list_html(template)
+    tag_set_presenter.inline_tag_list(template)
   end
 
   def has_nav_links?(template)

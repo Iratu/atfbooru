@@ -19,16 +19,19 @@ class PostsControllerTest < ActionController::TestCase
     context "for api calls" do
       context "passing the api limit" do
         setup do
-          User.any_instance.stubs(:api_hourly_limit).returns(5)
+          @post = FactoryGirl.create(:post)
+          @bucket = TokenBucket.create(user_id: @user.id, token_count: 5, last_touched_at: Time.now)
+          User.any_instance.stubs(:api_burst_limit).returns(5)
+          User.any_instance.stubs(:api_regen_multiplier).returns(0)
         end
         
         should "work" do
-          CurrentUser.user.api_hourly_limit.times do
-            get :index, {:format => "json", :login => @user.name, :api_key => @user.api_key.key}
+          @user.api_burst_limit.times do
+            post :update, {:format => "json", :id => @post.id, :post => {:rating => "q"}, :login => @user.name, :api_key => @user.api_key.key}
             assert_response :success
           end
 
-          get :index, {:format => "json", :login => @user.name, :api_key => @user.api_key.key}
+          post :update, {:format => "json", :id => @post.id, :post => {:rating => "q"}, :login => @user.name, :api_key => @user.api_key.key}
           assert_response 429
         end
       end
@@ -86,6 +89,32 @@ class PostsControllerTest < ActionController::TestCase
           assert_response :success
         end
       end
+
+      context "with an md5 param" do
+        should "render" do
+          get :index, { md5: @post.md5 }
+          assert_redirected_to(@post)
+        end
+      end
+    end
+
+    context "show_seq action" do
+      should "render" do
+        posts = FactoryGirl.create_list(:post, 3)
+
+        get :show_seq, { seq: "prev", id: posts[1].id }
+        assert_redirected_to(posts[2])
+
+        get :show_seq, { seq: "next", id: posts[1].id }
+        assert_redirected_to(posts[0])
+      end
+    end
+
+    context "random action" do
+      should "render" do
+        get :random, { tags: "aaaa" }
+        assert_redirected_to(post_path(@post, tags: "aaaa"))
+      end
     end
 
     context "show action" do
@@ -115,12 +144,12 @@ class PostsControllerTest < ActionController::TestCase
 
     context "revert action" do
       setup do
-        @post.stubs(:merge_version?).returns(false)
+        PostArchive.sqs_service.stubs(:merge?).returns(false)
         @post.update_attributes(:tag_string => "zzz")
       end
 
       should "work" do
-        @version = @post.versions(true).first
+        @version = @post.versions.first
         assert_equal("aaaa", @version.tags)
         post :revert, {:id => @post.id, :version_id => @version.id}, {:user_id => @user.id}
         assert_redirected_to post_path(@post)

@@ -24,7 +24,7 @@
       </div>
 
       <% @posts.each do |post| %>
-        <div id="post-<%= post.id %>" class="post mod-queue-preview <%= PostPresenter.preview_class(post) %>" <%= PostPresenter.data_attributes(post) %> data-has-dup="<%= post.has_dup_tag? %>">
+        <div id="post-<%= post.id %>" class="post mod-queue-preview <%= PostPresenter.preview_class(post) %>" <%= PostPresenter.data_attributes(post) %>>
           <aside>
             <%= link_to(image_tag(post.preview_file_url), post_path(post), :target => "_blank") %>
           </aside>
@@ -65,7 +65,7 @@
                 <strong>Hidden</strong>: <%= render "post_disapprovals/compact_counts", :disapprovals => post.disapprovals, :post => post %>
               </li>
               <li><strong>Source</strong>: <%= post.source %></li>
-              <li><strong>Tags</strong>: <%= post.tag_string %></li>
+              <li><strong>Tags</strong>: <%= post.presenter.inline_tag_list_html(self) %></li>
             </ul>
           </section>
         </div>

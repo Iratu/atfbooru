@@ -4,10 +4,10 @@ class BulkRevert
 
   class ConstraintTooGeneralError < Exception ; end
 
-  def self.process(constraints)
-    obj = BulkRevert.new(constraints)
+  def process
+    ModAction.log("#{CurrentUser.name} processed bulk revert for #{constraints.inspect}")
 
-    obj.find_post_versions.order("updated_at, id").each do |version|
+    find_post_versions.order("updated_at, id").each do |version|
       version.undo!
     end
   end
@@ -25,7 +25,7 @@ class BulkRevert
   end
 
   def find_post_versions
-    q = PostVersion.where("true")
+    q = PostArchive.where("true")
 
     if constraints[:user_name]
       constraints[:user_id] = User.find_by_name(constraints[:user_name]).try(:id)

@@ -7,9 +7,7 @@
     this.initialize_post_previews();
 
     if ($("#c-posts").length) {
-      if (Danbooru.meta("enable-js-navigation") === "true") {
-        this.initialize_shortcuts();
-      }
+      this.initialize_shortcuts();
     }
 
     if ($("#c-posts").length && $("#a-index").length) {
@@ -122,10 +120,6 @@
 
     $tag_string.css({"resize": "none", "width": "100%"});
     $tag_string.focus().selectEnd().height($tag_string[0].scrollHeight);
-
-    var $image = $("#c-uploads .ui-wrapper #image, #c-uploads .ui-wrapper:has(#image)");
-    $image.height($image.resizable("option", "maxHeight"));
-    $image.width($image.resizable("option", "maxWidth"));
   }
 
   Danbooru.Post.close_edit_dialog = function(e, ui) {
@@ -146,7 +140,7 @@
     });
   }
 
-  Danbooru.Post.nav_prev = function() {
+  Danbooru.Post.nav_prev = function(e) {
     if ($("#search-seq-nav").length) {
       var href = $("#search-seq-nav a[rel~=prev]").attr("href");
       if (href) {
@@ -158,9 +152,11 @@
         location.href = href;
       }
     }
+
+    e.preventDefault();
   }
 
-  Danbooru.Post.nav_next = function() {
+  Danbooru.Post.nav_next = function(e) {
     if ($("#search-seq-nav").length) {
       var href = $("#search-seq-nav a[rel~=next]").attr("href");
       location.href = href;
@@ -170,27 +166,22 @@
         location.href = href;
       }
     }
+
+    e.preventDefault();
   }
 
   Danbooru.Post.initialize_shortcuts = function() {
     if ($("#a-show").length) {
-      $(document).bind("keydown", "e", function(e) {
+      Danbooru.keydown("e", "edit", function(e) {
         $("#post-edit-link").trigger("click");
         $("#post_tag_string").focus();
         e.preventDefault();
       });
 
-      $(document).bind("keydown", "a", function(e) {
-        Danbooru.Post.nav_prev();
-        e.preventDefault();
-      });
+      Danbooru.keydown("a", "prev_page", Danbooru.Post.nav_prev);
+      Danbooru.keydown("d", "next_page", Danbooru.Post.nav_next);
 
-      $(document).bind("keydown", "d", function(e) {
-        Danbooru.Post.nav_next();
-        e.preventDefault();
-      });
-
-      $(document).bind("keydown", "f", function(e) {
+      Danbooru.keydown("f", "favorite", function(e) {
         if ($("#add-to-favorites").is(":visible")) {
           $("#add-to-favorites").click();
         } else {
@@ -336,8 +327,8 @@
       e.preventDefault();
     });
 
-    if ($("#image-resize-notice").length && Danbooru.meta("enable-js-navigation") === "true") {
-      $(document).bind("keydown", "v", function(e) {
+    if ($("#image-resize-notice").length) {
+      Danbooru.keydown("v", "resize", function(e) {
         if ($("#image-resize-notice").is(":visible")) {
           $("#image-resize-link").click();
         } else {
@@ -361,33 +352,35 @@
     }
   }
 
-  Danbooru.Post.initialize_post_image_resize_to_window_link = function() {
-    $("#image-resize-to-window-link").click(function(e) {
-      var $img = $("#image");
-
-      if (($img.data("scale-factor") === 1) || ($img.data("scale-factor") === undefined)) {
-        if ($(window).width() > 660) {
-          var client_width = $(window).width() - $("#sidebar").width() - 75;
-        } else {
-          var client_width = $(window).width() - 30;
-        }
-        var client_height = $(window).height();
-
-        if ($img.width() > client_width) {
-          var ratio = client_width / $img.data("original-width");
-          $img.data("scale-factor", ratio);
-          $img.css("width", $img.data("original-width") * ratio);
-          $img.css("height", $img.data("original-height") * ratio);
-          Danbooru.Post.resize_ugoira_controls();
-        }
+  Danbooru.Post.resize_image_to_window = function($img) {
+    if (($img.data("scale-factor") === 1) || ($img.data("scale-factor") === undefined)) {
+      if ($(window).width() > 660) {
+        var client_width = $(window).width() - $("#sidebar").width() - 75;
       } else {
-        $img.data("scale-factor", 1);
-        $img.width($img.data("original-width"));
-        $img.height($img.data("original-height"));
+        var client_width = $(window).width() - 30;
+      }
+      var client_height = $(window).height();
+
+      if ($img.width() > client_width) {
+        var ratio = client_width / $img.data("original-width");
+        $img.data("scale-factor", ratio);
+        $img.css("width", $img.data("original-width") * ratio);
+        $img.css("height", $img.data("original-height") * ratio);
         Danbooru.Post.resize_ugoira_controls();
       }
+    } else {
+      $img.data("scale-factor", 1);
+      $img.width($img.data("original-width"));
+      $img.height($img.data("original-height"));
+      Danbooru.Post.resize_ugoira_controls();
+    }
 
-      Danbooru.Note.Box.scale_all();
+    Danbooru.Note.Box.scale_all();
+  }
+
+  Danbooru.Post.initialize_post_image_resize_to_window_link = function() {
+    $("#image-resize-to-window-link").click(function(e) {
+      Danbooru.Post.resize_image_to_window($("#image"));
       e.preventDefault();
     });
   }
@@ -550,18 +543,20 @@
   }
 
   Danbooru.Post.initialize_saved_searches = function() {
-    $("#saved_search_category").autocomplete({
-      minLength: 1,
+    $("#saved_search_labels").autocomplete({
+      minLength: 2,
       source: function(req, resp) {
         $.ajax({
-          url: "/saved_searches/categories.json",
+          url: "/saved_searches/labels.json",
+          data: {
+            label: req.term
+          },
           method: "get",
           success: function(data) {
             resp($.map(data, function(saved_search) {
-              var category = saved_search.category === null ? "Uncategorized" : saved_search.category;
               return {
-                label: category,
-                value: category
+                label: saved_search.replace(/_/g, " "),
+                value: saved_search
               };
             }));
           }
@@ -584,8 +579,8 @@
       }
     });
 
-    $("#save-search").click(function() {
-      if (Danbooru.meta("disable-categorized-saved-searches") === "false") {
+    $("#save-search").click(function(e) {
+      if (Danbooru.meta("disable-labeled-saved-searches") === "false") {
         $("#save-search-dialog").dialog("open");
       } else {
         $.post(
@@ -595,6 +590,18 @@
           }
         );
       }
+
+      e.preventDefault();
+    });
+
+    $("#search-dropdown #wiki-search").click(function(e) {
+      window.location.href = "/wiki_pages?search%5Btitle%5D=" + encodeURIComponent($("#tags").val());
+      e.preventDefault();
+    });
+
+    $("#search-dropdown #artist-search").click(function(e) {
+      window.location.href = "/artists?search%5Bname%5D=" + encodeURIComponent($("#tags").val());
+      e.preventDefault();
     });
   }
 })();

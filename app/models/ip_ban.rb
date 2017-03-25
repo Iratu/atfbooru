@@ -6,6 +6,12 @@ class IpBan < ActiveRecord::Base
   validates_format_of :ip_addr, :with => IP_ADDR_REGEX
   validates_uniqueness_of :ip_addr, :if => lambda {|rec| rec.ip_addr =~ IP_ADDR_REGEX}
   attr_accessible :ip_addr, :reason
+  after_create do |rec|
+    ModAction.log("#{CurrentUser.name} created ip ban for #{rec.ip_addr}")
+  end
+  after_destroy do |rec|
+    ModAction.log("#{CurrentUser.name} deleted ip ban for #{rec.ip_addr}")
+  end
 
   def self.is_banned?(ip_addr)
     exists?(["ip_addr = ?", ip_addr])
@@ -25,13 +31,13 @@ class IpBan < ActiveRecord::Base
   def self.query(user_ids)
     comments = count_by_ip_addr("comments", user_ids, "creator_id", "ip_addr")
     notes = count_by_ip_addr("note_versions", user_ids, "updater_id", "updater_ip_addr")
-    pools = count_by_ip_addr("pool_versions", user_ids, "updater_id", "updater_ip_addr")
+#    pools = count_by_ip_addr("pool_versions", user_ids, "updater_id", "updater_ip_addr")
     wiki_pages = count_by_ip_addr("wiki_page_versions", user_ids, "updater_id", "updater_ip_addr")
 
     return {
       "comments" => comments,
       "notes" => notes,
-      "pools" => pools,
+#      "pools" => pools,
       "wiki_pages" => wiki_pages
     }
   end

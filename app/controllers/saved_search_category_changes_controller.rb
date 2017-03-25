@@ -1,4 +1,6 @@
 class SavedSearchCategoryChangesController < ApplicationController
+  include SavedSearches::CheckAvailability
+
   before_filter :member_only
   respond_to :html
 

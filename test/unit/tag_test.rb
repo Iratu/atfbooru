@@ -6,7 +6,6 @@ class TagTest < ActiveSupport::TestCase
     CurrentUser.user = user
     CurrentUser.ip_addr = "127.0.0.1"
     MEMCACHE.flush_all
-    Delayed::Worker.delay_jobs = false
   end
 
   teardown do
@@ -138,9 +137,9 @@ class TagTest < ActiveSupport::TestCase
       assert_equal(%w(~AAa -BBB* -bbb*), Tag.scan_query("~AAa -BBB* -bbb*"))
     end
 
-    should "strip out invalid characters when scanning" do
+    should "not strip out valid characters when scanning" do
       assert_equal(%w(aaa bbb), Tag.scan_tags("aaa bbb"))
-      assert_equal(%w(-BB;B* -b_b_b_), Tag.scan_tags("-B,B;B* -b_b_b_"))
+      assert_equal(%w(favgroup:yondemasu_yo,_azazel-san. pool:ichigo_100%), Tag.scan_tags("favgroup:yondemasu_yo,_azazel-san. pool:ichigo_100%"))
     end
 
     should "cast values" do
@@ -207,6 +206,42 @@ class TagTest < ActiveSupport::TestCase
         assert_equal("hoge", tag.name)
         assert_equal(Tag.categories.artist, tag.category)
       end
+    end
+
+    context "during name validation" do
+      # tags with spaces or uppercase are allowed because they are normalized
+      # to lowercase with underscores.
+      should allow_value(" foo ").for(:name).on(:create)
+      should allow_value("foo bar").for(:name).on(:create)
+      should allow_value("FOO").for(:name).on(:create)
+
+      should_not allow_value("").for(:name).on(:create)
+      should_not allow_value("___").for(:name).on(:create)
+      should_not allow_value("~foo").for(:name).on(:create)
+      should_not allow_value("-foo").for(:name).on(:create)
+      should_not allow_value("_foo").for(:name).on(:create)
+      should_not allow_value("foo_").for(:name).on(:create)
+      should_not allow_value("foo__bar").for(:name).on(:create)
+      should_not allow_value("foo*bar").for(:name).on(:create)
+      should_not allow_value("foo,bar").for(:name).on(:create)
+      should_not allow_value("foo\abar").for(:name).on(:create)
+      should_not allow_value("café").for(:name).on(:create)
+      should_not allow_value("東方").for(:name).on(:create)
+
+      metatags = Tag::METATAGS.split("|") + Tag::SUBQUERY_METATAGS.split("|") + Danbooru.config.tag_category_mapping.keys
+      metatags.split("|").each do |metatag|
+        should_not allow_value("#{metatag}:foo").for(:name).on(:create)
+      end
+    end
+  end
+
+  context "A tag with a negative post count" do
+    should "be fixed" do
+      tag = FactoryGirl.create(:tag, name: "touhou", post_count: -10)
+      post = FactoryGirl.create(:post, tag_string: "touhou")
+
+      Tag.clean_up_negative_post_counts!
+      assert_equal(1, tag.reload.post_count)
     end
   end
 end

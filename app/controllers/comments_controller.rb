@@ -1,7 +1,7 @@
 class CommentsController < ApplicationController
   respond_to :html, :xml, :json
-  before_filter :member_only, :only => [:update, :create, :edit, :destroy]
-  rescue_from ActiveRecord::StatementInvalid, :with => :rescue_exception
+  before_filter :member_only, :except => [:index, :search, :show]
+  skip_before_filter :api_check
 
   def index
     if params[:group_by] == "comment"
@@ -23,12 +23,12 @@ class CommentsController < ApplicationController
   def update
     @comment = Comment.find(params[:id])
     check_privilege(@comment)
-    @comment.update_attributes(params[:comment].permit(:body))
+    @comment.update(update_params, :as => CurrentUser.role)
     respond_with(@comment, :location => post_path(@comment.post_id))
   end
 
   def create
-    @comment = Comment.create(params[:comment])
+    @comment = Comment.create(create_params, :as => CurrentUser.role)
     respond_with(@comment) do |format|
       format.html do
         if @comment.errors.any?
@@ -48,9 +48,7 @@ class CommentsController < ApplicationController
 
   def show
     @comment = Comment.find(params[:id])
-    respond_with(@comment) do |format|
-      format.json {render :json => @comment.to_json(:methods => [:creator_name])}
-    end
+    respond_with(@comment)
   end
 
   def destroy
@@ -69,13 +67,6 @@ class CommentsController < ApplicationController
     respond_with(@comment) do |format|
       format.js
     end
-  end
-
-  def unvote
-    @comment = Comment.find(params[:id])
-    @comment.unvote!
-  rescue CommentVote::Error => x
-    @error = x
   end
 
 private
@@ -98,7 +89,7 @@ private
   end
 
   def index_by_comment
-    @comments = Comment.search(params[:search]).order("comments.id DESC").paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @comments = Comment.search(params[:search]).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     respond_with(@comments) do |format|
       format.html {render :action => "index_by_comment"}
       format.xml do
@@ -111,5 +102,13 @@ private
     if !comment.editable_by?(CurrentUser.user)
       raise User::PrivilegeError
     end
+  end
+
+  def create_params
+    params.require(:comment).permit(:post_id, :body, :do_not_bump_post, :is_sticky)
+  end
+
+  def update_params
+    params.require(:comment).permit(:body, :is_deleted, :is_sticky)
   end
 end

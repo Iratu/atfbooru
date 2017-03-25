@@ -22,7 +22,7 @@
   <meta name="style-usernames" content="<%= CurrentUser.user.style_usernames? %>">
   <meta name="mobile-mode" content="<%= CurrentUser.mobile_mode? %>">
   <meta name="last-forum-read-at" content="<%= CurrentUser.user.last_forum_read_at %>">
-  <meta name="disable-categorized-saved-searches" content="<%= CurrentUser.disable_categorized_saved_searches? %>">
+  <meta name="disable-labeled-saved-searches" content="<%= CurrentUser.disable_categorized_saved_searches? %>">
   <%= auto_discovery_link_tag :atom, posts_path(:format => "atom", :tags => params[:tags]) %>
   <%= stylesheet_link_tag "application", :media => "screen" %>
   <% if CurrentUser.user.custom_style.present? %>
@@ -80,7 +80,7 @@
       <%= render "users/ban_notice" %>
     <% end %>
 
-    <% if CurrentUser.dmail_count.present? && CurrentUser.dmails.unread.present? && cookies[:hide_dmail_notice].to_i != CurrentUser.dmails.unread.first.id %>
+    <% if CurrentUser.has_mail? && CurrentUser.dmails.unread.first.present? && cookies[:hide_dmail_notice].to_i != CurrentUser.dmails.unread.first.id %>
       <%= render "users/dmail_notice" %>
     <% end %>
 

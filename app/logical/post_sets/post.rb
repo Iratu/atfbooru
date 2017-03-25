@@ -37,6 +37,11 @@ module PostSets
       end
     end
 
+    def tag
+      return nil if !is_single_tag?
+      @tag ||= Tag.find_by(name: Tag.normalize_name(tag_string))
+    end
+
     def has_artist?
       is_single_tag? && artist.present? && artist.visible?
     end
@@ -77,6 +82,18 @@ module PostSets
       posts.any? {|x| x.rating == "e"}
     end
 
+    def hidden_posts
+      posts.select { |p| !p.visible? }
+    end
+
+    def banned_posts
+      posts.select(&:is_banned?)
+    end
+
+    def censored_posts
+      hidden_posts - banned_posts
+    end
+
     def use_sequential_paginator?
       unknown_post_count? && !CurrentUser.is_gold?
     end
@@ -91,29 +108,9 @@ module PostSets
     end
 
     def get_random_posts
-      if unknown_post_count?
-        chance = 0.01
-      elsif post_count == 0
-        chance = 1
-      else
-        chance = per_page / post_count.to_f
-      end
-
-      temp = []
-      temp += ::Post.tag_match(tag_string).where("random() < ?", chance).reorder("").limit(per_page)
-
-      3.times do
-        missing = per_page - temp.length
-        if missing >= 1
-          q = ::Post.tag_match(tag_string).where("random() < ?", chance*2).reorder("").limit(missing)
-          unless temp.empty?
-            q = q.where("id not in (?)", temp.map(&:id))
-          end
-          temp += q
-        end
-      end
-
-      temp
+      per_page.times.inject([]) do |all, x|
+        all << ::Post.tag_match(tag_string).random
+      end.compact.uniq
     end
 
     def posts
@@ -171,6 +168,10 @@ module PostSets
 
     def is_tag_subscription?
       tag_subscription.present?
+    end
+
+    def is_saved_search?
+      tag_string =~ /search:/
     end
 
     def tag_subscription

@@ -778,6 +778,74 @@ ALTER SEQUENCE artists_id_seq OWNED BY artists.id;
 
 
 --
+-- Name: bank_balances; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE bank_balances (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    amount integer NOT NULL,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL,
+    nonce character varying NOT NULL
+);
+
+
+--
+-- Name: bank_balances_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE bank_balances_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: bank_balances_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE bank_balances_id_seq OWNED BY bank_balances.id;
+
+
+--
+-- Name: bank_transactions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE bank_transactions (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    amount integer NOT NULL,
+    nonce character varying NOT NULL,
+    type character varying NOT NULL,
+    data text,
+    created_at timestamp without time zone NOT NULL,
+    updated_at timestamp without time zone NOT NULL
+);
+
+
+--
+-- Name: bank_transactions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE bank_transactions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: bank_transactions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE bank_transactions_id_seq OWNED BY bank_transactions.id;
+
+
+--
 -- Name: bans; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -896,7 +964,8 @@ CREATE TABLE comments (
     updater_id integer,
     updater_ip_addr inet,
     do_not_bump_post boolean DEFAULT false NOT NULL,
-    is_deleted boolean DEFAULT false NOT NULL
+    is_deleted boolean DEFAULT false NOT NULL,
+    is_sticky boolean DEFAULT false NOT NULL
 );
 
 
@@ -1006,7 +1075,7 @@ CREATE TABLE dmails (
     is_deleted boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
-    creator_ip_addr inet DEFAULT '127.0.0.1'::inet NOT NULL
+    creator_ip_addr inet NOT NULL
 );
 
 
@@ -2511,41 +2580,6 @@ ALTER SEQUENCE pixiv_ugoira_frame_data_id_seq OWNED BY pixiv_ugoira_frame_data.i
 
 
 --
--- Name: pool_versions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE pool_versions (
-    id integer NOT NULL,
-    pool_id integer,
-    post_ids text DEFAULT ''::text NOT NULL,
-    updater_id integer NOT NULL,
-    updater_ip_addr inet NOT NULL,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone,
-    name character varying
-);
-
-
---
--- Name: pool_versions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE pool_versions_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: pool_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE pool_versions_id_seq OWNED BY pool_versions.id;
-
-
---
 -- Name: pools; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2591,7 +2625,7 @@ CREATE TABLE post_appeals (
     id integer NOT NULL,
     post_id integer NOT NULL,
     creator_id integer NOT NULL,
-    creator_ip_addr integer NOT NULL,
+    creator_ip_addr inet,
     reason text,
     created_at timestamp without time zone,
     updated_at timestamp without time zone
@@ -2728,43 +2762,6 @@ CREATE UNLOGGED TABLE post_updates (
 
 
 --
--- Name: post_versions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE post_versions (
-    id integer NOT NULL,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone,
-    post_id integer NOT NULL,
-    tags text DEFAULT ''::text NOT NULL,
-    rating character(1),
-    parent_id integer,
-    source text,
-    updater_id integer NOT NULL,
-    updater_ip_addr inet NOT NULL
-);
-
-
---
--- Name: post_versions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE post_versions_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: post_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE post_versions_id_seq OWNED BY post_versions.id;
-
-
---
 -- Name: post_votes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2872,11 +2869,12 @@ ALTER SEQUENCE posts_id_seq OWNED BY posts.id;
 CREATE TABLE saved_searches (
     id integer NOT NULL,
     user_id integer,
-    tag_query text,
+    query text,
     name text,
     category character varying,
     created_at timestamp without time zone,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    labels text[] DEFAULT '{}'::text[] NOT NULL
 );
 
 
@@ -3089,36 +3087,14 @@ ALTER SEQUENCE tags_id_seq OWNED BY tags.id;
 
 
 --
--- Name: transaction_log_items; Type: TABLE; Schema: public; Owner: -
+-- Name: token_buckets; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE transaction_log_items (
-    id integer NOT NULL,
-    category character varying,
+CREATE UNLOGGED TABLE token_buckets (
     user_id integer,
-    data text,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone
+    last_touched_at timestamp without time zone NOT NULL,
+    token_count real NOT NULL
 );
-
-
---
--- Name: transaction_log_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE transaction_log_items_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: transaction_log_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE transaction_log_items_id_seq OWNED BY transaction_log_items.id;
 
 
 --
@@ -3469,6 +3445,20 @@ ALTER TABLE ONLY artist_versions ALTER COLUMN id SET DEFAULT nextval('artist_ver
 --
 
 ALTER TABLE ONLY artists ALTER COLUMN id SET DEFAULT nextval('artists_id_seq'::regclass);
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY bank_balances ALTER COLUMN id SET DEFAULT nextval('bank_balances_id_seq'::regclass);
+
+
+--
+-- Name: id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY bank_transactions ALTER COLUMN id SET DEFAULT nextval('bank_transactions_id_seq'::regclass);
 
 
 --
@@ -4322,13 +4312,6 @@ ALTER TABLE ONLY pixiv_ugoira_frame_data ALTER COLUMN id SET DEFAULT nextval('pi
 -- Name: id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY pool_versions ALTER COLUMN id SET DEFAULT nextval('pool_versions_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: public; Owner: -
---
-
 ALTER TABLE ONLY pools ALTER COLUMN id SET DEFAULT nextval('pools_id_seq'::regclass);
 
 
@@ -4358,13 +4341,6 @@ ALTER TABLE ONLY post_disapprovals ALTER COLUMN id SET DEFAULT nextval('post_dis
 --
 
 ALTER TABLE ONLY post_flags ALTER COLUMN id SET DEFAULT nextval('post_flags_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY post_versions ALTER COLUMN id SET DEFAULT nextval('post_versions_id_seq'::regclass);
 
 
 --
@@ -4421,13 +4397,6 @@ ALTER TABLE ONLY tag_subscriptions ALTER COLUMN id SET DEFAULT nextval('tag_subs
 --
 
 ALTER TABLE ONLY tags ALTER COLUMN id SET DEFAULT nextval('tags_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY transaction_log_items ALTER COLUMN id SET DEFAULT nextval('transaction_log_items_id_seq'::regclass);
 
 
 --
@@ -4557,6 +4526,22 @@ ALTER TABLE ONLY artist_versions
 
 ALTER TABLE ONLY artists
     ADD CONSTRAINT artists_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bank_balances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY bank_balances
+    ADD CONSTRAINT bank_balances_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bank_transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY bank_transactions
+    ADD CONSTRAINT bank_transactions_pkey PRIMARY KEY (id);
 
 
 --
@@ -4728,14 +4713,6 @@ ALTER TABLE ONLY pixiv_ugoira_frame_data
 
 
 --
--- Name: pool_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY pool_versions
-    ADD CONSTRAINT pool_versions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: pools_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4773,14 +4750,6 @@ ALTER TABLE ONLY post_disapprovals
 
 ALTER TABLE ONLY post_flags
     ADD CONSTRAINT post_flags_pkey PRIMARY KEY (id);
-
-
---
--- Name: post_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY post_versions
-    ADD CONSTRAINT post_versions_pkey PRIMARY KEY (id);
 
 
 --
@@ -4845,14 +4814,6 @@ ALTER TABLE ONLY tag_subscriptions
 
 ALTER TABLE ONLY tags
     ADD CONSTRAINT tags_pkey PRIMARY KEY (id);
-
-
---
--- Name: transaction_log_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY transaction_log_items
-    ADD CONSTRAINT transaction_log_items_pkey PRIMARY KEY (id);
 
 
 --
@@ -4968,6 +4929,13 @@ CREATE INDEX index_artist_commentary_versions_on_updater_id_and_post_id ON artis
 
 
 --
+-- Name: index_artist_commentary_versions_on_updater_ip_addr; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_artist_commentary_versions_on_updater_ip_addr ON artist_commentary_versions USING btree (updater_ip_addr);
+
+
+--
 -- Name: index_artist_urls_on_artist_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5010,6 +4978,13 @@ CREATE INDEX index_artist_versions_on_artist_id ON artist_versions USING btree (
 
 
 --
+-- Name: index_artist_versions_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_artist_versions_on_created_at ON artist_versions USING btree (created_at);
+
+
+--
 -- Name: index_artist_versions_on_name; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5021,6 +4996,13 @@ CREATE INDEX index_artist_versions_on_name ON artist_versions USING btree (name)
 --
 
 CREATE INDEX index_artist_versions_on_updater_id ON artist_versions USING btree (updater_id);
+
+
+--
+-- Name: index_artist_versions_on_updater_ip_addr; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_artist_versions_on_updater_ip_addr ON artist_versions USING btree (updater_ip_addr);
 
 
 --
@@ -5063,6 +5045,34 @@ CREATE INDEX index_artists_on_other_names_index ON artists USING gin (other_name
 --
 
 CREATE INDEX index_artists_on_other_names_trgm ON artists USING gin (other_names gin_trgm_ops);
+
+
+--
+-- Name: index_bank_balances_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_bank_balances_on_user_id ON bank_balances USING btree (user_id);
+
+
+--
+-- Name: index_bank_transactions_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_bank_transactions_on_created_at ON bank_transactions USING btree (created_at);
+
+
+--
+-- Name: index_bank_transactions_on_nonce; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_bank_transactions_on_nonce ON bank_transactions USING btree (nonce);
+
+
+--
+-- Name: index_bank_transactions_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_bank_transactions_on_user_id ON bank_transactions USING btree (user_id);
 
 
 --
@@ -5122,6 +5132,13 @@ CREATE INDEX index_comments_on_creator_id_and_post_id ON comments USING btree (c
 
 
 --
+-- Name: index_comments_on_ip_addr; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_comments_on_ip_addr ON comments USING btree (ip_addr);
+
+
+--
 -- Name: index_comments_on_post_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5147,6 +5164,20 @@ CREATE UNIQUE INDEX index_dmail_filters_on_user_id ON dmail_filters USING btree 
 --
 
 CREATE INDEX index_dmails_on_creator_ip_addr ON dmails USING btree (creator_ip_addr);
+
+
+--
+-- Name: index_dmails_on_is_deleted; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_dmails_on_is_deleted ON dmails USING btree (is_deleted);
+
+
+--
+-- Name: index_dmails_on_is_read; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_dmails_on_is_read ON dmails USING btree (is_read);
 
 
 --
@@ -6683,6 +6714,13 @@ CREATE INDEX index_news_updates_on_created_at ON news_updates USING btree (creat
 
 
 --
+-- Name: index_note_versions_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_note_versions_on_created_at ON note_versions USING btree (created_at);
+
+
+--
 -- Name: index_note_versions_on_note_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6739,34 +6777,6 @@ CREATE UNIQUE INDEX index_pixiv_ugoira_frame_data_on_post_id ON pixiv_ugoira_fra
 
 
 --
--- Name: index_pool_versions_on_pool_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_pool_versions_on_pool_id ON pool_versions USING btree (pool_id);
-
-
---
--- Name: index_pool_versions_on_updated_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_pool_versions_on_updated_at ON pool_versions USING btree (updated_at);
-
-
---
--- Name: index_pool_versions_on_updater_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_pool_versions_on_updater_id ON pool_versions USING btree (updater_id);
-
-
---
--- Name: index_pool_versions_on_updater_ip_addr; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_pool_versions_on_updater_ip_addr ON pool_versions USING btree (updater_ip_addr);
-
-
---
 -- Name: index_pools_on_creator_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6792,6 +6802,13 @@ CREATE INDEX index_pools_on_name ON pools USING btree (name);
 --
 
 CREATE INDEX index_pools_on_name_trgm ON pools USING gin (name gin_trgm_ops);
+
+
+--
+-- Name: index_post_appeals_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_post_appeals_on_created_at ON post_appeals USING btree (created_at);
 
 
 --
@@ -6862,34 +6879,6 @@ CREATE INDEX index_post_flags_on_creator_ip_addr ON post_flags USING btree (crea
 --
 
 CREATE INDEX index_post_flags_on_post_id ON post_flags USING btree (post_id);
-
-
---
--- Name: index_post_versions_on_post_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_post_versions_on_post_id ON post_versions USING btree (post_id);
-
-
---
--- Name: index_post_versions_on_updated_at_and_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_post_versions_on_updated_at_and_id ON post_versions USING btree (updated_at, id);
-
-
---
--- Name: index_post_versions_on_updater_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_post_versions_on_updater_id ON post_versions USING btree (updater_id);
-
-
---
--- Name: index_post_versions_on_updater_ip_addr; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_post_versions_on_updater_ip_addr ON post_versions USING btree (updater_ip_addr);
 
 
 --
@@ -7005,10 +6994,17 @@ CREATE INDEX index_saved_searches_on_category ON saved_searches USING btree (cat
 
 
 --
--- Name: index_saved_searches_on_tag_query; Type: INDEX; Schema: public; Owner: -
+-- Name: index_saved_searches_on_labels; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_saved_searches_on_tag_query ON saved_searches USING btree (tag_query);
+CREATE INDEX index_saved_searches_on_labels ON saved_searches USING gin (labels);
+
+
+--
+-- Name: index_saved_searches_on_query; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_saved_searches_on_query ON saved_searches USING btree (query);
 
 
 --
@@ -7089,17 +7085,10 @@ CREATE INDEX index_tags_on_name_pattern ON tags USING btree (name text_pattern_o
 
 
 --
--- Name: index_transaction_log_items_on_created_at; Type: INDEX; Schema: public; Owner: -
+-- Name: index_token_buckets_on_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_transaction_log_items_on_created_at ON transaction_log_items USING btree (created_at);
-
-
---
--- Name: index_transaction_log_items_on_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_transaction_log_items_on_user_id ON transaction_log_items USING btree (user_id);
+CREATE UNIQUE INDEX index_token_buckets_on_user_id ON token_buckets USING btree (user_id);
 
 
 --
@@ -7170,6 +7159,27 @@ CREATE INDEX index_users_on_last_ip_addr ON users USING btree (last_ip_addr) WHE
 --
 
 CREATE UNIQUE INDEX index_users_on_name ON users USING btree (lower((name)::text));
+
+
+--
+-- Name: index_users_on_name_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_users_on_name_trgm ON users USING gin (lower((name)::text) gin_trgm_ops);
+
+
+--
+-- Name: index_wiki_page_versions_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_wiki_page_versions_on_created_at ON wiki_page_versions USING btree (created_at);
+
+
+--
+-- Name: index_wiki_page_versions_on_updater_ip_addr; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_wiki_page_versions_on_updater_ip_addr ON wiki_page_versions USING btree (updater_ip_addr);
 
 
 --
@@ -7522,3 +7532,32 @@ INSERT INTO schema_migrations (version) VALUES ('20161024220345');
 
 INSERT INTO schema_migrations (version) VALUES ('20161101003139');
 
+INSERT INTO schema_migrations (version) VALUES ('20161221225849');
+
+INSERT INTO schema_migrations (version) VALUES ('20161227003428');
+
+INSERT INTO schema_migrations (version) VALUES ('20161229001201');
+
+INSERT INTO schema_migrations (version) VALUES ('20170106012138');
+
+INSERT INTO schema_migrations (version) VALUES ('20170112021922');
+
+INSERT INTO schema_migrations (version) VALUES ('20170112060921');
+
+INSERT INTO schema_migrations (version) VALUES ('20170117233040');
+
+INSERT INTO schema_migrations (version) VALUES ('20170126020516');
+
+INSERT INTO schema_migrations (version) VALUES ('20170126214445');
+
+INSERT INTO schema_migrations (version) VALUES ('20170218104710');
+
+INSERT INTO schema_migrations (version) VALUES ('20170302014435');
+
+INSERT INTO schema_migrations (version) VALUES ('20170314204631');
+
+INSERT INTO schema_migrations (version) VALUES ('20170314235626');
+
+INSERT INTO schema_migrations (version) VALUES ('20170316224630');
+
+INSERT INTO schema_migrations (version) VALUES ('20170319000519');

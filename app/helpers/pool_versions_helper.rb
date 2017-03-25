@@ -1,14 +1,16 @@
 module PoolVersionsHelper
-  def pool_version_diff(pool_version)
+  def pool_version_diff(pool_version, previous = nil, options = {})
     html = ""
 
-    html << pool_version.changes[:added_posts].map do |post_id|
+    diff = pool_version.build_diff(previous)
+
+    html << diff[:added_post_ids].map do |post_id|
       '<ins><a href="/posts/' + post_id.to_s + '">' + post_id.to_s + '</a></ins>'
     end.join(" ")
 
     html << " "
 
-    html << pool_version.changes[:removed_posts].map do |post_id|
+    html << diff[:removed_post_ids].map do |post_id|
       '<del><a href="/posts/' + post_id.to_s + '">' + post_id.to_s + '</a></del>'
     end.join(" ")
 

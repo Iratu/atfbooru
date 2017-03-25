@@ -3,10 +3,6 @@ class PostsController < ApplicationController
   before_filter :builder_only, :only => [:copy_notes]
   before_filter :enable_cors, :only => [:index, :show]
   respond_to :html, :xml, :json
-  rescue_from PostSets::SearchError, :with => :rescue_exception
-  rescue_from Post::SearchError, :with => :rescue_exception
-  rescue_from ActiveRecord::StatementInvalid, :with => :rescue_exception
-  rescue_from ActiveRecord::RecordNotFound, :with => :rescue_exception
 
   def index
     if params[:md5].present?
@@ -83,26 +79,13 @@ class PostsController < ApplicationController
     end
   end
 
-  def unvote
-    @post = Post.find(params[:id])
-    @post.unvote!
-  rescue PostVote::Error => x
-    @error = x
-  end
-
-  def home
-    if CurrentUser.user.is_anonymous?
-      redirect_to intro_explore_posts_path
-    else
-      redirect_to posts_path(:tags => params[:tags])
-    end
-  end
-
   def random
     count = Post.fast_count(params[:tags], :statement_timeout => CurrentUser.user.statement_timeout)
-    @post = Post.tag_match(params[:tags]).reorder("").offset(rand(count)).first
+    @post = Post.tag_match(params[:tags]).random
     raise ActiveRecord::RecordNotFound if @post.nil?
-    redirect_to post_path(@post, :tags => params[:tags])
+    respond_with(@post) do |format|
+      format.html { redirect_to post_path(@post, :tags => params[:tags]) }
+    end
   end
 
   def mark_as_translated

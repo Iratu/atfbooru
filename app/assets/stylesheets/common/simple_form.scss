@@ -1,0 +1,66 @@
+form.simple_form {
+  margin: 0 0 1em 0;
+
+  div.input.boolean {
+    label {
+      display: inline;
+      vertical-align: middle;
+      margin-left: 0.5em;
+    }
+  }
+
+  div.input {
+    margin-bottom: 1em;
+
+    input[type=text], input[type=file], input[type=password], input[type=email] {
+      width: 20em;
+    }
+
+    span.hint {
+      margin-left: 1em;
+    }
+
+    textarea {
+      width: 70%;
+      font-size: 1.2em;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      line-height: 1.5em;
+    }
+
+    fieldset {
+      border: none;
+      display: inline;
+      margin: 0;
+      padding: 0;
+
+      label {
+        font-weight: normal;
+        width: auto;
+        margin-right: 2em;
+        display: inline;
+      }
+    }
+  }
+}
+
+form.inline-form {
+  display: table;
+
+  > div.input {
+    display: table-row;
+    line-height: 2em;
+
+    label {
+      text-align: right;
+    }
+
+    label, input {
+      display: table-cell;
+      padding-right: 1em;
+    }
+  }
+}

@@ -7,10 +7,8 @@ class ApproverPruner
   end
 
   def prune!
-    admin = User.admins.first
-
     inactive_approvers.each do |user|
-      CurrentUser.scoped(admin, "127.0.0.1") do
+      CurrentUser.scoped(User.system, "127.0.0.1") do
         next if user.is_admin?
 
         janitor_trial = JanitorTrial.where(user_id: user.id).first
@@ -22,10 +20,10 @@ class ApproverPruner
           user.save
         end
  
-        Dmail.create_split(
+        Dmail.create_automated(
           :to_id => user.id,
           :title => "Approver inactivity",
-          :body => "You haven't approved a post in the past three months. In order to make sure the list of active approvers is up-to-date, you have lost your approver privileges. Please reply to this message if you want to be reinstated."
+          :body => "You haven't approved a post in the past three months. In order to make sure the list of active approvers is up-to-date, you have lost your approver privileges."
         )
       end
     end

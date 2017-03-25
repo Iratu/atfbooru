@@ -13,16 +13,10 @@ class UserTest < ActiveSupport::TestCase
       CurrentUser.user = nil
       CurrentUser.ip_addr = nil
     end
-    
+
     context "promoting a user" do
       setup do
         CurrentUser.user = FactoryGirl.create(:moderator_user)
-      end
-
-      should "create a transaction log item" do
-        assert_difference("TransactionLogItem.count") do
-          @user.promote_to!(User::Levels::GOLD)
-        end
       end
 
       should "create a neutral feedback" do
@@ -33,10 +27,15 @@ class UserTest < ActiveSupport::TestCase
         assert_equal("You have been promoted to a Gold level account from Member.", @user.feedback.last.body)
       end
 
-      should "create a dmail" do
-        assert_difference("Dmail.count", 2) do
+      should "send an automated dmail to the user" do
+        bot = FactoryGirl.create(:user)
+        Danbooru.config.stubs(:system_user).returns(bot)
+
+        assert_difference("Dmail.count", 1) do
           @user.promote_to!(User::Levels::GOLD)
         end
+
+        assert(@user.dmails.exists?(from: bot, to: @user, title: "You have been promoted"))
       end
     end
 
@@ -185,6 +184,13 @@ class UserTest < ActiveSupport::TestCase
     context "name" do
       should "be #{Danbooru.config.default_guest_name} given an invalid user id" do
         assert_equal(Danbooru.config.default_guest_name, User.id_to_name(-1))
+      end
+
+      should "not contain whitespace" do
+        # U+2007: https://en.wikipedia.org/wiki/Figure_space
+        user = FactoryGirl.build(:user, :name => "foo\u2007bar")
+        user.save
+        assert_equal(["Name cannot have whitespace or colons"], user.errors.full_messages)
       end
 
       should "not contain a colon" do

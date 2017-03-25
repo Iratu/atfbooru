@@ -1,0 +1,19 @@
+@import "../common/000_vars.scss";
+
+div#c-tag-subscriptions {
+  p.info {
+    margin: 1em 0;
+    color: #AAA;
+    font-style: italic;
+  }
+
+  div#a-posts {
+    h1 {
+      font-size: $h3_size;
+    }
+  }
+
+  .hint {
+    display: block;
+  }
+}

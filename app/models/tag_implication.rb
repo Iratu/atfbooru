@@ -32,6 +32,12 @@ class TagImplication < ActiveRecord::Base
       def with_descendants(names)
         (names + where("antecedent_name in (?) and status in (?)", names, ["active", "processing"]).map(&:descendant_names_array)).flatten.uniq
       end
+
+      def automatic_tags_for(names)
+        tags = names.grep(/\A(.+)_\(cosplay\)\Z/) { $1 }
+        tags << "cosplay" if tags.present?
+        tags.uniq
+      end
     end
 
     def descendants
@@ -297,7 +303,7 @@ class TagImplication < ActiveRecord::Base
     implication = %Q("tag implication ##{id}":[#{Rails.application.routes.url_helpers.tag_implication_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
 
     if id_changed?
-      ModAction.create(:description => "created #{status} #{implication}")
+      ModAction.log("created #{status} #{implication}")
     else
       # format the changes hash more nicely.
       change_desc = changes.except(:updated_at).map do |attribute, values|
@@ -309,7 +315,7 @@ class TagImplication < ActiveRecord::Base
         end
       end.join(", ")
 
-      ModAction.create(:description => "updated #{implication}\n#{change_desc}")
+      ModAction.log("updated #{implication}\n#{change_desc}")
     end
   end
 end

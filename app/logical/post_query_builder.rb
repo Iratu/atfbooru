@@ -102,15 +102,17 @@ class PostQueryBuilder
   end
 
   def add_saved_search_relation(saved_searches, relation)
-    saved_searches.each do |saved_search|
-      if saved_search == "all"
-        post_ids = SavedSearch.post_ids(CurrentUser.id)
-      else
-        post_ids = SavedSearch.post_ids(CurrentUser.id, saved_search)
-      end
+    if SavedSearch.enabled?
+      saved_searches.each do |saved_search|
+        if saved_search == "all"
+          post_ids = SavedSearch.post_ids(CurrentUser.id)
+        else
+          post_ids = SavedSearch.post_ids(CurrentUser.id, saved_search)
+        end
 
-      post_ids = [0] if post_ids.empty?
-      relation = relation.where(["posts.id IN (?)", post_ids])
+        post_ids = [0] if post_ids.empty?
+        relation = relation.where(["posts.id IN (?)", post_ids])
+      end
     end
 
     relation
@@ -179,6 +181,14 @@ class PostQueryBuilder
       relation = relation.where("posts.is_pending = TRUE OR posts.is_deleted = TRUE OR posts.is_banned = TRUE")
     elsif CurrentUser.user.hide_deleted_posts? && !CurrentUser.admin_mode?
       relation = relation.where("posts.is_deleted = FALSE")
+    end
+
+    if q[:filetype]
+      relation = relation.where("posts.file_ext": q[:filetype])
+    end
+
+    if q[:filetype_neg]
+      relation = relation.where.not("posts.file_ext": q[:filetype_neg])
     end
 
     # The SourcePattern SQL function replaces Pixiv sources with "pixiv/[suffix]", where
@@ -338,19 +348,23 @@ class PostQueryBuilder
       relation = relation.order("position(' '||posts.id||' ' in ' '||(select post_ids from pools where id = #{pool_id})||' ')")
     end
 
-    if q[:favgroup_neg].present?
-      favgroup_id = q[:favgroup_neg].to_i
-      favgroup = FavoriteGroup.where("favorite_groups.id = ?", favgroup_id).first
-      if favgroup
-        relation = relation.where("posts.id NOT in (?)", favgroup.post_id_array)
+    if q[:favgroups_neg].present?
+      q[:favgroups_neg].each do |favgroup_rec|
+        favgroup_id = favgroup_rec.to_i
+        favgroup = FavoriteGroup.where("favorite_groups.id = ?", favgroup_id).first
+        if favgroup
+          relation = relation.where("posts.id NOT in (?)", favgroup.post_id_array)
+        end
       end
     end
 
-    if q[:favgroup].present?
-      favgroup_id = q[:favgroup].to_i
-      favgroup = FavoriteGroup.where("favorite_groups.id = ?", favgroup_id).first
-      if favgroup
-        relation = relation.where("posts.id in (?)", favgroup.post_id_array)
+    if q[:favgroups].present?
+      q[:favgroups].each do |favgroup_rec|
+        favgroup_id = favgroup_rec.to_i
+        favgroup = FavoriteGroup.where("favorite_groups.id = ?", favgroup_id).first
+        if favgroup
+          relation = relation.where("posts.id in (?)", favgroup.post_id_array)
+        end
       end
     end
 
@@ -413,7 +427,13 @@ class PostQueryBuilder
       relation = relation.order("posts.last_commented_at DESC NULLS LAST, posts.id DESC")
 
     when "comment_asc", "comm_asc"
-      relation = relation.order("posts.last_commented_at ASC NULLS FIRST, posts.id DESC")
+      relation = relation.order("posts.last_commented_at ASC NULLS LAST, posts.id DESC")
+
+    when "comment_bumped"
+      relation = relation.order("posts.last_comment_bumped_at DESC NULLS LAST, posts.id DESC")
+
+    when "comment_bumped_asc"
+      relation = relation.order("posts.last_comment_bumped_at ASC NULLS LAST, posts.id DESC")
 
     when "note"
       relation = relation.order("posts.last_noted_at DESC NULLS LAST, posts.id DESC")

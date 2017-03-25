@@ -1,30 +1,15 @@
 module Moderator
   module Dashboard
     module Queries
-      class Tag
-        attr_reader :user, :count
-
+      class Tag < ::Struct.new(:user, :count)
         def self.all(min_date, max_level)
-          sql = <<-EOS
-            SELECT post_versions.updater_id, count(*)
-            FROM post_versions
-            JOIN users ON users.id = post_versions.updater_id
-            WHERE
-              post_versions.updated_at > ?
-              AND users.level <= ?
-            GROUP BY post_versions.updater_id
-            ORDER BY count(*) DESC
-            LIMIT 10
-          EOS
+          return [] unless PostArchive.enabled?
 
-          ActiveRecord::Base.without_timeout do
-            ActiveRecord::Base.select_all_sql(sql, min_date, max_level).map {|x| new(x)}
+          records = PostArchive.where("updated_at > ?", min_date).group(:updater).count.map do |user, count|
+            new(user, count)
           end
-        end
 
-        def initialize(hash)
-          @user = ::User.find(hash["updater_id"])
-          @count = hash["count"]
+          records.select { |rec| rec.user.level <= max_level }.sort_by(&:count).reverse.take(10)
         end
       end
     end

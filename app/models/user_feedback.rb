@@ -10,6 +10,12 @@ class UserFeedback < ActiveRecord::Base
   validate :creator_is_gold
   validate :user_is_not_creator
   after_create :create_dmail
+  after_update(:if => lambda {|rec| CurrentUser.id != rec.creator_id}) do |rec|
+    ModAction.log(%{#{CurrentUser.name} updated user feedback for "#{rec.user_name}":/users/#{rec.user_id}})
+  end
+  after_destroy(:if => lambda {|rec| CurrentUser.id != rec.creator_id}) do |rec|
+    ModAction.log(%{#{CurrentUser.name} deleted user feedback for "#{rec.user_name}":/users/#{rec.user_id}})
+  end
 
   module SearchMethods
     def positive
@@ -26,6 +32,15 @@ class UserFeedback < ActiveRecord::Base
 
     def for_user(user_id)
       where("user_id = ?", user_id)
+    end
+
+    def visible(viewer = CurrentUser.user)
+      if viewer.is_admin?
+        all
+      else
+        # joins(:user).merge(User.undeleted).or(where("body !~ 'Name changed from [^\s:]+ to [^\s:]+'"))
+        joins(:user).where.not("users.name ~ 'user_[0-9]+~*' AND user_feedback.body ~ 'Name changed from [^\s:]+ to [^\s:]+'")
+      end
     end
 
     def search(params)
@@ -77,7 +92,7 @@ class UserFeedback < ActiveRecord::Base
   def create_dmail
     unless disable_dmail_notification
       body = %{#{creator_name} created a "#{category} record":/user_feedbacks?search[user_id]=#{user_id} for your account. #{body}}
-      Dmail.create_split(:to_id => user_id, :title => "Your user record has been updated", :body => body)
+      Dmail.create_automated(:to_id => user_id, :title => "Your user record has been updated", :body => body)
     end
   end
 

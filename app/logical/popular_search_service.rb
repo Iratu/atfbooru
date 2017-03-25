@@ -8,7 +8,7 @@ class PopularSearchService
   end
 
   def each_search(limit = 100, &block)
-    fetch_data.scan(/(.+?) (\d+)\.0\n/).slice(0, limit).each(&block)
+    fetch_data.to_s.scan(/(.+?) (\d+)\.0\n/).slice(0, limit).each(&block)
   end
 
   def fetch_data
@@ -26,6 +26,6 @@ class PopularSearchService
         end
       end
       response
-    end
+    end.to_s.force_encoding("utf-8")
   end
 end

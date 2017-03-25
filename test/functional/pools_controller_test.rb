@@ -1,6 +1,9 @@
 require 'test_helper'
+require 'helpers/pool_archive_test_helper'
 
 class PoolsControllerTest < ActionController::TestCase
+  include PoolArchiveTestHelper
+
   context "The pools controller" do
     setup do
       Timecop.travel(1.month.ago) do
@@ -10,9 +13,12 @@ class PoolsControllerTest < ActionController::TestCase
       CurrentUser.user = @user
       CurrentUser.ip_addr = "127.0.0.1"
       @post = FactoryGirl.create(:post)
+      mock_pool_archive_service!
+      start_pool_archive_transaction
     end
 
     teardown do
+      rollback_pool_archive_transaction
       CurrentUser.user = nil
     end
 
@@ -43,11 +49,35 @@ class PoolsControllerTest < ActionController::TestCase
       end
     end
 
+    context "gallery action" do
+      should "render" do
+        pool = FactoryGirl.create(:pool)
+        get :gallery, {:id => pool.id}
+        assert_response :success
+      end
+    end
+
+    context "new action" do
+      should "render" do
+        get :new, {}, { user_id: @user.id }
+        assert_response :success
+      end
+    end
+
     context "create action" do
       should "create a pool" do
         assert_difference("Pool.count", 1) do
           post :create, {:pool => {:name => "xxx", :description => "abc"}}, {:user_id => @user.id}
         end
+      end
+    end
+
+    context "edit action" do
+      should "render" do
+        pool = FactoryGirl.create(:pool)
+
+        get :edit, { id: pool.id }, { user_id: @user.id }
+        assert_response :success
       end
     end
 
@@ -99,10 +129,10 @@ class PoolsControllerTest < ActionController::TestCase
       end
 
       should "revert to a previous version" do
-        assert_equal(2, PoolVersion.count)
+        assert_equal(2, PoolArchive.count)
         @pool.reload
         version = @pool.versions.first
-        assert_equal("#{@post.id}", version.post_ids)
+        assert_equal([@post.id], version.post_ids)
         post :revert, {:id => @pool.id, :version_id => version.id}, {:user_id => @mod.id}
         @pool.reload
         assert_equal([@post.id], @pool.post_id_array)
@@ -111,7 +141,7 @@ class PoolsControllerTest < ActionController::TestCase
       should "not allow reverting to a previous version of another pool" do
         @pool2 = FactoryGirl.create(:pool)
 
-        post :revert, { :id => @pool.id, :version_id => @pool2.versions(true).first.id }, {:user_id => @user.id}
+        post :revert, { :id => @pool.id, :version_id => @pool2.versions.first.id }, {:user_id => @user.id}
         @pool.reload
 
         assert_not_equal(@pool.name, @pool2.name)

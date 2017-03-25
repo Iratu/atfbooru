@@ -19,11 +19,17 @@ class ForumPost < ActiveRecord::Base
   validate :topic_is_not_restricted, :on => :create
   before_destroy :validate_topic_is_unlocked
   after_save :delete_topic_if_original_post
+  after_update(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
+    ModAction.log("#{CurrentUser.name} updated forum ##{rec.id}")
+  end
+  after_destroy(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
+    ModAction.log("#{CurrentUser.name} deleted forum ##{rec.id}")
+  end
   mentionable(
     :message_field => :body, 
     :user_field => :creator_id, 
-    :title => "You were mentioned in a forum topic",
-    :body => lambda {|rec, user_name| "You were mentioned in the forum topic \"#{rec.topic.title}\":/forum_topics/#{rec.topic_id}?page=#{rec.forum_topic_page}\n\n---\n\n[i]#{rec.creator.name} said:[/i]\n\n#{ActionController::Base.helpers.excerpt(rec.body, user_name)}"}
+    :title => lambda {|user_name| %{#{creator_name} mentioned you in topic ##{topic_id} (#{topic.title})}},
+    :body => lambda {|user_name| %{@#{creator_name} mentioned you in topic ##{topic_id} ("#{topic.title}":[/forum_topics/#{topic_id}?page=#{forum_topic_page}]):\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n}},
   )
 
   module SearchMethods

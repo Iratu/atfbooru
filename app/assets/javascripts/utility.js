@@ -45,6 +45,12 @@
     }
   }
 
+  Danbooru.keydown = function(keys, namespace, handler) {
+    if (Danbooru.meta("enable-js-navigation") === "true") {
+      $(document).on("keydown" + ".danbooru." + namespace, null, keys, handler);
+    }
+  };
+
   Danbooru.is_subset = function(array, subarray) {
     var all = true;
 
@@ -112,6 +118,15 @@
         return sParameterName[1] === undefined ? true : sParameterName[1];
       }
     }
+  };
+
+  Danbooru.sorttable = function(table) {
+    table.stupidtable();
+    table.bind("aftertablesort", function(event, data) {
+      $("#c-saved-searches table tbody tr").removeClass("even odd");
+      $("#c-saved-searches table tbody tr:even").addClass("even");
+      $("#c-saved-searches table tbody tr:odd").addClass("odd");
+    });
   };
 
   String.prototype.hash = function() {

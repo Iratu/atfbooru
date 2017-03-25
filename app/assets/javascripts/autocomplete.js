@@ -37,7 +37,7 @@
   }
 
   Danbooru.Autocomplete.initialize_mention_autocomplete = function() {
-    var $fields = $("#forum_post_body,#forum_post_body_for_,.comment-form textarea");
+    var $fields = $(".autocomplete-mentions textarea");
     $fields.autocomplete({
       delay: 500,
       minLength: 2,
@@ -101,7 +101,7 @@
     );
 
     var prefixes = "-|~|general:|gen:|artist:|art:|copyright:|copy:|co:|character:|char:|ch:";
-    var metatags = "order|-status|status|-rating|rating|-locked|locked|child|" +
+    var metatags = "order|-status|status|-rating|rating|-locked|locked|child|filetype|-filetype|" +
       "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-fav|fav|ordfav|" +
       "sub|-pool|pool|ordpool|favgroup";
 
@@ -159,6 +159,8 @@
         case "locked":
         case "-locked":
         case "child":
+        case "filetype":
+        case "-filetype":
           Danbooru.Autocomplete.static_metatag_source(term, resp, metatag);
           return;
         }
@@ -316,6 +318,7 @@
       "favcount", "favcount_asc",
       "change", "change_asc",
       "comment", "comment_asc",
+      "comment_bumped", "comment_bumped_asc",
       "note", "note_asc",
       "artcomm", "artcomm_asc",
       "mpixels", "mpixels_asc",
@@ -335,7 +338,10 @@
     ],
     child: [
       "any", "none"
-    ]
+    ],
+    filetype: [
+      "jpg", "png", "gif", "swf", "zip", "webm", "mp4"
+    ],
   }
 
   Danbooru.Autocomplete.static_metatag_source = function(term, resp, metatag) {

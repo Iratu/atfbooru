@@ -40,8 +40,11 @@ class ArtistUrlTest < ActiveSupport::TestCase
     end
 
     should "normalize nico seiga artist urls" do
-      url = FactoryGirl.create(:artist_url, :url => "http://seiga.nicovideo.jp/user/illust/1826959?target=illust_all")
-      assert_equal("http://seiga.nicovideo.jp/user/illust/1826959/", url.normalized_url)
+      url = FactoryGirl.create(:artist_url, :url => "http://seiga.nicovideo.jp/user/illust/1826959")
+      assert_equal("http://seiga.nicovideo.jp/user/illust/1826959", url.normalized_url)
+
+      url = FactoryGirl.create(:artist_url, :url => "http://seiga.nicovideo.jp/seiga/im4937663")
+      assert_equal("http://seiga.nicovideo.jp/user/illust/7017777/", url.normalized_url)
     end
 
     should "normalize hentai foundry artist urls" do

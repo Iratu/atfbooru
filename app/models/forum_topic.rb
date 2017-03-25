@@ -25,6 +25,7 @@ class ForumTopic < ActiveRecord::Base
   validates_associated :original_post
   validates_inclusion_of :category_id, :in => CATEGORIES.keys
   validates_inclusion_of :min_level, :in => MIN_LEVELS.values
+  validates :title, :length => {:maximum => 255}
   accepts_nested_attributes_for :original_post
   after_update :update_orignal_post
 
@@ -70,6 +71,10 @@ class ForumTopic < ActiveRecord::Base
     def search(params)
       q = permitted
       return q if params.blank?
+
+      if params[:mod_only].present?
+        q = q.where("min_level >= ?", MIN_LEVELS[:Moderator])
+      end
 
       if params[:title_matches].present?
         q = q.title_matches(params[:title_matches])
@@ -150,12 +155,12 @@ class ForumTopic < ActiveRecord::Base
     self.updater_id = CurrentUser.id
   end
 
-  def last_page
-    (response_count / Danbooru.config.posts_per_page.to_f).ceil
+  def page_for(post_id)
+    (posts.where("id < ?", post_id).count / Danbooru.config.posts_per_page.to_f).ceil
   end
 
-  def presenter(forum_posts)
-    @presenter ||= ForumTopicPresenter.new(self, forum_posts)
+  def last_page
+    (response_count / Danbooru.config.posts_per_page.to_f).ceil
   end
 
   def as_json(options = {})

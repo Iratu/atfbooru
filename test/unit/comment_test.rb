@@ -14,7 +14,6 @@ class CommentTest < ActiveSupport::TestCase
       CurrentUser.ip_addr = nil
     end
 
-
     context "that mentions a user" do
       setup do
         @post = FactoryGirl.create(:post)
@@ -58,7 +57,13 @@ class CommentTest < ActiveSupport::TestCase
           end
 
           dmail = Dmail.last
-          assert_equal("You were mentioned in a \"comment\":/posts/#{@comment.post_id}#comment-#{@comment.id}\n\n---\n\n[i]#{CurrentUser.name} said:[/i]\n\nHey @#{@user2.name} check this out!", dmail.body)
+          assert_equal(<<-EOS.strip_heredoc, dmail.body)
+            @#{CurrentUser.name} mentioned you in a \"comment\":/posts/#{@comment.post_id}#comment-#{@comment.id} on post ##{@comment.post_id}:
+
+            [quote]
+            Hey @#{@user2.name} check this out!
+            [/quote]
+          EOS
         end
       end
     end
@@ -160,16 +165,15 @@ class CommentTest < ActiveSupport::TestCase
         user = FactoryGirl.create(:user)
         post = FactoryGirl.create(:post)
         c1 = FactoryGirl.create(:comment, :post => post)
-        comment_vote = c1.vote!("down")
-        assert_equal([], comment_vote.errors.full_messages)
-        comment_vote = c1.vote!("down")
-        assert_equal(["You have already voted for this comment"], comment_vote.errors.full_messages)
+
+        assert_nothing_raised { c1.vote!("down") }
+        exception = assert_raises(ActiveRecord::RecordInvalid) { c1.vote!("down") }
+        assert_equal("Validation failed: You have already voted for this comment", exception.message)
         assert_equal(1, CommentVote.count)
         assert_equal(-1, CommentVote.last.score)
 
         c2 = FactoryGirl.create(:comment, :post => post)
-        comment_vote = c2.vote!("down")
-        assert_equal([], comment_vote.errors.full_messages)
+        assert_nothing_raised { c2.vote!("down") }
         assert_equal(2, CommentVote.count)
       end
 
@@ -177,9 +181,9 @@ class CommentTest < ActiveSupport::TestCase
         user = FactoryGirl.create(:user)
         post = FactoryGirl.create(:post)
         c1 = FactoryGirl.create(:comment, :post => post)
-        comment_vote = c1.vote!("up")
 
-        assert_equal(["You cannot upvote your own comments"], comment_vote.errors.full_messages)
+        exception = assert_raises(ActiveRecord::RecordInvalid) { c1.vote!("up") }
+        assert_equal("Validation failed: You cannot upvote your own comments", exception.message)
       end
 
       should "allow undoing of votes" do
@@ -204,6 +208,41 @@ class CommentTest < ActiveSupport::TestCase
         assert_equal(2, matches.count)
         assert_equal(c2.id, matches.all[0].id)
         assert_equal(c1.id, matches.all[1].id)
+      end
+
+      context "that is edited by a moderator" do
+        setup do
+          @post = FactoryGirl.create(:post)
+          @comment = FactoryGirl.create(:comment, :post_id => @post.id)
+          @mod = FactoryGirl.create(:moderator_user)
+          CurrentUser.user = @mod
+        end
+
+        should "create a mod action" do
+          assert_difference("ModAction.count") do
+            @comment.update_attributes({:body => "nope"}, :as => :moderator)
+          end
+        end
+      end
+
+      context "that is below the score threshold" do
+        should "be hidden if not stickied" do
+          user = FactoryGirl.create(:user, :comment_threshold => 0)
+          post = FactoryGirl.create(:post)
+          comment = FactoryGirl.create(:comment, :post => post, :score => -5)
+
+          assert_equal([comment], post.comments.hidden(user))
+          assert_equal([], post.comments.visible(user))
+        end
+
+        should "be visible if stickied" do
+          user = FactoryGirl.create(:user, :comment_threshold => 0)
+          post = FactoryGirl.create(:post)
+          comment = FactoryGirl.create(:comment, :post => post, :score => -5, :is_sticky => true)
+
+          assert_equal([], post.comments.hidden(user))
+          assert_equal([comment], post.comments.visible(user))
+        end
       end
     end
   end

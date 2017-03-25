@@ -5,6 +5,7 @@ module Moderator
       
       respond_to :html, :json
       before_filter :approver_only
+      skip_before_filter :api_check
 
       def show
         cookies.permanent[:moderated] = Time.now.to_i
@@ -14,7 +15,7 @@ module Moderator
         end
 
         ::Post.without_timeout do
-          @posts = ::Post.order("posts.id asc").pending_or_flagged.available_for_moderation(params[:hidden]).search(:tag_match => params[:query]).paginate(params[:page], :limit => per_page)
+          @posts = ::Post.includes(:disapprovals, :uploader).order("posts.id asc").pending_or_flagged.available_for_moderation(params[:hidden]).tag_match(params[:query]).paginate(params[:page], :limit => per_page)
           @posts.each # hack to force rails to eager load
         end
         respond_with(@posts)
@@ -24,7 +25,7 @@ module Moderator
         cookies.permanent[:moderated] = Time.now.to_i
 
         ::Post.without_timeout do
-          @posts = ::Post.order("posts.id asc").pending_or_flagged.available_for_moderation(false).reorder("random()").limit(RANDOM_COUNT)
+          @posts = ::Post.includes(:disapprovals, :uploader).order("posts.id asc").pending_or_flagged.available_for_moderation(false).reorder("random()").limit(RANDOM_COUNT)
           @posts.each # hack to force rails to eager load
 
           if @posts.empty?

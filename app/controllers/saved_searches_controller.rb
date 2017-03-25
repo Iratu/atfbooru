@@ -1,11 +1,15 @@
 class SavedSearchesController < ApplicationController
+  include SavedSearches::CheckAvailability
+
   before_filter :member_only
   respond_to :html, :xml, :json, :js
   
   def index
-    @saved_searches = saved_searches.order("tag_query")
-    @categories = @saved_searches.group_by{|saved_search| saved_search.category.to_s}
-    @categories = @categories.sort_by{|category, saved_searches| category.to_s}
+    @saved_searches = saved_searches.order("id")
+
+    if params[:label]
+      @saved_searches = saved_searches.labeled(params[:label])
+    end
 
     respond_with(@saved_searches) do |format|
       format.xml do
@@ -14,15 +18,18 @@ class SavedSearchesController < ApplicationController
     end
   end
 
-  def categories
-    @categories = saved_searches.select(:category).distinct
-    respond_with(@categories)
+  def labels
+    @labels = SavedSearch.labels_for(CurrentUser.user.id)
+    if params[:label]
+      regexp = Regexp.compile(Regexp.escape(params[:label]))
+      @labels = @labels.grep(regexp)
+    end
+    respond_with(@labels)
   end
 
   def create
-    @saved_search = saved_searches.create(:tag_query => params[:saved_search_tags], :category => params[:saved_search_category])
-
-    if params[:saved_search_disable_categories]
+    @saved_search = saved_searches.create(:query => params[:saved_search_tags], :label_string => params[:saved_search_labels])
+    if params[:saved_search_disable_labels]
       CurrentUser.disable_categorized_saved_searches = true
       CurrentUser.save
     end
@@ -46,7 +53,6 @@ class SavedSearchesController < ApplicationController
   end
 
 private
-
   def saved_searches
     CurrentUser.user.saved_searches
   end
