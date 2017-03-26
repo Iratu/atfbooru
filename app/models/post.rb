@@ -639,6 +639,7 @@ class Post < ActiveRecord::Base
       normalized_tags = normalized_tags + TagImplication.automatic_tags_for(normalized_tags)
       normalized_tags = TagImplication.with_descendants(normalized_tags)
 	  normalized_tags = check_tagme(normalized_tags)
+	  normalized_tags = normalized_tags.compact
       normalized_tags.sort!
       set_tag_string(normalized_tags.uniq.sort.join(" "))
     end
