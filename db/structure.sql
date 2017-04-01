@@ -891,7 +891,8 @@ CREATE TABLE bulk_update_requests (
     status character varying DEFAULT 'pending'::character varying NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
-    approver_id integer
+    approver_id integer,
+    forum_post_id integer
 );
 
 
@@ -2952,7 +2953,8 @@ CREATE TABLE tag_aliases (
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
     post_count integer DEFAULT 0 NOT NULL,
-    approver_id integer
+    approver_id integer,
+    forum_post_id integer
 );
 
 
@@ -2990,7 +2992,8 @@ CREATE TABLE tag_implications (
     status text DEFAULT 'pending'::text NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
-    approver_id integer
+    approver_id integer,
+    forum_post_id integer
 );
 
 
@@ -7561,4 +7564,6 @@ INSERT INTO schema_migrations (version) VALUES ('20170314235626');
 INSERT INTO schema_migrations (version) VALUES ('20170316224630');
 
 INSERT INTO schema_migrations (version) VALUES ('20170319000519');
+
+INSERT INTO schema_migrations (version) VALUES ('20170330230231');
 
