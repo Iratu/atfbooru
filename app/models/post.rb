@@ -1637,78 +1637,29 @@ class Post < ActiveRecord::Base
       end
 
       def remove_iqdb(post_id)
-	    if Danbooru.config.iqdbs_skip_sqs?
-		  remove_image(post_id)
-        elsif Danbooru.config.aws_sqs_iqdb_url
-          client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
-          client.send_message("remove\n#{post_id}")
+        if iqdb_enabled?
+          iqdb_sqs_service.send_message("remove\n#{post_id}")
         end
       end
     end
 
     def update_iqdb_async
-      	if Danbooru.config.iqdbs_skip_sqs?
-          add_image(id, complete_preview_file_url)
-        elsif File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
-        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
-        client.send_message("update\n#{id}\n#{complete_preview_file_url}")
+      if File.exists?(preview_file_path) && Post.iqdb_enabled?
+        Post.iqdb_sqs_service.send_message("update\n#{id}\n#{complete_preview_file_url}")
       end
     end
 
     def remove_iqdb_async
-      if Danbooru.config.iqdbs_skip_sqs?
-		  remove_image(id)
-      elsif File.exists?(preview_file_path) && Danbooru.config.aws_sqs_iqdb_url
-        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
-        client.send_message("remove\n#{id}")
+      if File.exists?(preview_file_path) && Post.iqdb_enabled?
+        Post.iqdb_sqs_service.send_message("remove\n#{id}")
       end
     end
 
     def update_iqdb
-	    if Danbooru.config.iqdbs_skip_sqs?
-		  add_image(id, complete_preview_file_url)
-        elsif Danbooru.config.aws_sqs_iqdb_url
-        client = SqsService.new(Danbooru.config.aws_sqs_iqdb_url)
-        client.send_message("update\n#{id}\n#{complete_preview_file_url}")
+      if Post.iqdb_enabled? && Post.iqdb_enabled?
+        Post.iqdb_sqs_service.send_message("update\n#{id}\n#{complete_preview_file_url}")
       end
     end
-
-	def add_image(post_id, imgurl)
-	  if Danbooru.config.iqdbs_server
-        params = {
-          "key" => Danbooru.config.iqdbs_auth_key,
-          "url" => imgurl,
-          "pid" => post_id
-        }
-        uri = URI.parse("#{Danbooru.config.iqdbs_server}/update")
-        uri.query = URI.encode_www_form(params)
-
-        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
-          resp = http.request_get(uri.request_uri)
-        end
-      else
-        raise NotImplementedError
-      end
-	end
-	
-	def remove_image(post_id)
-        if Danbooru.config.iqdbs_server
-        params = {
-          "key" => Danbooru.config.iqdbs_auth_key,
-          "pid" => post_id
-        }
-        uri = URI.parse("#{Danbooru.config.iqdbs_server}/remove")
-        uri.query = URI.encode_www_form(params)
-
-        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
-          resp = http.request_get(uri.request_uri)
-        end
-      else
-        raise NotImplementedError
-      end
-	end
-
-
   end
 
   module ValidationMethods

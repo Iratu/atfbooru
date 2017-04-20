@@ -17,8 +17,6 @@ module Iqdb
       [url, headers["Referer"]]
     end
 
-
-	
     def find_similar
       if Danbooru.config.iqdbs_server
         url, ref = get_referer(source)
