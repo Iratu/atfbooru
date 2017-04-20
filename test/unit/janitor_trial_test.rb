@@ -7,7 +7,6 @@ class JanitorTrialTest < ActiveSupport::TestCase
       @user = FactoryGirl.create(:user)
       CurrentUser.user = @admin
       CurrentUser.ip_addr = "127.0.0.1"
-      MEMCACHE.flush_all
     end
 
     teardown do
@@ -17,7 +16,7 @@ class JanitorTrialTest < ActiveSupport::TestCase
 
     context "upon creation" do
       should "create a dmail when testing a new janitor" do
-        assert_difference("Dmail.count", 4) do
+        assert_difference("Dmail.count", 2) do
           JanitorTrial.create(:user_id => @user.id)
         end
       end

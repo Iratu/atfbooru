@@ -13,9 +13,9 @@ class PoolTest < ActiveSupport::TestCase
     end
 
     CurrentUser.ip_addr = "127.0.0.1"
-    MEMCACHE.flush_all
 
     mock_pool_archive_service!
+    PoolArchive.sqs_service.stubs(:merge?).returns(false)
     start_pool_archive_transaction
   end
 
@@ -229,12 +229,20 @@ class PoolTest < ActiveSupport::TestCase
       @pool.reload
       assert_equal(2, @pool.versions.size)
 
-      CurrentUser.scoped(user2, "127.0.0.2") do
+      CurrentUser.scoped(user2, "127.0.0.3") do
         @pool.post_ids = "#{@p1.id} #{@p2.id}"
         @pool.save
       end
 
       @pool.reload
+      assert_equal(3, @pool.versions.size)
+    end
+
+    should "should create a version if the name changes" do
+      assert_difference("@pool.versions.size", 1) do
+        @pool.update(name: "blah")
+        assert_equal("blah", @pool.versions.last.name)
+      end
       assert_equal(2, @pool.versions.size)
     end
 

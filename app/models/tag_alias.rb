@@ -87,19 +87,19 @@ class TagAlias < ActiveRecord::Base
     end
 
     def approval_message
-      "[i]UPDATE #{date_timestamp}[/i]: The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been approved."
+      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been approved."
     end
 
     def failure_message(e = nil)
-      "[i]UPDATE #{date_timestamp}[/i]: The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) failed during processing. Reason: #{e}"
+      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) failed during processing. Reason: #{e}"
     end
 
     def reject_message
-      "[i]UPDATE #{date_timestamp}[/i]: The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been rejected."
+      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been rejected."
     end
 
     def conflict_message
-      "[i]UPDATE #{date_timestamp}[/i]: The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has conflicting wiki pages. [[#{consequent_name}]] should be updated to include information from [[#{antecedent_name}]] if necessary."
+      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has conflicting wiki pages. [[#{consequent_name}]] should be updated to include information from [[#{antecedent_name}]] if necessary."
     end
 
     def date_timestamp
@@ -130,12 +130,9 @@ class TagAlias < ActiveRecord::Base
   include ForumMethods
 
   def self.to_aliased(names)
-    # TODO: convert to multi-get
-    Array(names).flatten.map do |name|
-      Cache.get("ta:#{Cache.sanitize(name)}") do
-        ActiveRecord::Base.select_value_sql("select consequent_name from tag_aliases where status in ('active', 'processing') and antecedent_name = ?", name) || name.to_s
-      end
-    end.uniq
+    Cache.get_multi(Array(names), "ta") do |tag|
+      ActiveRecord::Base.select_value_sql("select consequent_name from tag_aliases where status in ('active', 'processing') and antecedent_name = ?", tag) || tag.to_s
+    end.values
   end
 
   def process!(update_topic: true)
@@ -144,10 +141,9 @@ class TagAlias < ActiveRecord::Base
     end
 
     tries = 0
-    messages = []
 
     begin
-      CurrentUser.scoped(approver, CurrentUser.ip_addr) do
+      CurrentUser.scoped(approver) do
         update({ :status => "processing" }, :as => CurrentUser.role)
         move_aliases_and_implications
         move_saved_searches
@@ -165,7 +161,7 @@ class TagAlias < ActiveRecord::Base
         retry
       end
 
-      CurrentUser.scoped(approver, CurrentUser.ip_addr) do
+      CurrentUser.scoped(approver) do
         forum_updater.update(failure_message(e), "FAILED") if update_topic
         update({ :status => "error: #{e}" }, :as => CurrentUser.role)
       end
@@ -295,9 +291,7 @@ class TagAlias < ActiveRecord::Base
     if antecedent_wiki.present? 
       if WikiPage.titled(consequent_name).blank?
         CurrentUser.scoped(creator, creator_ip_addr) do
-          antecedent_wiki.update_attributes(
-            :title => consequent_name
-          )
+          antecedent_wiki.update(title: consequent_name, skip_secondary_validations: true)
         end
       else
         forum_updater.update(conflict_message)

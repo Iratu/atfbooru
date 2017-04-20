@@ -38,7 +38,7 @@ class ArtistsController < ApplicationController
 
   def index
     search_params = params[:search].present? ? params[:search] : params
-    @artists = Artist.search(search_params).order("id desc").paginate(params[:page], :limit => params[:limit])
+    @artists = Artist.includes(:urls).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     respond_with(@artists) do |format|
       format.xml do
         render :xml => @artists.to_xml(:include => [:urls], :root => "artists")
@@ -71,12 +71,7 @@ class ArtistsController < ApplicationController
   end
 
   def update
-    body = params[:artist].delete("notes")
-    @artist.assign_attributes(params[:artist], :as => CurrentUser.role)
-    if body
-      @artist.notes = body
-    end
-    @artist.save
+    @artist.update(params[:artist], :as => CurrentUser.role)
     respond_with(@artist)
   end
 

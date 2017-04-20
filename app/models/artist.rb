@@ -6,9 +6,10 @@ class Artist < ActiveRecord::Base
   after_save :create_version
   after_save :save_url_string
   after_save :categorize_tag
+  after_save :update_wiki
   validates_uniqueness_of :name
-  validate :name_is_valid
-  validate :wiki_is_empty, :on => :create
+  validate :validate_name
+  validate :validate_wiki, :on => :create
   belongs_to :creator, :class_name => "User"
   has_many :members, :class_name => "Artist", :foreign_key => "group_name", :primary_key => "name"
   has_many :urls, :dependent => :destroy, :class_name => "ArtistUrl"
@@ -16,10 +17,14 @@ class Artist < ActiveRecord::Base
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :tag_alias, :foreign_key => "antecedent_name", :primary_key => "name"
   has_one :tag, :foreign_key => "name", :primary_key => "name"
-  accepts_nested_attributes_for :wiki_page
-  attr_accessible :body, :name, :url_string, :other_names, :other_names_comma, :group_name, :wiki_page_attributes, :notes, :as => [:member, :gold, :builder, :platinum, :janitor, :moderator, :default, :admin]
+  attr_accessible :body, :notes, :name, :url_string, :other_names, :other_names_comma, :group_name, :notes, :as => [:member, :gold, :builder, :platinum, :janitor, :moderator, :default, :admin]
   attr_accessible :is_active, :as => [:builder, :janitor, :moderator, :default, :admin]
   attr_accessible :is_banned, :as => :admin
+
+  scope :active, lambda { where(is_active: true) }
+  scope :deleted, lambda { where(is_active: false) }
+  scope :banned, lambda { where(is_banned: true) }
+  scope :unbanned, lambda { where(is_banned: false) }
 
   module UrlMethods
     extend ActiveSupport::Concern
@@ -94,7 +99,7 @@ class Artist < ActiveRecord::Base
       end
     end
 
-    def name_is_valid
+    def validate_name
       if name =~ /^[-~]/
         errors[:name] << "cannot begin with - or ~"
         false
@@ -214,47 +219,61 @@ class Artist < ActiveRecord::Base
   end
 
   module NoteMethods
+    extend ActiveSupport::Concern
+
     def notes
-      if wiki_page
-        wiki_page.body
-      else
-        nil
+      @notes || wiki_page.try(:body)
+    end
+
+    def notes=(text)
+      if notes != text
+        notes_will_change!
+        @notes = text
       end
     end
 
-    def notes=(msg)
-      if name_changed? && name_was.present?
-        old_wiki_page = WikiPage.titled(name_was).first
+    def reload(options = nil)
+      if instance_variable_defined?(:@notes)
+        remove_instance_variable(:@notes)
       end
-    
-      if wiki_page
-        if name_changed? && name_was.present?
-          wiki_page.body = wiki_page.body + "\n\n" + msg
-        else
-          wiki_page.body = msg
-        end
-        if wiki_page.body_changed?
-          wiki_page.save
-          @notes_changed = true
-        end
-      elsif old_wiki_page
-        old_wiki_page.title = name
-        old_wiki_page.body = msg
-        if old_wiki_page.body_changed? || old_wiki_page.title_changed?
-          old_wiki_page.save
-          @notes_changed = true
-        end
-      elsif msg.present?
-        self.wiki_page = WikiPage.new(:title => name, :body => msg)
-        @notes_changed = true
-      end
+
+      super
     end
 
     def notes_changed?
-      !!@notes_changed
+      attribute_changed?("notes")
     end
 
-    def wiki_is_empty
+    def notes_will_change!
+      attribute_will_change!("notes")
+    end
+
+    def update_wiki
+      if persisted? && name_changed? && name_was.present? && WikiPage.titled(name_was).exists?
+        # we're renaming the artist, so rename the corresponding wiki page
+        old_page = WikiPage.titled(name_was).first
+
+        if wiki_page.present?
+          # a wiki page with the new name already exists, so update the content
+          wiki_page.update(body: "#{wiki_page.body}\n\n#{@notes}")
+        else
+          # a wiki page doesn't already exist for the new name, so rename the old one
+          old_page.update(title: name, body: @notes)
+        end
+      elsif wiki_page.nil?
+        # if there are any notes, we need to create a new wiki page
+        if @notes.present?
+          create_wiki_page(body: @notes, title: name)
+        end
+      elsif wiki_page.body != @notes || wiki_page.title != name
+        # if anything changed, we need to update the wiki page
+        wiki_page.body = @notes unless @notes.nil?
+        wiki_page.title = name
+        wiki_page.save
+      end
+    end
+
+    def validate_wiki
       if WikiPage.titled(name).exists?
         errors.add(:name, "conflicts with a wiki page")
         return false
@@ -317,7 +336,7 @@ class Artist < ActiveRecord::Base
 
           # potential race condition but unlikely
           unless TagImplication.where(:antecedent_name => name, :consequent_name => "banned_artist").exists?
-            tag_implication = TagImplication.create!(:antecedent_name => name, :consequent_name => "banned_artist", :skip_secondary_validations => true, :status => "pending")
+            tag_implication = TagImplication.create!(:antecedent_name => name, :consequent_name => "banned_artist", :skip_secondary_validations => true)
             tag_implication.approve!(approver: CurrentUser.user)
           end
 
@@ -328,14 +347,6 @@ class Artist < ActiveRecord::Base
   end
 
   module SearchMethods
-    def active
-      where("is_active = true")
-    end
-
-    def banned
-      where("is_banned = true")
-    end
-
     def url_matches(string)
       matches = find_all_by_url(string).map(&:id)
 
@@ -362,33 +373,33 @@ class Artist < ActiveRecord::Base
 
     def other_names_match(string)
       if string =~ /\*/ && CurrentUser.is_builder?
-        where("other_names ILIKE ? ESCAPE E'\\\\'", string.to_escaped_for_sql_like)
+        where("artists.other_names ILIKE ? ESCAPE E'\\\\'", string.to_escaped_for_sql_like)
       else
-        where("other_names_index @@ to_tsquery('danbooru', E?)", Artist.normalize_name(string).to_escaped_for_tsquery)
+        where("artists.other_names_index @@ to_tsquery('danbooru', E?)", Artist.normalize_name(string).to_escaped_for_tsquery)
       end
     end
 
     def group_name_matches(name)
       stripped_name = normalize_name(name).to_escaped_for_sql_like
-      where("group_name LIKE ? ESCAPE E'\\\\'", stripped_name)
+      where("artists.group_name LIKE ? ESCAPE E'\\\\'", stripped_name)
     end
 
     def name_matches(name)
       stripped_name = normalize_name(name).to_escaped_for_sql_like
-      where("name LIKE ? ESCAPE E'\\\\'", stripped_name)
+      where("artists.name LIKE ? ESCAPE E'\\\\'", stripped_name)
     end
 
     def named(name)
-      where("name = ?", normalize_name(name))
+      where(name: normalize_name(name))
     end
 
     def any_name_matches(name)
       stripped_name = normalize_name(name).to_escaped_for_sql_like
       if name =~ /\*/ && CurrentUser.is_builder?
-        where("(name LIKE ? ESCAPE E'\\\\' OR other_names LIKE ? ESCAPE E'\\\\')", stripped_name, stripped_name)
+        where("(artists.name LIKE ? ESCAPE E'\\\\' OR artists.other_names LIKE ? ESCAPE E'\\\\')", stripped_name, stripped_name)
       else
         name_for_tsquery = normalize_name(name).to_escaped_for_tsquery
-        where("(name LIKE ? ESCAPE E'\\\\' OR other_names_index @@ to_tsquery('danbooru', E?))", stripped_name, name_for_tsquery)
+        where("(artists.name LIKE ? ESCAPE E'\\\\' OR artists.other_names_index @@ to_tsquery('danbooru', E?))", stripped_name, name_for_tsquery)
       end
     end
 
@@ -413,7 +424,7 @@ class Artist < ActiveRecord::Base
         q = q.banned
 
       when /status:active/
-        q = q.where("is_banned = false and is_active = true")
+        q = q.unbanned.active
 
       when /./
         q = q.any_name_matches(params[:name])
@@ -422,23 +433,25 @@ class Artist < ActiveRecord::Base
       params[:order] ||= params.delete(:sort)
       case params[:order]
       when "name"
-        q = q.reorder("name")
+        q = q.order("artists.name")
       when "updated_at"
-        q = q.reorder("updated_at desc")
+        q = q.order("artists.updated_at desc")
+      when "post_count"
+        q = q.joins(:tag).order("tags.post_count desc")
       else
-        q = q.reorder("id desc")
+        q = q.order("artists.id desc")
       end
 
       if params[:is_active] == "true"
         q = q.active
       elsif params[:is_active] == "false"
-        q = q.where("is_active = false")
+        q = q.deleted
       end
 
       if params[:is_banned] == "true"
         q = q.banned
       elsif params[:is_banned] == "false"
-        q = q.where("is_banned = false")
+        q = q.unbanned
       end
 
       if params[:id].present?

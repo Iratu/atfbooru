@@ -6,7 +6,6 @@ class CommentTest < ActiveSupport::TestCase
       user = FactoryGirl.create(:user)
       CurrentUser.user = user
       CurrentUser.ip_addr = "127.0.0.1"
-      MEMCACHE.flush_all
     end
 
     teardown do
@@ -91,7 +90,7 @@ class CommentTest < ActiveSupport::TestCase
         setup do
           @post = FactoryGirl.create(:post)
           @comment = FactoryGirl.create(:comment, :post_id => @post.id)
-          @comment.destroy
+          @comment.update({is_deleted: true}, as: :member)
           @post.reload
         end
 

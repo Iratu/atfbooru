@@ -9,6 +9,7 @@ class ApplicationController < ActionController::Base
   before_filter :set_started_at_session
   before_filter :api_check
   before_filter :set_safe_mode
+  before_filter :check_desktop_mode
   # before_filter :secure_cookies_check
   layout "default"
   force_ssl :if => :ssl_login?
@@ -20,6 +21,13 @@ class ApplicationController < ActionController::Base
   rescue_from Danbooru::Paginator::PaginationError, :with => :render_pagination_limit
 
   protected
+
+  def check_desktop_mode
+    if params[:dm]
+      cookies[:dm] = "1"
+    end
+  end
+
   def show_moderation_notice?
     CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
   end
@@ -84,6 +92,13 @@ class ApplicationController < ActionController::Base
     elsif exception.is_a?(::ActiveRecord::RecordNotFound)
       @error_message = "That record was not found"
       render :template => "static/error", :status => 404
+    elsif exception.is_a?(NotImplementedError)
+      flash[:notice] = "This feature isn't available: #{@exception.message}"
+      respond_to do |fmt|
+        fmt.html { redirect_to :back }
+        fmt.json { render template: "static/error", status: 501 }
+        fmt.xml  { render template: "static/error", status: 501 }
+      end
     else
       render :template => "static/error", :status => 500
     end

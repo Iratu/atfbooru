@@ -146,25 +146,45 @@ class BanTest < ActiveSupport::TestCase
     should "initialize the expiration date" do
       user = FactoryGirl.create(:user)
       admin = FactoryGirl.create(:admin_user)
-      CurrentUser.user = admin
-      ban = FactoryGirl.create(:ban, :user => user, :banner => admin)
-      CurrentUser.user = nil
-      assert_not_nil(ban.expires_at)
+      CurrentUser.scoped(admin) do
+        ban = FactoryGirl.create(:ban, :user => user, :banner => admin)
+        assert_not_nil(ban.expires_at)
+      end
     end
 
     should "update the user's feedback" do
       user = FactoryGirl.create(:user)
       admin = FactoryGirl.create(:admin_user)
       assert(user.feedback.empty?)
-      CurrentUser.user = admin
-      ban = FactoryGirl.create(:ban, :user => user, :banner => admin)
-      CurrentUser.user = nil
+      CurrentUser.scoped(admin) do
+        FactoryGirl.create(:ban, :user => user, :banner => admin)
+      end
       assert(!user.feedback.empty?)
       assert_equal("negative", user.feedback.last.category)
     end
   end
 
   context "Searching for a ban" do
+    should "find a given ban" do
+      CurrentUser.user = FactoryGirl.create(:admin_user)
+      CurrentUser.ip_addr = "127.0.0.1"
+
+      user = FactoryGirl.create(:user)
+      ban = FactoryGirl.create(:ban, user: user)
+      params = {
+        user_name: user.name,
+        banner_name: ban.banner.name,
+        reason: ban.reason,
+        expired: false,
+        order: :id_desc
+      }
+
+      bans = Ban.search(params)
+
+      assert_equal(1, bans.length)
+      assert_equal(ban.id, bans.first.id)
+    end
+
     context "by user id" do
       setup do
         @admin = FactoryGirl.create(:admin_user)

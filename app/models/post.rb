@@ -46,11 +46,12 @@ class Post < ActiveRecord::Base
   has_many :notes, :dependent => :destroy
   has_many :comments, lambda {includes(:creator, :updater).order("comments.id")}, :dependent => :destroy
   has_many :children, lambda {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
+  has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
   has_many :favorites, :dependent => :destroy
 
   if PostArchive.enabled?
-    has_many :versions, lambda {order("post_versions.updated_at ASC, id ASC")}, :class_name => "PostArchive", :dependent => :destroy
+    has_many :versions, lambda {order("post_versions.updated_at ASC")}, :class_name => "PostArchive", :dependent => :destroy
   end
 
   attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :janitor, :moderator, :admin, :default]
@@ -290,8 +291,8 @@ class Post < ActiveRecord::Base
   end
 
   module ApprovalMethods
-    def is_approvable?
-      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && !PostApproval.approved?(CurrentUser.id, id)
+    def is_approvable?(user = CurrentUser.user)
+      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && !approved_by?(user)
     end
 
     def flag!(reason, options = {})
@@ -320,35 +321,12 @@ class Post < ActiveRecord::Base
       end
     end
 
-    def approve!
-      if is_status_locked?
-        errors.add(:is_status_locked, "; post cannot be approved")
-        raise ApprovalError.new("Post is locked and cannot be approved")
-      end
+    def approve!(approver = CurrentUser.user)
+      approvals.create(user: approver)
+    end
 
-      if uploader_id == CurrentUser.id
-        errors.add(:base, "You cannot approve a post you uploaded")
-        raise ApprovalError.new("You cannot approve a post you uploaded")
-      end
-
-      if approver_id == CurrentUser.id || PostApproval.approved?(CurrentUser.id, id)
-        errors.add(:approver, "have already approved this post")
-        raise ApprovalError.new("You have previously approved this post and cannot approve it again")
-      end
-
-      flags.each {|x| x.resolve!}
-      self.is_flagged = false
-      self.is_pending = false
-      self.is_deleted = false
-      self.approver_id = CurrentUser.id
-
-      PostApproval.create(user_id: CurrentUser.id, post_id: id)
-
-      if is_deleted_was == true
-        ModAction.log("undeleted post ##{id}")
-      end
-
-      save!
+    def approved_by?(user)
+      approver == user || approvals.where(user: user).exists?
     end
 
     def disapproved_by?(user)
@@ -391,15 +369,17 @@ class Post < ActiveRecord::Base
 
     def normalized_source
       case source
-      when %r{\Ahttps?://img\d+\.pixiv\.net/img/[^\/]+/(\d+)}i, %r{\Ahttps?://i\d\.pixiv\.net/img\d+/img/[^\/]+/(\d+)}i
+      when %r{\Ahttps?://img\d+\.pixiv\.net/img/[^\/]+/(\d+)}i, 
+           %r{\Ahttps?://i\d\.pixiv\.net/img\d+/img/[^\/]+/(\d+)}i
         "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=#{$1}"
 
-      when %r{\Ahttps?://(?:i\d+\.pixiv\.net|i\.pximg\.net)/img-original/img/(?:\d+\/)+(\d+)_p}i,
+      when %r{\Ahttps?://(?:i\d+\.pixiv\.net|i\.pximg\.net)/img-(?:master|original)/img/(?:\d+\/)+(\d+)_p}i,
            %r{\Ahttps?://(?:i\d+\.pixiv\.net|i\.pximg\.net)/c/\d+x\d+/img-master/img/(?:\d+\/)+(\d+)_p}i,
            %r{\Ahttps?://(?:i\d+\.pixiv\.net|i\.pximg\.net)/img-zip-ugoira/img/(?:\d+\/)+(\d+)_ugoira\d+x\d+\.zip}i
         "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=#{$1}"
 
-      when %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/(\d+)\?e=\d+&h=[a-f0-9]+}i, %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/[a-f0-9]+/\d+/(\d+)}i
+      when %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/(\d+)\?e=\d+&h=[a-f0-9]+}i, 
+           %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/[a-f0-9]+/\d+/(\d+)}i
         "http://seiga.nicovideo.jp/seiga/im#{$1}"
 
       when %r{\Ahttps?://(?:d3j5vwomefv46c|dn3pm25xmtlyu)\.cloudfront\.net/photos/large/(\d+)\.}i
@@ -670,7 +650,8 @@ class Post < ActiveRecord::Base
     def add_automatic_tags(tags)
       return tags if !Danbooru.config.enable_dimension_autotagging
 
-      tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize animated_gif animated_png flash webm mp4)
+      tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize flash webm mp4)
+      tags -= %w(animated_gif animated_png) if new_record?
 
       if has_dimensions?
         if image_width >= 10_000 || image_height >= 10_000
@@ -1313,9 +1294,11 @@ class Post < ActiveRecord::Base
     def give_favorites_to_parent
       return if parent.nil?
 
-      favorited_users.each do |user|
-        remove_favorite!(user)
-        parent.add_favorite!(user)
+      transaction do
+        favorites.each do |fav|
+          remove_favorite!(fav.user)
+          parent.add_favorite!(fav.user)
+        end
       end
     end
 
@@ -1408,7 +1391,7 @@ class Post < ActiveRecord::Base
       end
 
       if !CurrentUser.is_admin? 
-        if approver_id == CurrentUser.id || PostApproval.approved?(CurrentUser.id, id)
+        if approved_by?(CurrentUser.user)
           raise ApprovalError.new("You have previously approved this post and cannot undelete it")
         elsif uploader_id == CurrentUser.id
           raise ApprovalError.new("You cannot undelete a post you uploaded")

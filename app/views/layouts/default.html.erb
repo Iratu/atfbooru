@@ -5,6 +5,9 @@
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="top" title="<%= Danbooru.config.app_name %>" href="/">
   <%= csrf_meta_tag %>
+  <% unless cookies[:dm] %>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+  <% end %>
   <meta name="current-user-name" content="<%= CurrentUser.name %>">
   <meta name="current-user-id" content="<%= CurrentUser.id %>">
   <meta name="current-user-can-approve-posts" content="<%= CurrentUser.can_approve_posts? %>">
@@ -48,15 +51,23 @@
   {
     "@context": "http://schema.org",
     "@type": "WebSite",
-    "url" : "http://<%= Danbooru.config.hostname%>",
-    "potentialAction": {
+    "url" : "http://<%= Danbooru.config.hostname %>",
+    "potentialAction": [{
       "@type": "SearchAction",
-      "target": "http://<%= Danbooru.config.hostname%>/posts?tags={search_term_string}",
+      "target": "http://<%= Danbooru.config.hostname %>/posts?tags={search_term_string}",
       "query-input": "required name=search_term_string"
-    }
+    }]
   }
   </script>
-
+  <script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "WebSite",
+    "name": "<%= Danbooru.config.app_name %>",
+    "alternateName": "<%= Danbooru.config.description %>",
+    "url" : "http://<%= Danbooru.config.hostname %>"
+  }
+  </script>
 </head>
 <body lang="en">
   <header id="top">

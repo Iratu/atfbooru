@@ -778,74 +778,6 @@ ALTER SEQUENCE artists_id_seq OWNED BY artists.id;
 
 
 --
--- Name: bank_balances; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE bank_balances (
-    id integer NOT NULL,
-    user_id integer NOT NULL,
-    amount integer NOT NULL,
-    created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone NOT NULL,
-    nonce character varying NOT NULL
-);
-
-
---
--- Name: bank_balances_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE bank_balances_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: bank_balances_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE bank_balances_id_seq OWNED BY bank_balances.id;
-
-
---
--- Name: bank_transactions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE bank_transactions (
-    id integer NOT NULL,
-    user_id integer NOT NULL,
-    amount integer NOT NULL,
-    nonce character varying NOT NULL,
-    type character varying NOT NULL,
-    data text,
-    created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone NOT NULL
-);
-
-
---
--- Name: bank_transactions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE bank_transactions_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: bank_transactions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE bank_transactions_id_seq OWNED BY bank_transactions.id;
-
-
---
 -- Name: bans; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -892,7 +824,8 @@ CREATE TABLE bulk_update_requests (
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
     approver_id integer,
-    forum_post_id integer
+    forum_post_id integer,
+    title text
 );
 
 
@@ -3454,20 +3387,6 @@ ALTER TABLE ONLY artists ALTER COLUMN id SET DEFAULT nextval('artists_id_seq'::r
 -- Name: id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY bank_balances ALTER COLUMN id SET DEFAULT nextval('bank_balances_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY bank_transactions ALTER COLUMN id SET DEFAULT nextval('bank_transactions_id_seq'::regclass);
-
-
---
--- Name: id; Type: DEFAULT; Schema: public; Owner: -
---
-
 ALTER TABLE ONLY bans ALTER COLUMN id SET DEFAULT nextval('bans_id_seq'::regclass);
 
 
@@ -4532,22 +4451,6 @@ ALTER TABLE ONLY artists
 
 
 --
--- Name: bank_balances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY bank_balances
-    ADD CONSTRAINT bank_balances_pkey PRIMARY KEY (id);
-
-
---
--- Name: bank_transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY bank_transactions
-    ADD CONSTRAINT bank_transactions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: bans_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5048,34 +4951,6 @@ CREATE INDEX index_artists_on_other_names_index ON artists USING gin (other_name
 --
 
 CREATE INDEX index_artists_on_other_names_trgm ON artists USING gin (other_names gin_trgm_ops);
-
-
---
--- Name: index_bank_balances_on_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX index_bank_balances_on_user_id ON bank_balances USING btree (user_id);
-
-
---
--- Name: index_bank_transactions_on_created_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_bank_transactions_on_created_at ON bank_transactions USING btree (created_at);
-
-
---
--- Name: index_bank_transactions_on_nonce; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX index_bank_transactions_on_nonce ON bank_transactions USING btree (nonce);
-
-
---
--- Name: index_bank_transactions_on_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_bank_transactions_on_user_id ON bank_transactions USING btree (user_id);
 
 
 --
@@ -6804,7 +6679,7 @@ CREATE INDEX index_pools_on_name ON pools USING btree (name);
 -- Name: index_pools_on_name_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_pools_on_name_trgm ON pools USING gin (name gin_trgm_ops);
+CREATE INDEX index_pools_on_name_trgm ON pools USING gin (lower((name)::text) gin_trgm_ops);
 
 
 --
@@ -6833,6 +6708,13 @@ CREATE INDEX index_post_appeals_on_creator_ip_addr ON post_appeals USING btree (
 --
 
 CREATE INDEX index_post_appeals_on_post_id ON post_appeals USING btree (post_id);
+
+
+--
+-- Name: index_post_appeals_on_reason_tsvector; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_post_appeals_on_reason_tsvector ON post_appeals USING gin (to_tsvector('english'::regconfig, reason));
 
 
 --
@@ -6882,6 +6764,13 @@ CREATE INDEX index_post_flags_on_creator_ip_addr ON post_flags USING btree (crea
 --
 
 CREATE INDEX index_post_flags_on_post_id ON post_flags USING btree (post_id);
+
+
+--
+-- Name: index_post_flags_on_reason_tsvector; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_post_flags_on_reason_tsvector ON post_flags USING gin (to_tsvector('english'::regconfig, reason));
 
 
 --
@@ -7221,6 +7110,13 @@ CREATE INDEX index_wiki_pages_on_title_pattern ON wiki_pages USING btree (title 
 
 
 --
+-- Name: index_wiki_pages_on_updated_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_wiki_pages_on_updated_at ON wiki_pages USING btree (updated_at);
+
+
+--
 -- Name: unique_schema_migrations; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7549,15 +7445,9 @@ INSERT INTO schema_migrations (version) VALUES ('20170112060921');
 
 INSERT INTO schema_migrations (version) VALUES ('20170117233040');
 
-INSERT INTO schema_migrations (version) VALUES ('20170126020516');
-
-INSERT INTO schema_migrations (version) VALUES ('20170126214445');
-
 INSERT INTO schema_migrations (version) VALUES ('20170218104710');
 
 INSERT INTO schema_migrations (version) VALUES ('20170302014435');
-
-INSERT INTO schema_migrations (version) VALUES ('20170314204631');
 
 INSERT INTO schema_migrations (version) VALUES ('20170314235626');
 
@@ -7565,5 +7455,15 @@ INSERT INTO schema_migrations (version) VALUES ('20170316224630');
 
 INSERT INTO schema_migrations (version) VALUES ('20170319000519');
 
+INSERT INTO schema_migrations (version) VALUES ('20170329185605');
+
 INSERT INTO schema_migrations (version) VALUES ('20170330230231');
+
+INSERT INTO schema_migrations (version) VALUES ('20170413000209');
+
+INSERT INTO schema_migrations (version) VALUES ('20170414005856');
+
+INSERT INTO schema_migrations (version) VALUES ('20170414233426');
+
+INSERT INTO schema_migrations (version) VALUES ('20170416224142');
 

@@ -4,7 +4,6 @@ class UserFeedbackTest < ActiveSupport::TestCase
   context "A user's feedback" do
     setup do
       CurrentUser.ip_addr = "127.0.0.1"
-      MEMCACHE.flush_all
     end
 
     teardown do
@@ -18,7 +17,7 @@ class UserFeedbackTest < ActiveSupport::TestCase
       member = FactoryGirl.create(:user)
 
       CurrentUser.user = gold
-      assert_difference("Dmail.count", 2) do
+      assert_difference("Dmail.count", 1) do
         FactoryGirl.create(:user_feedback, :user => user)
       end
     end

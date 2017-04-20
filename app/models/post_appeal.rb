@@ -12,8 +12,15 @@ class PostAppeal < ActiveRecord::Base
 
   module SearchMethods
     def reason_matches(query)
-      query = "*#{query}*" unless query =~ /\*/
-      where("reason ILIKE ? ESCAPE E'\\\\'", query.to_escaped_for_sql_like)
+      if query =~ /\*/
+        where("post_appeals.reason ILIKE ? ESCAPE E'\\\\'", query.to_escaped_for_sql_like)
+      else
+        where("to_tsvector('english', post_appeals.reason) @@ plainto_tsquery(?)", query.to_escaped_for_tsquery)
+      end
+    end
+
+    def post_tags_match(query)
+      PostQueryBuilder.new(query).build(self.joins(:post))
     end
 
     def resolved
@@ -37,7 +44,7 @@ class PostAppeal < ActiveRecord::Base
     end
 
     def search(params)
-      q = where("true")
+      q = order("post_appeals.id desc")
       return q if params.blank?
 
       if params[:reason_matches].present?
@@ -54,6 +61,10 @@ class PostAppeal < ActiveRecord::Base
 
       if params[:post_id].present?
         q = q.where("post_id = ?", params[:post_id].to_i)
+      end
+
+      if params[:post_tags_match].present?
+        q = q.post_tags_match(params[:post_tags_match])
       end
 
       if params[:is_resolved] == "true"
