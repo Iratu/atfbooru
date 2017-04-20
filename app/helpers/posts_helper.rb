@@ -20,7 +20,7 @@ module PostsHelper
         key = "ps-#{tags}"
         value = session.id
         digest = OpenSSL::Digest.new("sha256")
-        sig = OpenSSL::HMAC.hexdigest(digest, Danbooru.config.reportbooru_key, "#{key},#{value}")
+        sig = OpenSSL::HMAC.hexdigest(digest, Danbooru.config.reportbooru_key.to_s, "#{key},#{value}")
         return render("posts/partials/index/search_count", key: key, value: value, sig: sig)
       end
     end
