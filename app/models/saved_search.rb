@@ -74,14 +74,18 @@ class SavedSearch < ActiveRecord::Base
 
   def self.queries_for(user_id, label = nil, options = {})
     if label
-      SavedSearch.where(user_id: user_id).labeled(label).pluck("distinct query")
+      SavedSearch.where(user_id: user_id).labeled(label).map(&:normalized_query).sort.uniq
     else
-      SavedSearch.where(user_id: user_id).pluck("distinct query")
+      SavedSearch.where(user_id: user_id).map(&:normalized_query).sort.uniq
     end
   end
 
+  def normalized_query
+    Tag.normalize_query(query, sort: true)
+  end
+
   def normalize
-    self.query = query_array.sort.join(" ")
+    self.query = Tag.normalize_query(query, sort: false)
     self.labels = labels.map {|x| SavedSearch.normalize_label(x)}.reject {|x| x.blank?}
   end
 
@@ -103,15 +107,16 @@ class SavedSearch < ActiveRecord::Base
     end
   end
 
-  def query_array
-    Tag.scan_tags(query)
-  end
-
   def label_string
     labels.join(" ")
   end
 
   def label_string=(val)
-    self.labels = val.to_s.scan(/\S+/).map {|x| SavedSearch.normalize_label(x)}
+    self.labels = val.to_s.split(/[[:space:]]+/)
+  end
+
+  def labels=(labels)
+    labels = labels.map { |label| SavedSearch.normalize_label(label) }
+    super(labels)
   end
 end

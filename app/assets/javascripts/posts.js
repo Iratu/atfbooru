@@ -8,11 +8,11 @@
 
     if ($("#c-posts").length) {
       this.initialize_shortcuts();
+      this.initialize_saved_searches();
     }
 
     if ($("#c-posts").length && $("#a-index").length) {
       this.initialize_excerpt();
-      this.initialize_saved_searches();
     }
 
     if ($("#c-posts").length && $("#a-show").length) {
@@ -180,19 +180,8 @@
 
       Danbooru.keydown("a", "prev_page", Danbooru.Post.nav_prev);
       Danbooru.keydown("d", "next_page", Danbooru.Post.nav_next);
-
-      Danbooru.keydown("f", "favorite", function(e) {
-        if ($("#add-to-favorites").is(":visible")) {
-          $("#add-to-favorites").click();
-        } else {
-          if (Danbooru.meta("current-user-id") == "") {
-            Danbooru.notice("You must be logged in to favorite posts");
-          } else {
-            Danbooru.notice("You have already favorited this post");
-          }
-        }
-        e.preventDefault();
-      });
+      Danbooru.keydown("f", "favorite", Danbooru.Post.favorite);
+      Danbooru.keydown("shift+f", "unfavorite", Danbooru.Post.unfavorite);
     }
   }
 
@@ -541,6 +530,24 @@
       }
     });
   }
+
+  Danbooru.Post.favorite = function (e) {
+    if ($("#add-to-favorites").is(":visible")) {
+      $("#add-to-favorites").click();
+    } else {
+      if (Danbooru.meta("current-user-id") == "") {
+        Danbooru.notice("You must be logged in to favorite posts");
+      } else {
+        Danbooru.notice("You have already favorited this post");
+      }
+    }
+  };
+
+  Danbooru.Post.unfavorite = function (e) {
+    $.ajax("/favorites/" + Danbooru.meta("post-id") + ".js", {
+      type: "DELETE"
+    });
+  };
 
   Danbooru.Post.initialize_saved_searches = function() {
     $("#saved_search_labels").autocomplete({

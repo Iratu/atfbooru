@@ -349,9 +349,8 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "create a mod action" do
-          assert_difference("ModAction.count", 1) do
-            @post.undelete!
-          end
+          @post.undelete!
+          assert_equal("undeleted post ##{@post.id}", ModAction.last.description)
         end
       end
 
@@ -362,9 +361,8 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "create a mod action" do
-          assert_difference("ModAction.count", 1) do
-            @post.approve!
-          end
+          @post.approve!
+          assert_equal("undeleted post ##{@post.id}", ModAction.last.description)
         end
       end
 
@@ -420,8 +418,8 @@ class PostTest < ActiveSupport::TestCase
 
       context "that was previously approved by person X" do
         setup do
-          @user = FactoryGirl.create(:janitor_user, :name => "xxx")
-          @user2 = FactoryGirl.create(:janitor_user, :name => "yyy")
+          @user = FactoryGirl.create(:moderator_user, :name => "xxx")
+          @user2 = FactoryGirl.create(:moderator_user, :name => "yyy")
           @post = FactoryGirl.create(:post, :approver_id => @user.id)
           @post.flag!("bad")
         end
@@ -1788,6 +1786,24 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([posts[2]], "approver:none")
     end
 
+    should "return posts for the commenter:<name> metatag" do
+      users = FactoryGirl.create_list(:user, 2, created_at: 2.weeks.ago)
+      posts = FactoryGirl.create_list(:post, 2)
+      comms = users.zip(posts).map { |u, p| FactoryGirl.create(:comment, creator: u, post: p) }
+
+      assert_tag_match([posts[0]], "commenter:#{users[0].name}")
+      assert_tag_match([posts[1]], "commenter:#{users[1].name}")
+    end
+
+    should "return posts for the commenter:<any|none> metatag" do
+      posts = FactoryGirl.create_list(:post, 2)
+      FactoryGirl.create(:comment, post: posts[0], is_deleted: false)
+      FactoryGirl.create(:comment, post: posts[1], is_deleted: true)
+
+      assert_tag_match([posts[0]], "commenter:any")
+      assert_tag_match([posts[1]], "commenter:none")
+    end
+
     should "return posts for the noter:<name> metatag" do
       users = FactoryGirl.create_list(:user, 2)
       posts = FactoryGirl.create_list(:post, 2)
@@ -1795,6 +1811,15 @@ class PostTest < ActiveSupport::TestCase
 
       assert_tag_match([posts[0]], "noter:#{users[0].name}")
       assert_tag_match([posts[1]], "noter:#{users[1].name}")
+    end
+
+    should "return posts for the noter:<any|none> metatag" do
+      posts = FactoryGirl.create_list(:post, 2)
+      FactoryGirl.create(:note, post: posts[0], is_active: true)
+      FactoryGirl.create(:note, post: posts[1], is_active: false)
+
+      assert_tag_match([posts[0]], "noter:any")
+      assert_tag_match([posts[1]], "noter:none")
     end
 
     should "return posts for the artcomm:<name> metatag" do

@@ -11,7 +11,6 @@ class User < ActiveRecord::Base
     GOLD = 30
     PLATINUM = 31
     BUILDER = 32
-    JANITOR = 35
     MODERATOR = 40
     ADMIN = 50
   end
@@ -52,7 +51,7 @@ class User < ActiveRecord::Base
   has_bit_flags BOOLEAN_ATTRIBUTES, :field => "bit_prefs"
 
   attr_accessor :password, :old_password
-  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :as => [:moderator, :janitor, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
+  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :level, :as => :admin
 
   validates :name, user_name: true, on: :create
@@ -313,7 +312,6 @@ class User < ActiveRecord::Base
           "Gold" => Levels::GOLD,
           "Platinum" => Levels::PLATINUM,
           "Builder" => Levels::BUILDER,
-          "Janitor" => Levels::JANITOR,
           "Moderator" => Levels::MODERATOR,
           "Admin" => Levels::ADMIN
         }
@@ -335,9 +333,6 @@ class User < ActiveRecord::Base
 
         when Levels::PLATINUM
           "Platinum"
-
-        when Levels::JANITOR
-          "Janitor"
 
         when Levels::MODERATOR
           "Moderator"
@@ -406,10 +401,6 @@ class User < ActiveRecord::Base
 
     def is_platinum?
       level >= Levels::PLATINUM
-    end
-
-    def is_janitor?
-      level >= Levels::JANITOR
     end
 
     def is_moderator?
@@ -652,16 +643,45 @@ end
   end
 
   module ApiMethods
+    # blacklist all attributes by default. whitelist only safe attributes.
     def hidden_attributes
-      super + [:password_hash, :bcrypt_password_hash, :email, :email_verification_key, :time_zone, :updated_at, :receive_email_notifications, :last_logged_in_at, :last_forum_read_at, :has_mail, :default_image_size, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :recent_tags, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :enable_sequential_post_navigation, :hide_deleted_posts, :per_page, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :has_saved_searches, :last_ip_addr, :bit_prefs, :favorite_count]
+      super + attributes.keys.map(&:to_sym)
     end
 
     def method_attributes
-      list = super + [:is_banned, :can_approve_posts, :can_upload_free, :is_super_voter, :level_string]
+      list = super + [
+        :id, :created_at, :name, :inviter_id, :level, :base_upload_limit,
+        :post_upload_count, :post_update_count, :note_update_count,
+        :is_banned, :can_approve_posts, :can_upload_free, :is_super_voter,
+        :level_string,
+      ]
+
       if id == CurrentUser.user.id
-        list += [:remaining_api_limit, :api_burst_limit]
+        list += BOOLEAN_ATTRIBUTES + [
+          :updated_at, :email, :last_logged_in_at, :last_forum_read_at,
+          :recent_tags, :comment_threshold, :default_image_size,
+          :favorite_tags, :blacklisted_tags, :time_zone, :per_page,
+          :custom_style, :favorite_count,
+          :api_regen_multiplier, :api_burst_limit, :remaining_api_limit,
+          :statement_timeout, :favorite_group_limit, :favorite_limit,
+          :tag_query_limit, :can_comment_vote?, :can_remove_from_pools?,
+          :is_comment_limited?, :can_comment?, :can_upload?, :max_saved_searches,
+        ]
       end
+
       list
+    end
+
+    # extra attributes returned for /users/:id.json but not for /users.json.
+    def full_attributes
+      [
+        :wiki_page_version_count, :artist_version_count,
+        :artist_commentary_version_count, :pool_version_count,
+        :forum_post_count, :comment_count, :favorite_group_count,
+        :appeal_count, :flag_count, :positive_feedback_count,
+        :neutral_feedback_count, :negative_feedback_count, :upload_limit,
+        :max_upload_limit
+      ]
     end
 
     def to_legacy_json

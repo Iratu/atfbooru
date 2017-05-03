@@ -1,7 +1,7 @@
 class ForumPost < ActiveRecord::Base
   include Mentionable
 
-  attr_accessible :body, :topic_id, :as => [:member, :builder, :janitor, :gold, :platinum, :admin, :moderator, :default]
+  attr_accessible :body, :topic_id, :as => [:member, :builder, :gold, :platinum, :admin, :moderator, :default]
   attr_accessible :is_locked, :is_sticky, :is_deleted, :as => [:admin, :moderator]
   attr_readonly :topic_id
   belongs_to :creator, :class_name => "User"
@@ -234,8 +234,7 @@ class ForumPost < ActiveRecord::Base
   end
 
   def quoted_response
-    stripped_body = DText.strip_blocks(body, "quote")
-    "[quote]\n#{creator_name} said:\n\n#{stripped_body}\n[/quote]\n\n"
+    DText.quote(body, creator_name)
   end
 
   def forum_topic_page

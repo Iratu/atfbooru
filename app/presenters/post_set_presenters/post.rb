@@ -1,11 +1,14 @@
 module PostSetPresenters
   class Post < Base
-    attr_accessor :post_set, :tag_set_presenter
+    attr_accessor :post_set
     delegate :posts, :to => :post_set
 
     def initialize(post_set)
       @post_set = post_set
-      @tag_set_presenter = TagSetPresenter.new(related_tags)
+    end
+
+    def tag_set_presenter
+      @tag_set_presenter ||= TagSetPresenter.new(related_tags)
     end
 
     def related_tags
@@ -29,7 +32,11 @@ module PostSetPresenters
     end
 
     def popular_tags
-      Tag.trending
+      if PopularSearchService.enabled?
+        PopularSearchService.new(Date.today, "day").tags.slice(0, 25)
+      else
+        Tag.trending
+      end
     end
 
     def pattern_tags
@@ -51,7 +58,7 @@ module PostSetPresenters
     end
 
     def calculate_related_tags_from_post_set
-      RelatedTagCalculator.calculate_from_post_set_to_array(post_set).map(&:first)
+      RelatedTagCalculator.calculate_from_posts_to_array(post_set.posts).map(&:first)
     end
 
     def saved_search_labels

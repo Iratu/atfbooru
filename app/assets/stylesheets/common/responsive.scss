@@ -1,9 +1,5 @@
 @import "000_vars.scss";
 
-#responsive-tag-list {
-  display: none;
-}
-
 #desktop-version-link {
   display: none;
 }
@@ -13,22 +9,25 @@
     display: inline;
   }
 
-  #responsive-tag-list {
-    display: block;
-    font-size: 18pt;
-    font-weight: bold;
-
-    .post-count, .wiki-link {
-      display: none;
-    }
-
-    input[type=text] {
-      width: 75%;
-    }
-  }
-
   #saved-searches-nav {
     display: none;
+  }
+
+  div#page {
+    > div /* div#c-$controller */ {
+      > div /* div#a-$action */ {
+        display: flex;
+        flex-direction: column;
+
+        /* Move #sidebar below #content. */
+        > aside#sidebar {
+          font-size: 1.5em;
+          float: none;
+          width: auto;
+          order: 2;
+        }
+      }
+    }
   }
 
   #maintoggle {
@@ -62,10 +61,6 @@
   }
 
   #comments h2 {
-    display: none;
-  }
-
-  #sidebar {
     display: none;
   }
 
@@ -127,13 +122,6 @@
     }
   }
 
-  section#responsive-tag-list {
-    display: block;
-    h1 {
-      font-size: 1em;
-    }
-  }
-
   div#page {
     div.comments-for-post div.list-of-comments article.comment div.content {
       clear: both;
@@ -184,10 +172,6 @@
 }
 
 @media screen and (max-width: 440px) {
-  #responsive-tag-list {
-    display: block;
-  }
-
   input#expand-search {
     display: none;
   }

@@ -1,4 +1,5 @@
 class Artist < ActiveRecord::Base
+  extend Memoist
   class RevertError < Exception ; end
 
   before_create :initialize_creator
@@ -17,8 +18,8 @@ class Artist < ActiveRecord::Base
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :tag_alias, :foreign_key => "antecedent_name", :primary_key => "name"
   has_one :tag, :foreign_key => "name", :primary_key => "name"
-  attr_accessible :body, :notes, :name, :url_string, :other_names, :other_names_comma, :group_name, :notes, :as => [:member, :gold, :builder, :platinum, :janitor, :moderator, :default, :admin]
-  attr_accessible :is_active, :as => [:builder, :janitor, :moderator, :default, :admin]
+  attr_accessible :body, :notes, :name, :url_string, :other_names, :other_names_comma, :group_name, :notes, :as => [:member, :gold, :builder, :platinum, :moderator, :default, :admin]
+  attr_accessible :is_active, :as => [:builder, :moderator, :default, :admin]
   attr_accessible :is_banned, :as => :admin
 
   scope :active, lambda { where(is_active: true) }
@@ -50,6 +51,10 @@ class Artist < ActiveRecord::Base
 
         artists.inject({}) {|h, x| h[x.name] = x; h}.values.slice(0, 20)
       end
+    end
+
+    included do
+      memoize :domains
     end
 
     def url_array
@@ -87,6 +92,29 @@ class Artist < ActiveRecord::Base
 
     def url_string_changed?
       url_string.scan(/\S+/) != url_array
+    end
+
+    def map_domain(x)
+      case x
+      when "pximg.net"
+        "pixiv.net"
+
+      when "deviantart.net"
+        "deviantart.com"
+
+      else
+        x
+      end
+    end
+
+    def domains
+      Post.raw_tag_match(name).pluck(:source).map do |x| 
+        begin
+          map_domain(Addressable::URI.parse(x).domain)
+        rescue Addressable::URI::InvalidURIError
+          nil
+        end
+      end.compact.inject(Hash.new(0)) {|h, x| h[x] += 1; h}
     end
   end
 
@@ -233,6 +261,8 @@ class Artist < ActiveRecord::Base
     end
 
     def reload(options = nil)
+      flush_cache
+
       if instance_variable_defined?(:@notes)
         remove_instance_variable(:@notes)
       end
@@ -430,6 +460,26 @@ class Artist < ActiveRecord::Base
         q = q.any_name_matches(params[:name])
       end
 
+      if params[:name_matches].present?
+        q = q.name_matches(params[:name_matches])
+      end
+
+      if params[:other_names_match].present?
+        q = q.other_names_match(params[:other_names_match])
+      end
+
+      if params[:group_name_matches].present?
+        q = q.group_name_matches(params[:group_name_matches])
+      end
+
+      if params[:any_name_matches].present?
+        q = q.any_name_matches(params[:any_name_matches])
+      end
+
+      if params[:url_matches].present?
+        q = q.url_matches(params[:url_matches])
+      end
+
       params[:order] ||= params.delete(:sort)
       case params[:order]
       when "name"
@@ -437,7 +487,7 @@ class Artist < ActiveRecord::Base
       when "updated_at"
         q = q.order("artists.updated_at desc")
       when "post_count"
-        q = q.joins(:tag).order("tags.post_count desc")
+        q = q.includes(:tag).order("tags.post_count desc nulls last").references(:tags)
       else
         q = q.order("artists.id desc")
       end
@@ -466,8 +516,15 @@ class Artist < ActiveRecord::Base
         q = q.where("creator_id = ?", params[:creator_id].to_i)
       end
 
+      # XXX deprecated, remove at some point.
       if params[:empty_only] == "true"
-        q = q.joins(:tag).where("tags.post_count = 0")
+        params[:has_tag] = "false"
+      end
+
+      if params[:has_tag] == "true"
+        q = q.joins(:tag).where("tags.post_count > 0")
+      elsif params[:has_tag] == "false"
+        q = q.includes(:tag).where("tags.name IS NULL OR tags.post_count <= 0").references(:tags)
       end
 
       q
@@ -477,6 +534,10 @@ class Artist < ActiveRecord::Base
   module ApiMethods
     def hidden_attributes
       super + [:other_names_index]
+    end
+
+    def method_attributes
+      super + [:domains]
     end
 
     def legacy_api_hash
