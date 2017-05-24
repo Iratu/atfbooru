@@ -22,7 +22,8 @@ class ApplicationController < ActionController::Base
   protected
 
   def show_moderation_notice?
-    CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
+    #CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
+	false
   end
 
   def ssl_login?
