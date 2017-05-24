@@ -110,7 +110,13 @@ Rails.application.routes.draw do
       get :posts
     end
   end
-  resources :delayed_jobs, :only => [:index]
+  resources :delayed_jobs, :only => [:index, :destroy] do
+    member do
+      put :run
+      put :retry
+      put :cancel
+    end
+  end
   resources :dmails, :only => [:new, :create, :index, :show, :destroy] do
     collection do
       get :search
@@ -192,6 +198,7 @@ Rails.application.routes.draw do
   end
   resources :posts do
     resources :events, :only => [:index], :controller => "post_events"
+    resources :replacements, :only => [:index, :new, :create], :controller => "post_replacements"
     resource :artist_commentary, :only => [:index, :show] do
       collection { put :create_or_update }
       member { put :revert }
@@ -210,6 +217,7 @@ Rails.application.routes.draw do
   end
   resources :post_appeals
   resources :post_flags
+  resources :post_replacements, :only => [:index, :new, :create]
   resources :post_versions, :only => [:index, :search] do
     member do
       put :undo

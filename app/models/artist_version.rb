@@ -26,11 +26,11 @@ class ArtistVersion < ActiveRecord::Base
       end
 
       if params[:updater_id].present?
-        q = q.for_user(params[:updater_id].to_i)
+        q = q.where(updater_id: params[:updater_id].split(",").map(&:to_i))
       end
 
       if params[:artist_id].present?
-        q = q.where("artist_id = ?", params[:artist_id].to_i)
+        q = q.where(artist_id: params[:artist_id].split(",").map(&:to_i))
       end
 
       params[:order] ||= params.delete(:sort)
@@ -109,6 +109,6 @@ class ArtistVersion < ActiveRecord::Base
   end
 
   def updater_name
-    User.id_to_name(updater_id).tr("_", " ")
+    User.id_to_name(updater_id)
   end
 end

@@ -23,13 +23,13 @@ class Post < ActiveRecord::Base
   before_save :set_tag_counts
   before_save :set_pool_category_pseudo_tags
   before_create :autoban
+  after_save :queue_backup, if: :md5_changed?
   after_save :create_version
   after_save :update_parent_on_save
   after_save :apply_post_metatags
   after_save :expire_essential_tag_string_cache
   after_destroy :remove_iqdb_async
   after_destroy :delete_files
-  after_destroy :delete_remote_files
   after_commit :update_iqdb_async, :on => :create
   after_commit :notify_pubsub
 
@@ -49,6 +49,7 @@ class Post < ActiveRecord::Base
   has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
   has_many :favorites, :dependent => :destroy
+  has_many :replacements, class_name: "PostReplacement"
 
   if PostArchive.enabled?
     has_many :versions, lambda {order("post_versions.updated_at ASC")}, :class_name => "PostArchive", :dependent => :destroy
@@ -60,22 +61,29 @@ class Post < ActiveRecord::Base
   attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
 
   module FileMethods
+    extend ActiveSupport::Concern
+
+    module ClassMethods
+      def delete_files(post_id, file_path, large_file_path, preview_file_path)
+        # the large file and the preview don't necessarily exist. if so errors will be ignored.
+        FileUtils.rm_f(file_path)
+        FileUtils.rm_f(large_file_path)
+        FileUtils.rm_f(preview_file_path)
+
+        RemoteFileManager.new(file_path).delete
+        RemoteFileManager.new(large_file_path).delete
+        RemoteFileManager.new(preview_file_path).delete
+      end
+    end
+
+    def delete_files
+      Post.delete_files(id, file_path, large_file_path, preview_file_path)
+    end
+
     def distribute_files
       RemoteFileManager.new(file_path).distribute
       RemoteFileManager.new(preview_file_path).distribute if has_preview?
       RemoteFileManager.new(large_file_path).distribute if has_large?
-    end
-
-    def delete_remote_files
-      RemoteFileManager.new(file_path).delete
-      RemoteFileManager.new(preview_file_path).delete if has_preview?
-      RemoteFileManager.new(large_file_path).delete if has_large?
-    end
-
-    def delete_files
-      FileUtils.rm_f(file_path)
-      FileUtils.rm_f(large_file_path)
-      FileUtils.rm_f(preview_file_path)
     end
 
     def file_path_prefix
@@ -229,6 +237,23 @@ class Post < ActiveRecord::Base
     end
   end
 
+  module BackupMethods
+    extend ActiveSupport::Concern
+
+    def queue_backup
+      Post.delay(queue: "default", priority: -1).backup_file(file_path, id: id, type: :original)
+      Post.delay(queue: "default", priority: -1).backup_file(large_file_path, id: id, type: :large) if has_large?
+      Post.delay(queue: "default", priority: -1).backup_file(preview_file_path, id: id, type: :preview) if has_preview?
+    end
+
+    module ClassMethods
+      def backup_file(file_path, options = {})
+        backup_service = Danbooru.config.backup_service
+        backup_service.backup(file_path, options)
+      end
+    end
+  end
+
   module ImageMethods
     def device_scale
       if large_image_width > 320
@@ -296,17 +321,11 @@ class Post < ActiveRecord::Base
     end
 
     def flag!(reason, options = {})
-      if is_status_locked?
-        raise PostFlag::Error.new("Post is locked and cannot be flagged")
-      end
-
       flag = flags.create(:reason => reason, :is_resolved => false, :is_deletion => options[:is_deletion])
 
       if flag.errors.any?
         raise PostFlag::Error.new(flag.errors.full_messages.join("; "))
       end
-
-      update_column(:is_flagged, true) unless is_flagged?
     end
 
     def appeal!(reason)
@@ -387,11 +406,27 @@ class Post < ActiveRecord::Base
         base_36_id = base_10_id.to_s(36)
         "http://twitpic.com/#{base_36_id}"
 
-      when %r{\Ahttps?://(?:fc|th|pre|orig|img)\d{2}\.deviantart\.net/.+/[a-z0-9_]*_by_([a-z0-9_]+)-d([a-z0-9]+)\.}i
-        "http://#{$1}.deviantart.com/gallery/#/d#{$2}"
+      # http://orig12.deviantart.net/9b69/f/2017/023/7/c/illustration___tokyo_encount_oei__by_melisaongmiqin-dawi58s.png
+      # http://pre15.deviantart.net/81de/th/pre/f/2015/063/5/f/inha_by_inhaestudios-d8kfzm5.jpg
+      # http://th00.deviantart.net/fs71/PRE/f/2014/065/3/b/goruto_by_xyelkiltrox-d797tit.png
+      # http://th04.deviantart.net/fs70/300W/f/2009/364/4/d/Alphes_Mimic___Rika_by_Juriesute.png
+      # http://fc02.deviantart.net/fs48/f/2009/186/2/c/Animation_by_epe_tohri.swf
+      # http://fc08.deviantart.net/files/f/2007/120/c/9/Cool_Like_Me_by_47ness.jpg
+      # http://fc08.deviantart.net/images3/i/2004/088/8/f/Blackrose_for_MuzicFreq.jpg
+      # http://img04.deviantart.net/720b/i/2003/37/9/6/princess_peach.jpg
+      when %r{\Ahttps?://(?:fc|th|pre|orig|img|prnt)\d{2}\.deviantart\.net/.+/(?<title>[a-z0-9_]+)_by_(?<artist>[a-z0-9_]+)-d(?<id>[a-z0-9]+)\.}i
+        artist = $~[:artist].dasherize
+        title = $~[:title].titleize.strip.squeeze(" ").tr(" ", "-")
+        id = $~[:id].to_i(36)
+        "http://#{artist}.deviantart.com/art/#{title}-#{id}"
 
-      when %r{\Ahttps?://(?:fc|th|pre|orig|img)\d{2}\.deviantart\.net/.+/[a-f0-9]+-d([a-z0-9]+)\.}i
-        "http://deviantart.com/gallery/#/d#{$1}"
+      # http://prnt00.deviantart.net/9b74/b/2016/101/4/468a9d89f52a835d4f6f1c8caca0dfb2-pnjfbh.jpg
+      # http://fc00.deviantart.net/fs71/f/2013/234/d/8/d84e05f26f0695b1153e9dab3a962f16-d6j8jl9.jpg
+      # http://th04.deviantart.net/fs71/PRE/f/2013/337/3/5/35081351f62b432f84eaeddeb4693caf-d6wlrqs.jpg
+      # http://fc09.deviantart.net/fs22/o/2009/197/3/7/37ac79eaeef9fb32e6ae998e9a77d8dd.jpg
+      when %r{\Ahttps?://(?:fc|th|pre|orig|img|prnt)\d{2}\.deviantart\.net/.+/[a-f0-9]{32}-d(?<id>[a-z0-9]+)\.}i
+        id = $~[:id].to_i(36)
+        "http://deviantart.com/deviation/#{id}"
 
       when %r{\Ahttp://www\.karabako\.net/images(?:ub)?/karabako_(\d+)(?:_\d+)?\.}i
         "http://www.karabako.net/post/view/#{$1}"
@@ -931,7 +966,7 @@ class Post < ActiveRecord::Base
     end
 
     def favorited_by?(user_id)
-      fav_string =~ /(?:\A| )fav:#{user_id}(?:\Z| )/
+      !!(fav_string =~ /(?:\A| )fav:#{user_id}(?:\Z| )/)
     end
 
     def append_user_to_fav_string(user_id)
@@ -996,7 +1031,7 @@ class Post < ActiveRecord::Base
     end
 
     def uploader_name
-      User.id_to_name(uploader_id).tr("_", " ")
+      User.id_to_name(uploader_id)
     end
   end
 
@@ -1332,7 +1367,7 @@ class Post < ActiveRecord::Base
       end
 
       ModAction.log("permanently deleted post ##{id}")
-      delete!(:without_mod_action => true)
+      delete!("Permanently deleted post ##{id}", :without_mod_action => true)
       Post.without_timeout do
         give_favorites_to_parent
         update_children_on_destroy
@@ -1354,13 +1389,15 @@ class Post < ActiveRecord::Base
       ModAction.log("unbanned post ##{id}")
     end
 
-    def delete!(options = {})
+    def delete!(reason, options = {})
       if is_status_locked?
         self.errors.add(:is_status_locked, "; cannot delete post")
         return false
       end
 
       Post.transaction do
+        flag!(reason, is_deletion: true)
+
         self.is_deleted = true
         self.is_pending = false
         self.is_flagged = false
@@ -1375,11 +1412,7 @@ class Post < ActiveRecord::Base
         update_parent_on_save
 
         unless options[:without_mod_action]
-          if options[:reason]
-            ModAction.log("deleted post ##{id}, reason: #{options[:reason]}")
-          else
-            ModAction.log("deleted post ##{id}")
-          end
+          ModAction.log("deleted post ##{id}, reason: #{reason}")
         end
       end
     end
@@ -1404,6 +1437,14 @@ class Post < ActiveRecord::Base
       save
       Post.expire_cache_for_all(tag_array)
       ModAction.log("undeleted post ##{id}")
+    end
+
+    def replace!(params)
+      transaction do
+        replacement = replacements.create(params)
+        replacement.process!
+        replacement
+      end
     end
   end
 
@@ -1697,6 +1738,7 @@ class Post < ActiveRecord::Base
   end
   
   include FileMethods
+  include BackupMethods
   include ImageMethods
   include ApprovalMethods
   include PresenterMethods

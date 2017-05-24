@@ -56,11 +56,31 @@ class ForumTopicsControllerTest < ActionController::TestCase
         get :show, {:id => @forum_topic.id}
         assert_response :success
       end
+
+      should "record a topic visit for html requests" do
+        get :show, {id: @forum_topic.id}, {user_id: @user.id}
+        assert_not_nil(@user.reload.last_forum_read_at)
+      end
+
+      should "not record a topic visit for non-html requests" do
+        get :show, {id: @forum_topic.id, format: :json}, {user_id: @user.id}
+        assert_nil(@user.reload.last_forum_read_at)
+      end
+
+      should "render for atom feed" do
+        get :show, {:id => @forum_topic.id, :format => :atom}
+        assert_response :success
+      end
     end
 
     context "index action" do
       should "list all forum topics" do
         get :index
+        assert_response :success
+      end
+
+      should "render for atom feed" do
+        get :index, {:format => :atom}
         assert_response :success
       end
 

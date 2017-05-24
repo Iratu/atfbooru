@@ -1,10 +1,12 @@
 require 'test_helper'
 require 'helpers/pool_archive_test_helper'
 require 'helpers/saved_search_test_helper'
+require 'helpers/iqdb_test_helper'
 
 class PostTest < ActiveSupport::TestCase
   include PoolArchiveTestHelper
   include SavedSearchTestHelper
+  include IqdbTestHelper
 
   def assert_tag_match(posts, query)
     assert_equal(posts.map(&:id), Post.tag_match(query).pluck(:id))
@@ -78,18 +80,43 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "fail" do
-          @post.delete!
+          @post.delete!("test")
           assert_equal(["Is status locked ; cannot delete post"], @post.errors.full_messages)
           assert_equal(1, Post.where("id = ?", @post.id).count)
+        end
+      end
+
+      context "that is pending" do
+        setup do
+          @post = FactoryGirl.create(:post, is_pending: true)
+        end
+
+        should "succeed" do
+          @post.delete!("test")
+
+          assert_equal(true, @post.is_deleted)
+          assert_equal(1, @post.flags.size)
+          assert_match(/test/, @post.flags.last.reason)
         end
       end
 
       context "with the banned_artist tag" do
         should "also ban the post" do
           post = FactoryGirl.create(:post, :tag_string => "banned_artist")
-          post.delete!
+          post.delete!("test")
           post.reload
           assert(post.is_banned?)
+        end
+      end
+
+      context "that is still in cooldown after being flagged" do
+        should "succeed" do
+          post = FactoryGirl.create(:post)
+          post.flag!("test flag")
+          post.delete!("test deletion")
+
+          assert_equal(true, post.is_deleted)
+          assert_equal(2, post.flags.size)
         end
       end
 
@@ -98,7 +125,7 @@ class PostTest < ActiveSupport::TestCase
         post = FactoryGirl.create(:post, :tag_string => "aaa")
         assert_equal(1, Post.fast_count)
         assert_equal(1, Post.fast_count("aaa"))
-        post.delete!
+        post.delete!("test")
         assert_equal(1, Post.fast_count)
         assert_equal(1, Post.fast_count("aaa"))
       end
@@ -106,14 +133,14 @@ class PostTest < ActiveSupport::TestCase
       should "toggle the is_deleted flag" do
         post = FactoryGirl.create(:post)
         assert_equal(false, post.is_deleted?)
-        post.delete!
+        post.delete!("test")
         assert_equal(true, post.is_deleted?)
       end
 
       should "not decrement the tag counts" do
         post = FactoryGirl.create(:post, :tag_string => "aaa")
         assert_equal(1, Tag.find_by_name("aaa").post_count)
-        post.delete!
+        post.delete!("test")
         assert_equal(1, Tag.find_by_name("aaa").post_count)
       end
     end
@@ -207,7 +234,7 @@ class PostTest < ActiveSupport::TestCase
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
           user = FactoryGirl.create(:gold_user)
           c1.add_favorite!(user)
-          c1.delete!
+          c1.delete!("test")
           p1.reload
           assert(Favorite.exists?(:post_id => c1.id, :user_id => user.id))
           assert(!Favorite.exists?(:post_id => p1.id, :user_id => user.id))
@@ -218,7 +245,7 @@ class PostTest < ActiveSupport::TestCase
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
           user = FactoryGirl.create(:gold_user)
           c1.add_favorite!(user)
-          c1.delete!(:move_favorites => true)
+          c1.delete!("test", :move_favorites => true)
           p1.reload
           assert(!Favorite.exists?(:post_id => c1.id, :user_id => user.id), "Child should not still have favorites")
           assert(Favorite.exists?(:post_id => p1.id, :user_id => user.id), "Parent should have favorites")
@@ -227,7 +254,7 @@ class PostTest < ActiveSupport::TestCase
         should "not update the parent's has_children flag" do
           p1 = FactoryGirl.create(:post)
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-          c1.delete!
+          c1.delete!("test")
           p1.reload
           assert(p1.has_children?, "Parent should have children")
         end
@@ -237,7 +264,7 @@ class PostTest < ActiveSupport::TestCase
         should "not remove the has_children flag" do
           p1 = FactoryGirl.create(:post)
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-          p1.delete!
+          p1.delete!("test")
           p1.reload
           assert_equal(true, p1.has_children?)
         end
@@ -245,7 +272,7 @@ class PostTest < ActiveSupport::TestCase
         should "not remove the parent of that child" do
           p1 = FactoryGirl.create(:post)
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-          p1.delete!
+          p1.delete!("test")
           c1.reload
           assert_not_nil(c1.parent)
         end
@@ -257,7 +284,7 @@ class PostTest < ActiveSupport::TestCase
           c1 = FactoryGirl.create(:post, :parent_id => p1.id)
           c2 = FactoryGirl.create(:post, :parent_id => p1.id)
           c3 = FactoryGirl.create(:post, :parent_id => p1.id)
-          p1.delete!
+          p1.delete!("test")
           c1.reload
           c2.reload
           c3.reload
@@ -273,7 +300,7 @@ class PostTest < ActiveSupport::TestCase
         new_user = FactoryGirl.create(:moderator_user)
         p1 = FactoryGirl.create(:post)
         c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-        c1.delete!
+        c1.delete!("test")
         CurrentUser.scoped(new_user, "127.0.0.1") do
           c1.undelete!
         end
@@ -284,7 +311,7 @@ class PostTest < ActiveSupport::TestCase
       should "preserve the parent's has_children flag" do
         p1 = FactoryGirl.create(:post)
         c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-        c1.delete!
+        c1.delete!("test")
         c1.undelete!
         p1.reload
         assert_not_nil(c1.parent_id)
@@ -1359,9 +1386,9 @@ class PostTest < ActiveSupport::TestCase
 
         should "normalize deviantart links" do
           @post.source = "http://fc06.deviantart.net/fs71/f/2013/295/d/7/you_are_already_dead__by_mar11co-d6rgm0e.jpg"
-          assert_equal("http://mar11co.deviantart.com/gallery/#/d6rgm0e", @post.normalized_source)
+          assert_equal("http://mar11co.deviantart.com/art/You-Are-Already-Dead-408921710", @post.normalized_source)
           @post.source = "http://fc00.deviantart.net/fs71/f/2013/337/3/5/35081351f62b432f84eaeddeb4693caf-d6wlrqs.jpg"
-          assert_equal("http://deviantart.com/gallery/#/d6wlrqs", @post.normalized_source)
+          assert_equal("http://deviantart.com/deviation/417560500", @post.normalized_source)
         end
 
         should "normalize karabako links" do

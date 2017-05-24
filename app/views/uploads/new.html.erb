@@ -69,15 +69,18 @@
           <%= f.text_field :parent_id %>
         </div>
 
-        <% if @upload.has_artist_commentary? %>
+        <strong>Commentary</strong>
+        <a href="#" id="toggle-artist-commentary">show »</a>
+
+        <div class="artist-commentary" style="display: none;">
           <div class="input">
-            <%= f.label :artist_commentary_title, "Artist Commentary Title" %>
-            <%= f.text_field :artist_commentary_title, :value => @upload.artist_commentary_title %>
+            <%= f.label :artist_commentary_title, "Title" %>
+            <%= f.text_field :artist_commentary_title %>
           </div>
 
           <div class="input">
-            <%= f.label :artist_commentary_desc, "Artist Commentary" %>
-            <%= f.text_area :artist_commentary_desc, :value => @upload.artist_commentary_desc, :size => "60x5" %>
+            <%= f.label :artist_commentary_desc, "Description" %>
+            <%= f.text_area :artist_commentary_desc, :size => "60x5" %>
           </div>
 
           <div class="input">
@@ -86,7 +89,7 @@
               Include Commentary
             </label>
           </div>
-        <% end %>
+        </div>
 
         <% if Danbooru.config.iqdbs_server %>
           <% if params[:url] %>

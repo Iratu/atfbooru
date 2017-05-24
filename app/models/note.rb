@@ -56,7 +56,7 @@ class Note < ActiveRecord::Base
       end
 
       if params[:post_id].present?
-        q = q.where("post_id = ?", params[:post_id].to_i)
+        q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
       end
 
       if params[:post_tags_match].present?
@@ -68,7 +68,7 @@ class Note < ActiveRecord::Base
       end
 
       if params[:creator_id].present?
-        q = q.where("creator_id = ?", params[:creator_id].to_i)
+        q = q.where(creator_id: params[:creator_id].split(",").map(&:to_i))
       end
 
       q
@@ -124,7 +124,15 @@ class Note < ActiveRecord::Base
   end
 
   def creator_name
-    User.id_to_name(creator_id).tr("_", " ")
+    User.id_to_name(creator_id)
+  end
+
+  def rescale!(x_scale, y_scale)
+    self.x *= x_scale
+    self.y *= y_scale
+    self.width *= x_scale
+    self.height *= y_scale
+    save!
   end
 
   def update_post

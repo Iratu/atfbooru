@@ -8,6 +8,10 @@ class AnonymousUser
     0
   end
 
+  def level_string
+    "Anonymous"
+  end
+
   def comment_threshold
     0
   end
@@ -34,10 +38,6 @@ class AnonymousUser
 
   def is_anonymous?
     true
-  end
-
-  def is_banned?
-    false
   end
 
   def is_banned_or_ip_banned?
@@ -245,19 +245,15 @@ class AnonymousUser
     false
   end
 
-  def is_voter?
-    false
-  end
-
-  def is_super_voter?
-    false
-  end
-
   def disable_tagged_filenames?
     false
   end
 
-  %w(member banned gold builder platinum moderator admin).each do |name|
+  def ban_expired?
+    false
+  end
+
+  User::Roles.reject {|r| r == :anonymous}.each do |name|
     define_method("is_#{name}?") do
       false
     end

@@ -5,6 +5,8 @@ module Moderator
       #before_filter :moderator_only, :only => [:expunge]
       skip_before_filter :api_check
 
+      respond_to :html, :json, :xml
+
       def confirm_delete
         @post = ::Post.find(params[:id])
       end
@@ -12,8 +14,7 @@ module Moderator
       def delete
         @post = ::Post.find(params[:id])
         if params[:commit] == "Delete"
-          @post.flag!(params[:reason], :is_deletion => true)
-          @post.delete!(:reason => params[:reason], :move_favorites => params[:move_favorites].present?)
+          @post.delete!(params[:reason], :move_favorites => params[:move_favorites].present?)
         end
         redirect_to(post_path(@post))
       end

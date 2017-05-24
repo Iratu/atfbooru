@@ -378,6 +378,17 @@ class PostQueryBuilder
       relation = relation.where("favorites.user_id % 100 = ? and favorites.user_id = ?", user_id % 100, user_id).order("favorites.id DESC")
     end
 
+    # HACK: if we're using a date: or age: metatag, default to ordering by
+    # created_at instead of id so that the query will use the created_at index.
+    if q[:date].present? || q[:age].present?
+      case q[:order]
+      when "id", "id_asc"
+        q[:order] = "created_at_asc"
+      when "id_desc", nil
+        q[:order] = "created_at_desc"
+      end
+    end
+
     if q[:order] == "rank"
       relation = relation.where("posts.score > 0 and posts.created_at >= ?", 2.days.ago)
     elsif q[:order] == "landscape" || q[:order] == "portrait"
@@ -392,34 +403,40 @@ class PostQueryBuilder
       relation = relation.order("posts.id DESC")
 
     when "score", "score_desc"
-      relation = relation.order("posts.score DESC")
+      relation = relation.order("posts.score DESC, posts.id DESC")
 
     when "score_asc"
-      relation = relation.order("posts.score ASC")
+      relation = relation.order("posts.score ASC, posts.id ASC")
 
     when "favcount"
-      relation = relation.order("posts.fav_count DESC")
+      relation = relation.order("posts.fav_count DESC, posts.id DESC")
 
     when "favcount_asc"
-      relation = relation.order("posts.fav_count ASC")
+      relation = relation.order("posts.fav_count ASC, posts.id ASC")
+
+    when "created_at", "created_at_desc"
+      relation = relation.order("posts.created_at DESC")
+
+    when "created_at_asc"
+      relation = relation.order("posts.created_at ASC")
 
     when "change", "change_desc"
-      relation = relation.order("posts.updated_at DESC")
+      relation = relation.order("posts.updated_at DESC, posts.id DESC")
 
     when "change_asc"
-      relation = relation.order("posts.updated_at ASC")
+      relation = relation.order("posts.updated_at ASC, posts.id ASC")
 
     when "comment", "comm"
-      relation = relation.order("posts.last_commented_at DESC NULLS LAST")
+      relation = relation.order("posts.last_commented_at DESC NULLS LAST, posts.id DESC")
 
     when "comment_asc", "comm_asc"
-      relation = relation.order("posts.last_commented_at ASC NULLS LAST")
+      relation = relation.order("posts.last_commented_at ASC NULLS LAST, posts.id ASC")
 
     when "comment_bumped"
       relation = relation.order("posts.last_comment_bumped_at DESC NULLS LAST")
 
     when "comment_bumped_asc"
-      relation = relation.order("posts.last_comment_bumped_at ASC NULLS LAST")
+      relation = relation.order("posts.last_comment_bumped_at ASC NULLS FIRST")
 
     when "note"
       relation = relation.order("posts.last_noted_at DESC NULLS LAST")

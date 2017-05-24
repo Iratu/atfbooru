@@ -72,6 +72,10 @@ class ForumTopic < ActiveRecord::Base
       q = permitted
       return q if params.blank?
 
+      if params[:id].present?
+        q = q.where(id: params[:id].split(",").map(&:to_i))
+      end
+
       if params[:mod_only].present?
         q = q.where("min_level >= ?", MIN_LEVELS[:Moderator])
       end
@@ -103,8 +107,8 @@ class ForumTopic < ActiveRecord::Base
       ForumTopicVisit.where("user_id = ? and forum_topic_id = ? and last_read_at >= ?", user.id, id, updated_at).exists?
     end
 
-    def mark_as_read!(user = nil)
-      user ||= CurrentUser.user
+    def mark_as_read!(user = CurrentUser.user)
+      return if user.is_anonymous?
       
       match = ForumTopicVisit.where(:user_id => user.id, :forum_topic_id => id).first
       if match

@@ -80,6 +80,7 @@ class User < ActiveRecord::Base
   has_many :post_votes
   has_many :bans, lambda {order("bans.id desc")}
   has_one :recent_ban, lambda {order("bans.id desc")}, :class_name => "Ban"
+
   has_one :api_key
   has_one :dmail_filter
   has_one :super_voter
@@ -109,7 +110,10 @@ class User < ActiveRecord::Base
     def unban!
       self.is_banned = false
       save
-      ban.destroy
+    end
+
+    def ban_expired?
+      is_banned? && recent_ban.try(:expired?)
     end
   end
 
@@ -606,9 +610,9 @@ end
 
     def api_regen_multiplier
       # regen this amount per second
-      if is_platinum? && api_key.present?
+      if is_platinum?
         4
-      elsif is_gold? && api_key.present?
+      elsif is_gold?
         2
       else
         1
@@ -618,9 +622,9 @@ end
     def api_burst_limit
       # can make this many api calls at once before being bound by
       # api_regen_multiplier refilling your pool
-      if is_platinum? && api_key.present?
+      if is_platinum?
         60
-      elsif is_gold? && api_key.present?
+      elsif is_gold?
         30
       else
         10

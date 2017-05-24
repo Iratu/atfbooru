@@ -41,12 +41,8 @@ module Sources
         "http://www.pixiv.net"
       end
 
-      def has_artist_commentary?
-        @artist_commentary_desc.present?
-      end
-
       def normalized_for_artist_finder?
-        url =~ %r!https?://img\.pixiv\.net/img/#{MONIKER}/?$!i
+        url =~ %r!\Ahttp://www\.pixiv\.net/member\.php\?id=[0-9]+\z/!
       end
 
       def normalizable_for_artist_finder?
@@ -54,15 +50,10 @@ module Sources
       end
 
       def normalize_for_artist_finder!
-        if has_moniker?
-          moniker = get_moniker_from_url
-        else
-          @illust_id = illust_id_from_url!
-          @metadata = get_metadata_from_papi(@illust_id)
-          moniker = @metadata.moniker
-        end
+        @illust_id = illust_id_from_url!
+        @metadata = get_metadata_from_papi(@illust_id)
 
-        "http://img.pixiv.net/img/#{moniker}/"
+        "http://www.pixiv.net/member.php?id=#{@metadata.user_id}/"
       end
 
       def get
@@ -79,11 +70,14 @@ module Sources
           page = agent.get(URI.parse(normalized_url))
         end
         
-        @artist_name, @profile_url = get_profile_from_page(page)
-        @pixiv_moniker = get_moniker_from_page(page)
+        @artist_name = @metadata.name
+        @profile_url = "http://www.pixiv.net/member.php?id=#{@metadata.user_id}"
+        @pixiv_moniker = @metadata.moniker
         @zip_url, @ugoira_frame_data, @ugoira_content_type = get_zip_url_from_page(page)
-        @tags = get_tags_from_page(page)
-        @page_count = get_page_count_from_page(page)
+        @tags = @metadata.tags.map do |tag|
+          [tag, "https://www.pixiv.net/search.php?s_mode=s_tag_full&#{{word: tag}.to_param}"]
+        end
+        @page_count = @metadata.page_count
         @artist_commentary_title = @metadata.artist_commentary_title
         @artist_commentary_desc = @metadata.artist_commentary_desc
 
@@ -227,20 +221,6 @@ module Sources
         end
       end
 
-      def get_profile_from_page(page)
-        profile_url = page.search("a.user-link").first
-        if profile_url
-          profile_url = "http://www.pixiv.net" + profile_url["href"]
-        end
-
-        artist_name = page.search("h1.user").first
-        if artist_name
-          artist_name = artist_name.inner_text
-        end
-
-        return [artist_name, profile_url]
-      end
-
       def get_moniker_from_page(page)
         # <a class="tab-feed" href="/stacc/gennmai-226">Feed</a>
         stacc_link = page.search("a.tab-feed").first
@@ -299,30 +279,6 @@ module Sources
           content_type = data["mime_type"]
 
           return [zip_url, frame_data, content_type]
-        end
-      end
-
-      def get_tags_from_page(page)
-        # puts page.root.to_xhtml
-
-        links = page.search("ul.tags a.text").find_all do |node|
-          node["href"] =~ /search\.php/
-        end
-
-        original_flag = page.search("a.original-works")
-
-        if links.any?
-          links.map! do |node|
-            [node.inner_text, "http://www.pixiv.net" + node.attr("href")]
-          end
-
-          if original_flag.any?
-            links << ["オリジナル", "http://www.pixiv.net/search.php?s_mode=s_tag_full&word=%E3%82%AA%E3%83%AA%E3%82%B8%E3%83%8A%E3%83%AB"]
-          end
-
-          links
-        else
-          []
         end
       end
 
