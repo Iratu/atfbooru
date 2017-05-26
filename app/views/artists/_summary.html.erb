@@ -14,10 +14,10 @@
     <% if artist.group_name.present? %>
       <li><strong>Group</strong> <%= link_to_artist(artist.group_name) %></li>
     <% end %>
-    <% if artist.members.any.s? %>
+    <% if artist.members.any? %>
       <li><strong>Members</strong> <%= link_to_artists(artist.members.map(&:name)) %></li>
     <% end %>
-    <% if artist.domains.any.s? %>
+    <% if artist.domains.any? %>
       <li><strong>Domains</strong></li>
       <ul>
         <% artist.domains.each do |url, count| %>
