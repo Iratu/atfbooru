@@ -830,7 +830,7 @@ class Post < ActiveRecord::Base
           end
 
         when /^source:none$/i
-          self.source = nil
+          self.source = ""
 
         when /^source:"(.*)"$/i
           self.source = $1
@@ -1054,22 +1054,26 @@ class Post < ActiveRecord::Base
     def add_pool!(pool, force = false)
       return if belongs_to_pool?(pool)
       return if pool.is_deleted? && !force
-      reload
-      self.pool_string = "#{pool_string} pool:#{pool.id}".strip
-      set_pool_category_pseudo_tags
-      update_column(:pool_string, pool_string) unless new_record?
-      pool.add!(self)
+
+      with_lock do
+        self.pool_string = "#{pool_string} pool:#{pool.id}".strip
+        set_pool_category_pseudo_tags
+        update_column(:pool_string, pool_string) unless new_record?
+        pool.add!(self)
+      end
     end
 
     def remove_pool!(pool, force = false)
       return unless belongs_to_pool?(pool)
       return unless CurrentUser.user.can_remove_from_pools?
       return if pool.is_deleted? && !force
-      reload
-      self.pool_string = pool_string.gsub(/(?:\A| )pool:#{pool.id}(?:\Z| )/, " ").strip
-      set_pool_category_pseudo_tags
-      update_column(:pool_string, pool_string) unless new_record?
-      pool.remove!(self)
+
+      with_lock do
+        self.pool_string = pool_string.gsub(/(?:\A| )pool:#{pool.id}(?:\Z| )/, " ").strip
+        set_pool_category_pseudo_tags
+        update_column(:pool_string, pool_string) unless new_record?
+        pool.remove!(self)
+      end
     end
 
     def remove_from_all_pools
@@ -1603,6 +1607,17 @@ class Post < ActiveRecord::Base
 
     def random_down(key)
       where("md5 >= ?", key).reorder("md5 asc").first
+    end
+
+    def sample(query, sample_size)
+      CurrentUser.without_safe_mode do
+        tag_match(query).reorder(:md5).limit(sample_size)
+      end
+    end
+
+    # unflattens the tag_string into one tag per row.
+    def with_unflattened_tags
+      joins("CROSS JOIN unnest(string_to_array(tag_string, ' ')) AS tag")
     end
 
     def pending
