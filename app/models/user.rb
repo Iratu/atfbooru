@@ -545,6 +545,10 @@ end
       created_at <= 1.week.ago
     end
 
+    def can_view_flagger?(flagger_id)
+      is_moderator? || flagger_id == id
+    end
+
     def base_upload_limit
       if created_at >= 1.month.ago
         100
@@ -712,6 +716,7 @@ end
     end
 
     def pool_version_count
+      return nil unless PoolArchive.enabled?
       PoolArchive.for_user(id).count
     end
 

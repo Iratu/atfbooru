@@ -1,6 +1,8 @@
 module Sources
   module Strategies
     class DeviantArt < Base
+      DEVIANTART_SESSION_CACHE_KEY = "deviantart-session"
+
       def self.url_match?(url)
         url =~ /^https?:\/\/(?:.+?\.)?deviantart\.(?:com|net)/
       end
@@ -24,12 +26,57 @@ module Sources
 
       def get
         agent.get(URI.parse(normalized_url)) do |page|
+          page.encoding = "utf-8"
           @artist_name, @profile_url = get_profile_from_page(page)
           @image_url = get_image_url_from_page(page)
           @tags = get_tags_from_page(page)
           @artist_commentary_title = get_artist_commentary_title_from_page(page)
           @artist_commentary_desc = get_artist_commentary_desc_from_page(page)
         end
+      end
+
+      def self.to_dtext(text)
+        html = Nokogiri::HTML.fragment(text)
+
+        dtext = html.children.map do |element|
+          case element.name
+          when "text"
+            element.content
+          when "br"
+            "\n"
+          when "blockquote"
+            "[quote]#{to_dtext(element.inner_html)}[/quote]" if element.inner_html.present?
+          when "small", "sub"
+            "[tn]#{to_dtext(element.inner_html)}[/tn]" if element.inner_html.present?
+          when "b"
+            "[b]#{to_dtext(element.inner_html)}[/b]" if element.inner_html.present?
+          when "i"
+            "[i]#{to_dtext(element.inner_html)}[/i]" if element.inner_html.present?
+          when "u"
+            "[u]#{to_dtext(element.inner_html)}[/u]" if element.inner_html.present?
+          when "strike"
+            "[s]#{to_dtext(element.inner_html)}[/s]" if element.inner_html.present?
+          when "li"
+            "* #{to_dtext(element.inner_html)}" if element.inner_html.present?
+          when "h1", "h2", "h3", "h4", "h5", "h6"
+            hN = element.name
+            title = to_dtext(element.inner_html)
+            "#{hN}. #{title}\n"
+          when "a"
+            title = to_dtext(element.inner_html)
+            url = element.attributes["href"].value
+            url = url.gsub(%r!\Ahttps?://www\.deviantart\.com/users/outgoing\?!i, "")
+            %("#{title}":[#{url}]) if title.present?
+          when "img"
+            element.attributes["title"] || element.attributes["alt"] || ""
+          when "comment"
+            # ignored
+          else
+            to_dtext(element.inner_html)
+          end
+        end.join
+
+        dtext
       end
 
     protected
@@ -86,7 +133,7 @@ module Sources
         desc = page.search("div.dev-description div.text.block")
 
         if desc.any?
-          desc[0].inner_text
+          desc[0].children.to_s
         end
       end
 
@@ -107,14 +154,47 @@ module Sources
       def agent
         @agent ||= begin
           mech = Mechanize.new
-          
+          auth, userinfo = session_cookies(mech)
+
           # This cookie needs to be set to allow viewing of mature works
           cookie = Mechanize::Cookie.new("agegate_state", "1")
           cookie.domain = ".deviantart.com"
           cookie.path = "/"
           mech.cookie_jar.add(cookie)
 
+          cookie = Mechanize::Cookie.new("auth", auth)
+          cookie.domain = ".deviantart.com"
+          cookie.path = "/"
+          mech.cookie_jar.add(cookie)
+
+          cookie = Mechanize::Cookie.new("userinfo", userinfo)
+          cookie.domain = ".deviantart.com"
+          cookie.path = "/"
+          mech.cookie_jar.add(cookie)
+
           mech
+        end
+      end
+
+      def session_cookies(mech)
+        Cache.get(DEVIANTART_SESSION_CACHE_KEY, 2.hours) do
+          page = mech.get("https://www.deviantart.com/users/login")
+          validate_key = page.search('input[name="validate_key"]').attribute("value").value
+          validate_token = page.search('input[name="validate_token"]').attribute("value").value
+
+          mech.post("https://www.deviantart.com/users/login", {
+            username: Danbooru.config.deviantart_login,
+            password: Danbooru.config.deviantart_password,
+            validate_key: validate_key,
+            validate_token: validate_token,
+            remember_me: 1,
+          })
+
+          auth = mech.cookies.find { |cookie| cookie.name == "auth" }.value
+          userinfo = mech.cookies.find { |cookie| cookie.name == "userinfo" }.value
+          mech.cookie_jar.clear
+
+          [auth, userinfo]
         end
       end
     end

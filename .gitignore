@@ -8,6 +8,7 @@ db/*.sqlite3
 log/*.log
 tmp/*
 public/data
+public/assets
 vendor/cache/*.gem
 .sass-cache
 .DS_Store
@@ -20,5 +21,5 @@ danbooru.db
 iqdb.db
 danbooru.sublime-project
 danbooru.sublime-workspace
-script/scratch.rb
+script/scratch.*
 test/fixtures/vcr_cassettes

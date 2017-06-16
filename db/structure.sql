@@ -603,10 +603,10 @@ ALTER SEQUENCE api_keys_id_seq OWNED BY api_keys.id;
 CREATE TABLE artist_commentaries (
     id integer NOT NULL,
     post_id integer NOT NULL,
-    original_title text,
-    original_description text,
-    translated_title text,
-    translated_description text,
+    original_title text DEFAULT ''::text NOT NULL,
+    original_description text DEFAULT ''::text NOT NULL,
+    translated_title text DEFAULT ''::text NOT NULL,
+    translated_description text DEFAULT ''::text NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone
 );
@@ -2838,8 +2838,6 @@ CREATE TABLE saved_searches (
     id integer NOT NULL,
     user_id integer,
     query text,
-    name text,
-    category character varying,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
     labels text[] DEFAULT '{}'::text[] NOT NULL
@@ -6893,6 +6891,20 @@ CREATE INDEX index_posts_on_image_width ON posts USING btree (image_width);
 
 
 --
+-- Name: index_posts_on_is_flagged; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_posts_on_is_flagged ON posts USING btree (is_flagged) WHERE (is_flagged = true);
+
+
+--
+-- Name: index_posts_on_is_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_posts_on_is_pending ON posts USING btree (is_pending) WHERE (is_pending = true);
+
+
+--
 -- Name: index_posts_on_last_comment_bumped_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7548,4 +7560,8 @@ INSERT INTO schema_migrations (version) VALUES ('20170515235205');
 INSERT INTO schema_migrations (version) VALUES ('20170519204506');
 
 INSERT INTO schema_migrations (version) VALUES ('20170526183928');
+
+INSERT INTO schema_migrations (version) VALUES ('20170608043651');
+
+INSERT INTO schema_migrations (version) VALUES ('20170613200356');
 

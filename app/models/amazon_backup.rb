@@ -136,19 +136,19 @@ class AmazonBackup < ActiveRecord::Base
         base64_md5 = Digest::MD5.base64digest(File.read(post.file_path))
         key = File.basename(post.file_path)
         body = open(post.file_path, "rb")
-        client.put_object(bucket: bucket, key: key, body: body, content_md5: base64_md5)
+        client.put_object(bucket: bucket, key: key, body: body, content_md5: base64_md5, acl: "public-read")
       end
 
       if post.has_preview? && File.exists?(post.preview_file_path)
         key = "preview/#{post.md5}.jpg"
         body = open(post.preview_file_path, "rb")
-        client.put_object(bucket: bucket, key: key, body: body)
+        client.put_object(bucket: bucket, key: key, body: body, acl: "public-read")
       end
 
       if File.exists?(post.large_file_path)
-        key = "large/#{post.md5}.#{post.large_file_ext}"
+        key = "sample/#{Danbooru.config.large_image_prefix}#{post.md5}.#{post.large_file_ext}"
         body = open(post.large_file_path, "rb")
-        client.put_object(bucket: bucket, key: key, body: body)
+        client.put_object(bucket: bucket, key: key, body: body, acl: "public-read")
       end
 
       AmazonBackup.update_id(post.id)

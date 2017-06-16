@@ -5,7 +5,7 @@ module Sources
     attr_reader :url, :strategy
     delegate :get, :get_size, :site_name, :artist_name, 
       :profile_url, :image_url, :tags, :artist_record, :unique_id, 
-      :page_count, :file_url, :ugoira_frame_data, :ugoira_content_type, :image_urls,
+      :file_url, :ugoira_frame_data, :ugoira_content_type, :image_urls,
       :artist_commentary_title, :artist_commentary_desc,
       :dtext_artist_commentary_title, :dtext_artist_commentary_desc,
       :rewrite_thumbnails, :illust_id_from_url, :to => :strategy
@@ -14,12 +14,12 @@ module Sources
       [Strategies::PixivWhitecube, Strategies::Pixiv, Strategies::NicoSeiga, Strategies::DeviantArt, Strategies::ArtStation, Strategies::Nijie, Strategies::Twitter, Strategies::Tumblr, Strategies::Pawoo]
     end
 
-    def initialize(url, options = {})
+    def initialize(url, referer_url: nil)
       @url = url
 
       Site.strategies.each do |strategy|
-        if strategy.url_match?(url)
-          @strategy = strategy.new(url, options[:referer_url])
+        if strategy.url_match?(url) || strategy.url_match?(referer_url)
+          @strategy = strategy.new(url, referer_url)
           break
         end
       end
@@ -54,6 +54,7 @@ module Sources
           tag
         end
       end
+      untranslated_tags.reject! {|x| x.blank?}
       WikiPage.other_names_equal(untranslated_tags).map{|wiki_page| [wiki_page.title, wiki_page.category_name]}
     end
 
@@ -62,13 +63,13 @@ module Sources
         :artist_name => artist_name,
         :profile_url => profile_url,
         :image_url => image_url,
+        :image_urls => image_urls,
         :normalized_for_artist_finder_url => normalize_for_artist_finder!,
         :tags => tags,
         :translated_tags => translated_tags,
         :danbooru_name => artist_record.try(:first).try(:name),
         :danbooru_id => artist_record.try(:first).try(:id),
         :unique_id => unique_id,
-        :page_count => page_count,
         :artist_commentary => {
           :title => artist_commentary_title,
           :description => artist_commentary_desc,

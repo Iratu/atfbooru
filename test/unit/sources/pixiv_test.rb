@@ -77,14 +77,14 @@ module Sources
         end
 
         should "get the page count" do
-          assert_equal(3, @site.page_count)
+          assert_equal(3, @site.image_urls.size)
         end
 
         should "get the tags" do
           pixiv_tags  = @site.tags.map(&:first)
           pixiv_links = @site.tags.map(&:last)
 
-          assert_equal(["漫画", "foo", "bar", "tag1", "tag2", "derp", "オリジナル"], pixiv_tags)
+          assert_equal(["漫画", "foo", "bar", "tag1", "tag2", "derp", "鉛筆", "色鉛筆", "シャープペンシル"], pixiv_tags)
           assert_contains(pixiv_links, /search\.php/)
         end
 
@@ -108,7 +108,7 @@ module Sources
         end
 
         should "get the page count" do
-          assert_equal(1, @site.page_count)
+          assert_equal(1, @site.image_urls.size)
         end
 
         should "get the full size image url" do

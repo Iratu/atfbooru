@@ -244,9 +244,17 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       should "find nothing for bad IDs" do
-        assert_raise(PixivApiClient::Error) do
-          assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
-        end
+        assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
+      end
+    end
+
+    context "when finding nico seiga artists" do
+      setup do
+        FactoryGirl.create(:artist, :name => "osamari", :url_string => "http://seiga.nicovideo.jp/user/illust/7017777")
+      end
+
+      should "find the artist by the profile" do
+        assert_artist_found("osamari", "http://seiga.nicovideo.jp/seiga/im4937663")
       end
     end
 

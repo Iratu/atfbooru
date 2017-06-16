@@ -1,7 +1,7 @@
 class Tag < ActiveRecord::Base
   COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 1000
-  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype"
-  SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm"
+  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|sub|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype|flagger|-flagger|appealer|-appealer"
+  SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm|flagger|-flagger|appealer|-appealer"
   attr_accessible :category, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :is_locked, :as => [:moderator, :admin]
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
@@ -436,18 +436,74 @@ class Tag < ActiveRecord::Base
             q[:uploader_id] = user_id unless user_id.blank?
 
           when "-approver"
-            q[:approver_id_neg] ||= []
-            user_id = User.name_to_id($2)
-            q[:approver_id_neg] << user_id unless user_id.blank?
+            if $2 == "none"
+              q[:approver_id] = "any"
+            elsif $2 == "any"
+              q[:approver_id] = "none"
+            else
+              q[:approver_id_neg] ||= []
+              user_id = User.name_to_id($2)
+              q[:approver_id_neg] << user_id unless user_id.blank?
+            end
 
           when "approver"
             if $2 == "none"
-              q[:approver_id] = "none"              
+              q[:approver_id] = "none"
             elsif $2 == "any"
               q[:approver_id] = "any"
             else
               user_id = User.name_to_id($2)
               q[:approver_id] = user_id unless user_id.blank?
+            end
+
+          when "flagger"
+            q[:flagger_ids] ||= []
+
+            if $2 == "none"
+              q[:flagger_ids] << "none"
+            elsif $2 == "any"
+              q[:flagger_ids] << "any"
+            else
+              user_id = User.name_to_id($2)
+              q[:flagger_ids] << user_id unless user_id.blank?
+            end
+
+          when "-flagger"
+            if $2 == "none"
+              q[:flagger_ids] ||= []
+              q[:flagger_ids] << "any"
+            elsif $2 == "any"
+              q[:flagger_ids] ||= []
+              q[:flagger_ids] << "none"
+            else
+              q[:flagger_ids_neg] ||= []
+              user_id = User.name_to_id($2)
+              q[:flagger_ids_neg] << user_id unless user_id.blank?
+            end
+
+          when "appealer"
+            q[:appealer_ids] ||= []
+
+            if $2 == "none"
+              q[:appealer_ids] << "none"
+            elsif $2 == "any"
+              q[:appealer_ids] << "any"
+            else
+              user_id = User.name_to_id($2)
+              q[:appealer_ids] << user_id unless user_id.blank?
+            end
+
+          when "-appealer"
+            if $2 == "none"
+              q[:appealer_ids] ||= []
+              q[:appealer_ids] << "any"
+            elsif $2 == "any"
+              q[:appealer_ids] ||= []
+              q[:appealer_ids] << "none"
+            else
+              q[:appealer_ids_neg] ||= []
+              user_id = User.name_to_id($2)
+              q[:appealer_ids_neg] << user_id unless user_id.blank?
             end
 
           when "commenter", "comm"
@@ -485,7 +541,11 @@ class Tag < ActiveRecord::Base
             q[:artcomm_ids] << user_id unless user_id.blank?
 
           when "-pool"
-            if $2.downcase == "series"
+            if $2.downcase == "none"
+              q[:pool] = "any"
+            elsif $2.downcase == "any"
+              q[:pool] = "none"
+            elsif $2.downcase == "series"
               q[:tags][:exclude] << "pool:series"
             elsif $2.downcase == "collection"
               q[:tags][:exclude] << "pool:collection"
@@ -614,7 +674,14 @@ class Tag < ActiveRecord::Base
             q[:parent] = $2.downcase
 
           when "-parent"
-            q[:parent_neg] = $2.downcase
+            if $2.downcase == "none"
+              q[:parent] = "any"
+            elsif $2.downcase == "any"
+              q[:parent] = "none"
+            else
+              q[:parent_neg_ids] ||= []
+              q[:parent_neg_ids] << $2.downcase
+            end
 
           when "child"
             q[:child] = $2.downcase

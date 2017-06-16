@@ -68,9 +68,12 @@ class ForumTopic < ActiveRecord::Base
       where("min_level <= ?", CurrentUser.level)
     end
 
+    def sticky_first
+      order(is_sticky: :desc, updated_at: :desc)
+    end
+
     def search(params)
       q = permitted
-      return q if params.blank?
 
       if params[:id].present?
         q = q.where(id: params[:id].split(",").map(&:to_i))
@@ -90,6 +93,13 @@ class ForumTopic < ActiveRecord::Base
 
       if params[:title].present?
         q = q.where("title = ?", params[:title])
+      end
+
+      case params[:order]
+      when "sticky"
+        q = q.sticky_first
+      else
+        q = q.order(updated_at: :desc)
       end
 
       q
@@ -117,7 +127,7 @@ class ForumTopic < ActiveRecord::Base
         ForumTopicVisit.create(:user_id => user.id, :forum_topic_id => id, :last_read_at => updated_at)
       end
 
-      has_unread_topics = ForumTopic.active.where("forum_topics.updated_at >= ?", user.last_forum_read_at)
+      has_unread_topics = ForumTopic.permitted.active.where("forum_topics.updated_at >= ?", user.last_forum_read_at)
       .joins("left join forum_topic_visits on (forum_topic_visits.forum_topic_id = forum_topics.id and forum_topic_visits.user_id = #{user.id})")
       .where("(forum_topic_visits.id is null or forum_topic_visits.last_read_at < forum_topics.updated_at)")
       .exists?

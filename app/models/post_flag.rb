@@ -33,6 +33,14 @@ class PostFlag < ActiveRecord::Base
       end
     end
 
+    def duplicate
+      where("to_tsvector('english', post_flags.reason) @@ to_tsquery('dup | duplicate | sample | smaller')")
+    end
+
+    def not_duplicate
+      where("to_tsvector('english', post_flags.reason) @@ to_tsquery('!dup & !duplicate & !sample & !smaller')")
+    end
+
     def post_tags_match(query)
       PostQueryBuilder.new(query).build(self.joins(:post))
     end
@@ -65,12 +73,15 @@ class PostFlag < ActiveRecord::Base
         q = q.reason_matches(params[:reason_matches])
       end
 
-      if params[:creator_id].present? && (CurrentUser.is_moderator? || params[:creator_id].to_i == CurrentUser.user.id)
+      if params[:creator_id].present? && CurrentUser.can_view_flagger?(params[:creator_id].to_i)
         q = q.where("creator_id = ?", params[:creator_id].to_i)
       end
 
-      if params[:creator_name].present? && (CurrentUser.is_moderator? || params[:creator_name].mb_chars.downcase.strip.tr(" ", "_") == CurrentUser.user.name.downcase)
-        q = q.where("creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].mb_chars.downcase.strip.tr(" ", "_"))
+      if params[:creator_name].present?
+        flagger_id = User.name_to_id(params[:creator_name].strip)
+        if CurrentUser.can_view_flagger?(flagger_id)
+          q = q.where("creator_id = ?", flagger_id)
+        end
       end
 
       if params[:post_id].present?
@@ -98,6 +109,8 @@ class PostFlag < ActiveRecord::Base
         q = q.where("reason LIKE ?", Reasons::REJECTED)
       when "deleted"
         q = q.where("reason = ? OR reason LIKE ?", Reasons::UNAPPROVED, Reasons::REJECTED)
+      when "duplicate"
+        q = q.duplicate
       end
 
       q
