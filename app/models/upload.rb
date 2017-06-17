@@ -1,7 +1,7 @@
 require "danbooru_image_resizer/danbooru_image_resizer"
 require "tmpdir"
 
-class Upload < ActiveRecord::Base
+class Upload < ApplicationRecord
   class Error < Exception ; end
 
   attr_accessor :file, :image_width, :image_height, :file_ext, :md5, 
@@ -408,7 +408,7 @@ class Upload < ActiveRecord::Base
 
   module DownloaderMethods
     def strip_source
-      source.try(:strip)
+      source.to_s.strip
     end
 
     # Determines whether the source is downloadable
