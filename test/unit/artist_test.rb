@@ -291,6 +291,41 @@ class ArtistTest < ActiveSupport::TestCase
       end
     end
 
+    context "when finding pawoo artists" do
+      setup do
+        FactoryGirl.create(:artist, :name => "evazion", :url_string => "https://pawoo.net/@evazion")
+        FactoryGirl.create(:artist, :name => "yasumo01", :url_string => "https://pawoo.net/web/accounts/28816")
+      end
+
+      should "find the artist" do
+        assert_artist_found("evazion", "https://pawoo.net/@evazion/19451018")
+        assert_artist_found("evazion", "https://pawoo.net/web/statuses/19451018")
+        assert_artist_found("yasumo01", "https://pawoo.net/@yasumo01/222337")
+        assert_artist_found("yasumo01", "https://pawoo.net/web/statuses/222337")
+      end
+
+      should "return nothing for unknown pawoo sources" do
+        assert_artist_not_found("https://pawoo.net/@9ed00e924818/1202176")
+        assert_artist_not_found("https://pawoo.net/web/statuses/1202176")
+      end
+    end
+
+    context "when finding nijie artists" do
+      setup do
+        FactoryGirl.create(:artist, :name => "evazion", :url_string => "http://nijie.info/members.php?id=236014")
+        FactoryGirl.create(:artist, :name => "728995",  :url_string => "http://nijie.info/members.php?id=728995")
+      end
+
+      should "find the artist" do
+        assert_artist_found("evazion", "http://nijie.info/view.php?id=218944")
+        assert_artist_found("728995",  "http://nijie.info/view.php?id=213043")
+      end
+
+      should "return nothing for unknown nijie artists" do
+        assert_artist_not_found("http://nijie.info/view.php?id=157953")
+      end
+    end
+
     should "normalize its other names" do
       artist = FactoryGirl.create(:artist, :name => "a1", :other_names_comma => "aaa, bbb, ccc ddd")
       assert_equal("aaa, bbb, ccc_ddd", artist.other_names_comma)

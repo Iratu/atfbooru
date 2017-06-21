@@ -20,9 +20,15 @@ module Danbooru
       "Find good anime art fast"
     end
 
-    # The hostname of the server.
+    # The canonical hostname of the site.
     def hostname
       Socket.gethostname
+    end
+
+    # The list of all domain names this site is accessible under.
+    # Example: %w[danbooru.donmai.us sonohara.donmai.us hijiribe.donmai.us safebooru.donmai.us]
+    def hostnames
+      [hostname]
     end
 
     # Contact email address of the admin.
@@ -364,6 +370,15 @@ module Danbooru
     end
 
     def deviantart_password
+      nil
+    end
+
+    # http://tinysubversions.com/notes/mastodon-bot/
+    def pawoo_client_id
+      nil
+    end
+
+    def pawoo_client_secret
       nil
     end
 
