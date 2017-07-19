@@ -3,13 +3,16 @@ module Downloads
     class Error < Exception ; end
 
     attr_reader :data, :options
-    attr_accessor :source, :original_source, :content_type, :file_path
+    attr_accessor :source, :original_source, :downloaded_source, :content_type, :file_path
 
     def initialize(source, file_path, options = {})
       # source can potentially get rewritten in the course
       # of downloading a file, so check it again
       @source = source
       @original_source = source
+
+      # the URL actually downloaded after rewriting the original source.
+      @downloaded_source = nil
 
       # where to save the download
       @file_path = file_path
@@ -28,21 +31,17 @@ module Downloads
       }
       @source, headers, @data = before_download(@source, headers, @data)
       url = URI.parse(@source)
-      Net::HTTP.start(url.host, url.port, :use_ssl => url.is_a?(URI::HTTPS)) do |http|
-        http.read_timeout = 3
-        http.request_head(url.request_uri, headers) do |res|
-          return res.content_length
-        end
-      end
+      res = HTTParty.head(url, Danbooru.config.httparty_options.reverse_merge(timeout: 3))
+      res.content_length
     end
 
     def download!
-      @source, @data = http_get_streaming(@source, @data) do |response|
-        self.content_type = response["Content-Type"]
-        ::File.open(@file_path, "wb") do |out|
-          response.read_body(out)
+      ::File.open(@file_path, "wb") do |out|
+        @source, @data = http_get_streaming(@source, @data) do |response|
+          out.write(response)
         end
       end
+      @downloaded_source = @source
       @source = after_download(@source)
     end
 
@@ -69,7 +68,7 @@ module Downloads
       end
     end
 
-    def http_get_streaming(src, datums = {}, options = {})
+    def http_get_streaming(src, datums = {}, options = {}, &block)
       max_size = options[:max_size] || Danbooru.config.max_file_size
       max_size = nil if max_size == 0 # unlimited
       limit = 4
@@ -90,30 +89,20 @@ module Downloads
         validate_local_hosts(url)
 
         begin
-          Net::HTTP.start(url.host, url.port, :use_ssl => url.is_a?(URI::HTTPS)) do |http|
-            http.read_timeout = 10
-            http.request_get(url.request_uri, headers) do |res|
-              case res
-              when Net::HTTPSuccess then
-                if max_size
-                  len = res["Content-Length"]
-                  raise Error.new("File is too large (#{len} bytes)") if len && len.to_i > max_size
-                end
-                yield(res)
-                return [src, datums]
+          res = HTTParty.get(url, Danbooru.config.httparty_options.reverse_merge(stream_body: true, timeout: 10, headers: headers), &block)
 
-              when Net::HTTPRedirection then
-                if limit == 0 then
-                  raise Error.new("Too many redirects")
-                end
-                src = res["location"]
-                limit -= 1
+          if res.success?
+            if max_size
+              len = res["Content-Length"]
+              raise Error.new("File is too large (#{len} bytes)") if len && len.to_i > max_size
+            end
 
-              else
-                raise Error.new("HTTP error code: #{res.code} #{res.message}")
-              end
-            end # http.request_get
-          end # http.start
+            @content_type = res["Content-Type"]
+
+            return [src, datums]
+          else
+            raise Error.new("HTTP error code: #{res.code} #{res.message}")
+          end
         rescue Errno::ECONNRESET, Errno::ETIMEDOUT, Errno::EIO, Errno::EHOSTUNREACH, Errno::ECONNREFUSED, IOError => x
           tries += 1
           if tries < 3
@@ -140,8 +129,8 @@ module Downloads
     def set_source_to_referer(src, referer)
       if Sources::Strategies::Nijie.url_match?(src) ||
          Sources::Strategies::Twitter.url_match?(src) ||
-         Sources::Strategies::Tumblr.url_match?(src) ||
          Sources::Strategies::Pawoo.url_match?(src) ||
+         Sources::Strategies::Tumblr.url_match?(src) || Sources::Strategies::Tumblr.url_match?(referer)
          Sources::Strategies::ArtStation.url_match?(src) || Sources::Strategies::ArtStation.url_match?(referer)
         strategy = Sources::Site.new(src, :referer_url => referer)
         strategy.referer_url

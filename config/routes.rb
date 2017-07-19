@@ -53,7 +53,6 @@ Rails.application.routes.draw do
         get :popular
         get :searches
         get :missed_searches
-        get :hot
         get :intro
       end
     end
@@ -119,7 +118,6 @@ Rails.application.routes.draw do
   end
   resources :dmails, :only => [:new, :create, :index, :show, :destroy] do
     collection do
-      get :search
       post :mark_all_as_read
     end
   end
@@ -163,7 +161,6 @@ Rails.application.routes.draw do
       put :demote
     end
   end
-  resources :jobs
   resources :mod_actions
   resources :news_updates
   resources :notes do
@@ -196,6 +193,7 @@ Rails.application.routes.draw do
       get :diff
     end
   end
+  resources :post_replacements, :only => [:index, :new, :create]
   resources :posts do
     resources :events, :only => [:index], :controller => "post_events"
     resources :replacements, :only => [:index, :new, :create], :controller => "post_replacements"
@@ -217,7 +215,6 @@ Rails.application.routes.draw do
   end
   resources :post_appeals
   resources :post_flags
-  resources :post_replacements, :only => [:index, :new, :create]
   resources :post_versions, :only => [:index, :search] do
     member do
       put :undo
@@ -253,7 +250,6 @@ Rails.application.routes.draw do
     end
   end
   resource :source, :only => [:show]
-  resources :super_voters, :only => [:index]
   resources :tags do
     resource :correction, :only => [:new, :create, :show], :controller => "tag_corrections"
     collection do
@@ -273,10 +269,9 @@ Rails.application.routes.draw do
     end
   end
   resource :tag_implication_request, :only => [:new, :create]
-  resources :tag_subscriptions do
+  resources :tag_subscriptions, :only => [:index, :destroy, :migrate]  do
     member do
       post :migrate
-      get :posts
     end
   end
   resources :uploads do

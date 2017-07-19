@@ -28,18 +28,14 @@ class SavedSearch < ApplicationRecord
             "queries" => queries
           }.to_json
 
-          uri = URI.parse("#{Danbooru.config.listbooru_server}/v2/search")
+          uri = "#{Danbooru.config.listbooru_server}/v2/search"
 
-          body = Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.is_a?(URI::HTTPS)) do |http|
-            resp = http.request_post(uri.request_uri, json)
-            if resp.is_a?(Net::HTTPSuccess)
-              resp.body
-            else
-              raise "HTTP error code: #{resp.code} #{resp.message}"
-            end
+          resp = HTTParty.post(uri, Danbooru.config.httparty_options.merge(body: json))
+          if resp.success?
+            resp.body.to_s.scan(/\d+/).map(&:to_i)
+          else
+            raise "HTTP error code: #{resp.code} #{resp.message}"
           end
-
-          body.to_s.scan(/\d+/).map(&:to_i)
         end
       end
     end
@@ -60,6 +56,19 @@ class SavedSearch < ApplicationRecord
 
   def self.normalize_label(label)
     label.to_s.strip.downcase.gsub(/[[:space:]]/, "_")
+  end
+
+  def self.search_labels(user_id, params)
+    labels = labels_for(user_id)
+
+    if params[:label].present?
+      query = Regexp.escape(params[:label]).gsub("\\*", ".*")
+      query = ".*#{query}.*" unless query.include?("*")
+      query = /\A#{query}\z/
+      labels = labels.grep(query)
+    end
+
+    labels
   end
 
   def self.labels_for(user_id)

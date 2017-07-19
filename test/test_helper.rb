@@ -11,9 +11,10 @@ end
 require File.expand_path('../../config/environment', __FILE__)
 require 'rails/test_help'
 require 'cache'
-require 'helpers/post_archive_test_helper'
+require 'webmock/minitest'
 
 Dir[File.expand_path(File.dirname(__FILE__) + "/factories/*.rb")].each {|file| require file}
+Dir[File.expand_path(File.dirname(__FILE__) + "/helpers/*.rb")].each {|file| require file}
 
 Shoulda::Matchers.configure do |config|
   config.integrate do |with|
@@ -23,6 +24,14 @@ end
 
 class ActiveSupport::TestCase
   include PostArchiveTestHelper
+  include ReportbooruHelper
+  include DownloadTestHelper
+
+  setup do
+    mock_popular_search_service!
+    mock_missed_search_service!
+    WebMock.allow_net_connect!
+  end
 
   teardown do
     Cache.clear
@@ -49,13 +58,3 @@ end
 
 Delayed::Worker.delay_jobs = false
 TestAfterCommit.enabled = false
-
-require "helpers/reportbooru_helper"
-class ActiveSupport::TestCase
-  include ReportbooruHelper
-
-  setup do
-    mock_popular_search_service!
-    mock_missed_search_service!
-  end
-end

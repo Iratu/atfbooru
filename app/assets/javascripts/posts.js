@@ -47,16 +47,7 @@
     });
 
     $("#toggle-related-tags-link").click(function(e) {
-      var $related_tags = $("#related-tags");
-      if ($related_tags.is(":visible")) {
-        $related_tags.hide();
-        $(e.target).html("&raquo;");
-      } else {
-        $related_tags.show();
-        $("#related-tags-button").trigger("click");
-        $("#find-artist-button").trigger("click");
-        $(e.target).html("&laquo;");
-      }
+      Danbooru.RelatedTag.toggle();
       e.preventDefault();
     });
   }
@@ -125,8 +116,8 @@
   Danbooru.Post.close_edit_dialog = function(e, ui) {
     $("#form").appendTo($("#c-posts #edit,#c-uploads #a-new"));
     $("#edit-dialog").remove();
-    $("#related-tags").show();
-    $("#toggle-related-tags-link").html("&raquo;").hide();
+    Danbooru.RelatedTag.show();
+    $("#toggle-related-tags-link").hide();
     var $tag_string = $("#post_tag_string,#upload_tag_string");
     $("div.input").has($tag_string).prevAll().show();
     $("#open-edit-dialog").show();
@@ -552,23 +543,15 @@
 
   Danbooru.Post.initialize_saved_searches = function() {
     $("#saved_search_labels").autocomplete({
-      minLength: 2,
       source: function(req, resp) {
-        $.ajax({
-          url: "/saved_searches/labels.json",
-          data: {
-            label: req.term
-          },
-          method: "get",
-          success: function(data) {
-            resp($.map(data, function(saved_search) {
-              return {
-                label: saved_search.replace(/_/g, " "),
-                value: saved_search
-              };
-            }));
-          }
-        })
+        Danbooru.SavedSearch.labels(req.term).success(function(labels) {
+          resp(labels.map(function(label) {
+            return {
+              label: label.replace(/_/g, " "),
+              value: label
+            };
+          }));
+        });
       }
     });
 

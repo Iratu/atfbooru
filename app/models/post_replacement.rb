@@ -4,11 +4,12 @@ class PostReplacement < ApplicationRecord
   belongs_to :post
   belongs_to :creator, class_name: "User"
   before_validation :initialize_fields
-  attr_accessible :replacement_url
+  attr_accessor :replacement_file, :final_source, :tags
 
   def initialize_fields
     self.creator = CurrentUser.user
     self.original_url = post.source
+    self.tags = post.tag_string + " " + self.tags.to_s
   end
 
   def undo!
@@ -17,15 +18,16 @@ class PostReplacement < ApplicationRecord
   end
 
   def process!
-    # TODO images hosted on s3 need to be deleted from s3 instead of the local filesystem.
-    if Danbooru.config.use_s3_proxy?(post)
-      raise NotImplementedError.new("Replacing S3 hosted images not yet supported.")
-    end
-
     transaction do
-      upload = Upload.create!(source: replacement_url, rating: post.rating, tag_string: post.tag_string)
+      upload = Upload.create!(file: replacement_file, source: replacement_url, rating: post.rating, tag_string: self.tags)
       upload.process_upload
       upload.update(status: "completed", post_id: post.id)
+
+      if replacement_file.present?
+        update(replacement_url: "file://#{replacement_file.original_filename}")
+      else
+        update(replacement_url: upload.downloaded_source)
+      end
 
       # queue the deletion *before* updating the post so that we use the old
       # md5/file_ext to delete the old files. if saving the post fails,
@@ -37,7 +39,7 @@ class PostReplacement < ApplicationRecord
       post.image_width = upload.image_width
       post.image_height = upload.image_height
       post.file_size = upload.file_size
-      post.source = upload.source
+      post.source = final_source.presence || upload.source
       post.tag_string = upload.tag_string
       rescale_notes
       update_ugoira_frame_data(upload)
@@ -69,6 +71,10 @@ class PostReplacement < ApplicationRecord
   end
 
   module SearchMethods
+    def post_tags_match(query)
+      PostQueryBuilder.new(query).build(self.joins(:post))
+    end
+
     def search(params = {})
       q = all
 
@@ -77,7 +83,7 @@ class PostReplacement < ApplicationRecord
       end
 
       if params[:creator_name].present?
-        q = q.where(creator_name: User.name_to_id(params[:creator_name]))
+        q = q.where(creator_id: User.name_to_id(params[:creator_name]))
       end
 
       if params[:id].present?
@@ -86,6 +92,10 @@ class PostReplacement < ApplicationRecord
 
       if params[:post_id].present?
         q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
+      end
+
+      if params[:post_tags_match].present?
+        q = q.post_tags_match(params[:post_tags_match])
       end
 
       q = q.order("created_at DESC")
@@ -104,7 +114,7 @@ class PostReplacement < ApplicationRecord
     end
 
     def replacement_message
-      linked_source = linked_source(post.source)
+      linked_source = linked_source(replacement_url)
       linked_source_was = linked_source(post.source_was)
 
       <<-EOS.strip_heredoc
@@ -140,6 +150,12 @@ class PostReplacement < ApplicationRecord
       else
         truncated_source
       end
+    end
+
+    def suggested_tags_for_removal
+      tags = post.tag_array.select { |tag| Danbooru.config.remove_tag_after_replacement?(tag) }
+      tags = tags.map { |tag| "-#{tag}" }
+      tags.join(" ")
     end
   end
 

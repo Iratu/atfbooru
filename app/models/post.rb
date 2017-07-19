@@ -49,7 +49,7 @@ class Post < ApplicationRecord
   has_many :children, lambda {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
   has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
-  has_many :favorites, :dependent => :destroy
+  has_many :favorites
   has_many :replacements, class_name: "PostReplacement"
 
   if PostArchive.enabled?
@@ -73,6 +73,11 @@ class Post < ApplicationRecord
             raise DeletionError.new("Files still in use; skipping deletion.")
           end
         end
+
+        backup_service = Danbooru.config.backup_service
+        backup_service.delete(file_path, type: :original)
+        backup_service.delete(large_file_path, type: :large)
+        backup_service.delete(preview_file_path, type: :preview)
 
         # the large file and the preview don't necessarily exist. if so errors will be ignored.
         FileUtils.rm_f(file_path)
@@ -1310,13 +1315,6 @@ class Post < ApplicationRecord
       if parent.present? && parent.parent_id.present? && parent.parent_id == id
         parent.parent_id = nil
         parent.save
-      end
-    end
-
-    def validate_parent_does_not_have_a_parent
-      return if parent.nil?
-      if !parent.parent.nil?
-        errors.add(:parent, "can not have a parent")
       end
     end
 

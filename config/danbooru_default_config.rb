@@ -382,8 +382,19 @@ module Danbooru
       nil
     end
 
+    # 1. Register app at https://www.tumblr.com/oauth/register.
+    # 2. Copy "OAuth Consumer Key" from https://www.tumblr.com/oauth/apps.
+    def tumblr_consumer_key
+      nil
+    end
+
     def enable_dimension_autotagging
       true
+    end
+
+    # Should return true if the given tag should be suggested for removal in the post replacement dialog box.
+    def remove_tag_after_replacement?(tag)
+      tag =~ /replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts/i
     end
 
     def shared_dir_path
@@ -404,6 +415,12 @@ module Danbooru
 
     def enable_post_search_counts
       false
+    end
+
+    def httparty_options
+      # proxy example:
+      # {http_proxyaddr: "", http_proxyport: "", http_proxyuser: nil, http_proxypass: nil}
+      {}
     end
 
     # you should override this

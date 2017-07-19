@@ -1,5 +1,4 @@
 class SavedSearchesController < ApplicationController
-  before_filter :member_only
   before_filter :check_availability
   respond_to :html, :xml, :json, :js
   
@@ -18,11 +17,7 @@ class SavedSearchesController < ApplicationController
   end
 
   def labels
-    @labels = SavedSearch.labels_for(CurrentUser.user.id)
-    if params[:label]
-      regexp = Regexp.compile(Regexp.escape(params[:label]))
-      @labels = @labels.grep(regexp)
-    end
+    @labels = SavedSearch.search_labels(CurrentUser.id, params[:search])
     respond_with(@labels)
   end
 
