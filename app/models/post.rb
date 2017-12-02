@@ -1148,11 +1148,50 @@ class Post < ApplicationRecord
   end
 
   module CountMethods
+    def fix_post_counts(post)
+      post.set_tag_counts(false)
+      if post.changed?
+        args = Hash[TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}].update(:tag_count => post.tag_count)
+        post.update_columns(args)
+      end
+    end
+
+    def get_count_from_cache(tags)
+      count = Cache.get(count_cache_key(tags))
+
+      if count.nil? && !CurrentUser.safe_mode? && !CurrentUser.hide_deleted_posts?
+        count = select_value_sql("SELECT post_count FROM tags WHERE name = ?", tags.to_s)
+      end
+
+      count
+    end
+
+    def set_count_in_cache(tags, count, expiry = nil)
+      if expiry.nil?
+        if count < 100
+          expiry = 1.minute
+        else
+          expiry = (count * 4).minutes
+        end
+      end
+
+      Cache.put(count_cache_key(tags), count, expiry)
+    end
+
+    def count_cache_key(tags)
+      if CurrentUser.safe_mode?
+        tags = "#{tags} rating:s".strip
+      end
+      
+      if CurrentUser.user && CurrentUser.hide_deleted_posts? && tags !~ /(?:^|\s)(?:-)?status:.+/
+        tags = "#{tags} -status:deleted".strip
+      end
+
+      "pfc:#{Cache.hash(tags)}"
+    end
+
     def fast_count(tags = "", options = {})
-      tags = tags.to_s
-      tags += " rating:s" if CurrentUser.safe_mode?
-      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && tags !~ /(?:^|\s)(?:-)?status:.+/
-      tags = Tag.normalize_query(tags)
+      tags = tags.to_s.strip
 
       # optimize some cases. these are just estimates but at these
       # quantities being off by a few hundred doesn't matter much
@@ -1177,11 +1216,11 @@ class Post < ApplicationRecord
 
       count = get_count_from_cache(tags)
 
-      if count.nil?
+      if count.to_i == 0
         count = fast_count_search(tags, options)
       end
 
-      count
+      count.to_i
     rescue SearchError
       0
     end
@@ -1191,18 +1230,17 @@ class Post < ApplicationRecord
         PostReadOnly.tag_match(tags).count
       end
 
-      if count.nil?
+      if count == nil && tags !~ / /
         count = fast_count_search_batched(tags, options)
       end
 
-      if count.nil?
-        # give up
-        count = Danbooru.config.blank_tag_search_fast_count
-      else
+      if count
         set_count_in_cache(tags, count)
+      else
+        count = Danbooru.config.blank_tag_search_fast_count
       end
 
-      count ? count.to_i : nil
+      count
     end
 
     def fast_count_search_batched(tags, options)
@@ -1221,38 +1259,22 @@ class Post < ApplicationRecord
       end
       sum
     end
-
-    def fix_post_counts(post)
-      post.set_tag_counts(false)
-      if post.changed?
-        args = Hash[TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}].update(:tag_count => post.tag_count)
-        post.update_columns(args)
-      end
-    end
-
-    def get_count_from_cache(tags)
-      if Tag.is_simple_tag?(tags)
-        count = select_value_sql("SELECT post_count FROM tags WHERE name = ?", tags.to_s)
-      else
-        # this will only have a value for multi-tag searches or single metatag searches
-        count = Cache.get(count_cache_key(tags))
-      end
-
-      count.try(:to_i)
-    end
-
-    def set_count_in_cache(tags, count, expiry = nil)
-      if expiry.nil?
-        [count.seconds, 20.hours].min
-      end
-
-      Cache.put(count_cache_key(tags), count, expiry)
-    end
-
-    def count_cache_key(tags)
-      "pfc:#{Cache.hash(tags)}"
-    end
   end
+
+  module CacheMethods
+    def expire_cache_for_all(tag_names)
+      expire_cache(tag_names)
+      Danbooru.config.other_server_hosts.each do |host|
+        delay(:queue => host).expire_cache(tag_names)
+      end
+    end
+
+    def expire_cache(tag_names)
+      tag_names.each do |tag_name|
+        Cache.delete(Post.count_cache_key(tag_name))
+      end
+    end
+end
 
   module ParentMethods
     # A parent has many children. A child belongs to a parent.
