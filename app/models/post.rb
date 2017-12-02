@@ -36,7 +36,7 @@ class Post < ApplicationRecord
 
   belongs_to :updater, :class_name => "User"
   belongs_to :approver, :class_name => "User"
-  belongs_to :uploader, :class_name => "User"
+  belongs_to :uploader, :class_name => "User", :counter_cache => "post_upload_count"
   belongs_to :parent, :class_name => "Post"
   has_one :upload, :dependent => :destroy
   has_one :artist_commentary, :dependent => :destroy
@@ -50,14 +50,14 @@ class Post < ApplicationRecord
   has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
   has_many :favorites
-  has_many :replacements, class_name: "PostReplacement"
+  has_many :replacements, class_name: "PostReplacement", :dependent => :destroy
 
   if PostArchive.enabled?
     has_many :versions, lambda {order("post_versions.updated_at ASC")}, :class_name => "PostArchive", :dependent => :destroy
   end
 
   attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :moderator, :admin, :default]
-  attr_accessible :is_rating_locked, :is_note_locked, :as => [:builder, :moderator, :admin]
+  attr_accessible :is_rating_locked, :is_note_locked, :has_cropped, :as => [:builder, :moderator, :admin]
   attr_accessible :is_status_locked, :as => [:admin]
   attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
 
@@ -67,9 +67,11 @@ class Post < ApplicationRecord
     module ClassMethods
       def delete_files(post_id, file_path, large_file_path, preview_file_path, force: false)
         unless force
-          post = Post.find(post_id)
+          # XXX should pass in the md5 instead of parsing it.
+          preview_file_path =~ %r!/data/preview/(?:test\.)?([a-z0-9]{32})\.jpg\z!
+          md5 = $1
 
-          if post.file_path == file_path || post.large_file_path == large_file_path || post.preview_file_path == preview_file_path
+          if Post.where(md5: md5).exists?
             raise DeletionError.new("Files still in use; skipping deletion.")
           end
         end
@@ -87,6 +89,11 @@ class Post < ApplicationRecord
         RemoteFileManager.new(file_path).delete
         RemoteFileManager.new(large_file_path).delete
         RemoteFileManager.new(preview_file_path).delete
+
+        if Danbooru.config.cloudflare_key
+          md5, ext = File.basename(file_path).split(".")
+          CloudflareService.new.delete(md5, ext)
+        end
       end
     end
 
@@ -140,6 +147,15 @@ class Post < ApplicationRecord
        end
     end
 
+    # this is for the 640x320 version
+    def cropped_file_url
+      if Danbooru.config.use_s3_proxy?(self)
+        "/cached/data/cropped/large/#{md5}.jpg"
+      else
+        "/data/cropped/large/#{md5}.jpg"
+      end
+    end
+
     def large_file_url
       if has_large?
         if Danbooru.config.use_s3_proxy?(self)
@@ -169,7 +185,11 @@ class Post < ApplicationRecord
         return "/images/download-preview.png"
       end
 
-      "/data/preview/#{file_path_prefix}#{md5}.jpg"
+      # if has_cropped? && !CurrentUser.disable_cropped_thumbnails?
+      #   "/cached/data/cropped/small/#{md5}.jpg"
+      # else
+        "/data/preview/#{file_path_prefix}#{md5}.jpg"
+      # end
     end
 
     def complete_preview_file_url
@@ -239,7 +259,9 @@ class Post < ApplicationRecord
     end
 
     def has_preview?
-      is_image? || is_video? || is_ugoira?
+      # for video/ugoira we don't want to try and render a preview that
+      # might doesn't exist yet
+      is_image? || ((is_video? || is_ugoira?) && File.exists?(preview_file_path))
     end
 
     def has_dimensions?
@@ -269,14 +291,6 @@ class Post < ApplicationRecord
   end
 
   module ImageMethods
-    def device_scale
-      if large_image_width > 320
-        320.0 / (large_image_width + 10)
-      else
-        1.0
-      end
-    end
-
     def twitter_card_supported?
       image_width.to_i >= 280 && image_height.to_i >= 150
     end
@@ -593,38 +607,28 @@ class Post < ApplicationRecord
 
       increment_tags = tag_array - tag_array_was
       if increment_tags.any?
-        Tag.delay(:queue => "default").increment_post_counts(increment_tags)
+        Tag.increment_post_counts(increment_tags)
       end
       if decrement_tags.any?
-        Tag.delay(:queue => "default").decrement_post_counts(decrement_tags)
+        Tag.decrement_post_counts(decrement_tags)
       end
-      Post.expire_cache_for_all([""]) if new_record? || id <= 100_000
     end
 
-    def set_tag_counts
-      self.tag_count = 0
-      self.tag_count_general = 0
-      self.tag_count_artist = 0
-      self.tag_count_copyright = 0
-      self.tag_count_character = 0
+    def set_tag_count(category,tagcount)
+      self.send("tag_count_#{category}=",tagcount)
+    end
 
-      categories = Tag.categories_for(tag_array, :disable_caching => true)
+    def inc_tag_count(category)
+      set_tag_count(category,self.send("tag_count_#{category}") + 1)
+    end
+
+    def set_tag_counts(disable_cache = true)
+      self.tag_count = 0
+      TagCategory.categories.each {|x| set_tag_count(x,0)}
+      categories = Tag.categories_for(tag_array, :disable_caching => disable_cache)
       categories.each_value do |category|
         self.tag_count += 1
-
-        case category
-        when Tag.categories.general
-          self.tag_count_general += 1
-
-        when Tag.categories.artist
-          self.tag_count_artist += 1
-
-        when Tag.categories.copyright
-          self.tag_count_copyright += 1
-
-        when Tag.categories.character
-          self.tag_count_character += 1
-        end
+        inc_tag_count(TagCategory.reverse_mapping[category])
       end
     end
 
@@ -668,17 +672,18 @@ class Post < ApplicationRecord
 
     def normalize_tags
       normalized_tags = Tag.scan_tags(tag_string)
+      normalized_tags = apply_casesensitive_metatags(normalized_tags)
+      normalized_tags = normalized_tags.map {|tag| tag.downcase}
       normalized_tags = filter_metatags(normalized_tags)
-      normalized_tags = normalized_tags.map{|tag| tag.downcase}
       normalized_tags = remove_negated_tags(normalized_tags)
-      normalized_tags = normalized_tags.map {|x| Tag.find_or_create_by_name(x).name}
-      normalized_tags = %w(tagme) if normalized_tags.empty?
       normalized_tags = TagAlias.to_aliased(normalized_tags)
-      normalized_tags = add_automatic_tags(normalized_tags)
-      normalized_tags = normalized_tags + TagImplication.automatic_tags_for(normalized_tags)
+      normalized_tags = %w(tagme) if normalized_tags.empty?
       normalized_tags = TagImplication.with_descendants(normalized_tags)
 	  normalized_tags = check_tagme(normalized_tags)
 	  normalized_tags = normalized_tags.compact
+      normalized_tags = Tag.create_for_list(add_automatic_tags(normalized_tags))
+      normalized_tags = normalized_tags + Tag.create_for_list(TagImplication.automatic_tags_for(normalized_tags))
+      normalized_tags = normalized_tags.compact
       normalized_tags.sort!
       set_tag_string(normalized_tags.uniq.sort.join(" "))
     end
@@ -761,11 +766,48 @@ class Post < ApplicationRecord
       return tags
     end
 
+    def apply_casesensitive_metatags(tags)
+      casesensitive_metatags, tags = tags.partition {|x| x =~ /\A(?:source):/i}
+      #Reuse the following metatags after the post has been saved
+      casesensitive_metatags += tags.select {|x| x =~ /\A(?:newpool):/i}
+      if casesensitive_metatags.length > 0
+        case casesensitive_metatags[-1]
+        when /^source:none$/i
+          self.source = ""
+
+        when /^source:"(.*)"$/i
+          self.source = $1
+
+        when /^source:(.*)$/i
+          self.source = $1
+
+        when /^newpool:(.+)$/i
+          pool = Pool.find_by_name($1)
+          if pool.nil?
+            pool = Pool.create(:name => $1, :description => "This pool was automatically generated")
+          end
+        end
+      end
+      return tags
+    end
+
     def filter_metatags(tags)
-      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|source|-?locked):/i}
+      @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|-?locked):/i}
+      tags = apply_categorization_metatags(tags)
       @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-favgroup|favgroup|upvote|downvote):/i}
       apply_pre_metatags
       return tags
+    end
+
+    def apply_categorization_metatags(tags)
+      tags.map do |x|
+        if x =~ Tag.categories.regexp
+          tag = Tag.find_or_create_by_name(x)
+          tag.name
+        else
+          x
+        end
+      end
     end
 
     def apply_post_metatags
@@ -791,9 +833,6 @@ class Post < ApplicationRecord
 
         when /^newpool:(.+)$/i
           pool = Pool.find_by_name($1)
-          if pool.nil?
-            pool = Pool.create(:name => $1, :description => "This pool was automatically generated")
-          end
           add_pool!(pool) if pool
 
         when /^fav:(.+)$/i
@@ -812,19 +851,20 @@ class Post < ApplicationRecord
 
         when /^-favgroup:(\d+)$/i
           favgroup = FavoriteGroup.where("id = ?", $1.to_i).for_creator(CurrentUser.user.id).first
-          favgroup.remove!(self) if favgroup
+          favgroup.remove!(id) if favgroup
 
         when /^-favgroup:(.+)$/i
           favgroup = FavoriteGroup.named($1).for_creator(CurrentUser.user.id).first
-          favgroup.remove!(self) if favgroup
+          favgroup.remove!(id) if favgroup
 
         when /^favgroup:(\d+)$/i
           favgroup = FavoriteGroup.where("id = ?", $1.to_i).for_creator(CurrentUser.user.id).first
-          favgroup.add!(self) if favgroup
+          favgroup.add!(id) if favgroup
 
         when /^favgroup:(.+)$/i
           favgroup = FavoriteGroup.named($1).for_creator(CurrentUser.user.id).first
-          favgroup.add!(self) if favgroup
+          favgroup.add!(id) if favgroup
+
         end
       end
     end
@@ -848,17 +888,8 @@ class Post < ApplicationRecord
             remove_parent_loops
           end
 
-        when /^source:none$/i
-          self.source = ""
-
-        when /^source:"(.*)"$/i
-          self.source = $1
-
-        when /^source:(.*)$/i
-          self.source = $1
-
         when /^rating:([qse])/i
-          self.rating = $1.downcase
+          self.rating = $1
 
         when /^(-?)locked:notes?$/i
           assign_attributes({ is_note_locked: $1 != "-" }, as: CurrentUser.role)
@@ -868,6 +899,7 @@ class Post < ApplicationRecord
 
         when /^(-?)locked:status$/i
           assign_attributes({ is_status_locked: $1 != "-" }, as: CurrentUser.role)
+
         end
       end
     end
@@ -888,31 +920,11 @@ class Post < ApplicationRecord
       @tag_categories ||= Tag.categories_for(tag_array)
     end
 
-    def copyright_tags
-      typed_tags("copyright")
-    end
-
-    def character_tags
-      typed_tags("character")
-    end
-
-    def artist_tags
-      typed_tags("artist")
-    end
-
-    def artist_tags_excluding_hidden
-      artist_tags - %w(banned_artist)
-    end
-
-    def general_tags
-      typed_tags("general")
-    end
-
     def typed_tags(name)
       @typed_tags ||= {}
       @typed_tags[name] ||= begin
         tag_array.select do |tag|
-          tag_categories[tag] == Danbooru.config.tag_category_mapping[name]
+          tag_categories[tag] == TagCategory.mapping[name]
         end
       end
     end
@@ -925,51 +937,35 @@ class Post < ApplicationRecord
       @humanized_essential_tag_string ||= Cache.get("hets-#{id}", 1.hour.to_i) do
         string = []
 
-        if character_tags.any?
-          chartags = character_tags.slice(0, 5)
-          if character_tags.length > 5
-            chartags << "others"
+        TagCategory.humanized_list.each do |category|
+          typetags = typed_tags(category) - TagCategory.humanized_mapping[category]["exclusion"]
+          if TagCategory.humanized_mapping[category]["slice"] > 0
+            typetags = typetags.slice(0,TagCategory.humanized_mapping[category]["slice"]) + (typetags.length > TagCategory.humanized_mapping[category]["slice"] ? ["others"] : [])
           end
-          chartags = chartags.map do |tag|
-            tag.match(/^(.+?)(?:_\(.+\))?$/)[1]
+          if TagCategory.humanized_mapping[category]["regexmap"] != //
+            typetags = typetags.map do |tag|
+              tag.match(TagCategory.humanized_mapping[category]["regexmap"])[1]
+            end
           end
-          string << chartags.to_sentence
-        end
-
-        if copyright_tags.any?
-          copytags = copyright_tags.slice(0, 5)
-          if copyright_tags.length > 5
-            copytags << "others"
+          if typetags.any?
+            if category != "copyright" || typed_tags("character").any?
+              string << TagCategory.humanized_mapping[category]["formatstr"] % typetags.to_sentence
+            else
+              string << typetags.to_sentence
+            end
           end
-          copytags = copytags.to_sentence
-          string << (character_tags.any? ? "(#{copytags})" : copytags)
         end
-
-        if artist_tags_excluding_hidden.any?
-          string << "drawn by"
-          string << artist_tags_excluding_hidden.to_sentence
-        end
-
         string.empty? ? "##{id}" : string.join(" ").tr("_", " ")
       end
     end
 
-    def tag_string_copyright
-      copyright_tags.join(" ")
-    end
-
-    def tag_string_character
-      character_tags.join(" ")
-    end
-
-    def tag_string_artist
-      artist_tags.join(" ")
-    end
-
-    def tag_string_general
-      general_tags.join(" ")
+    TagCategory.categories.each do |category|
+      define_method("tag_string_#{category}") do
+        typed_tags(category).join(" ")
+      end
     end
   end
+
 
   module FavoriteMethods
     def clean_fav_string?
@@ -994,7 +990,7 @@ class Post < ApplicationRecord
     end
 
     def add_favorite!(user)
-      Favorite.add(self, user)
+      Favorite.add(post: self, user: user)
       vote!("up", user) if user.is_voter?
     rescue PostVote::Error
     end
@@ -1004,7 +1000,7 @@ class Post < ApplicationRecord
     end
 
     def remove_favorite!(user)
-      Favorite.remove(self, user)
+      Favorite.remove(post: self, user: user)
       unvote!(user) if user.is_voter?
     rescue PostVote::Error
     end
@@ -1034,10 +1030,15 @@ class Post < ApplicationRecord
       end
     end
 
+    def remove_from_favorites
+      Favorite.delete_all(post_id: id)
+      user_ids = fav_string.scan(/\d+/)
+      User.where(:id => user_ids).update_all("favorite_count = favorite_count - 1")
+      PostVote.where(post_id: id).delete_all
+    end
+
     def remove_from_fav_groups
-      FavoriteGroup.for_post(id).find_each do |group|
-        group.remove!(self)
-      end
+      FavoriteGroup.delay.purge_post(id)
     end
   end
 
@@ -1059,12 +1060,12 @@ class Post < ApplicationRecord
       @pools ||= begin
         return Pool.none if pool_string.blank?
         pool_ids = pool_string.scan(/\d+/)
-        Pool.undeleted.where(id: pool_ids).series_first
+        Pool.where(id: pool_ids).series_first
       end
     end
 
     def has_active_pools?
-      pools.length > 0
+      pools.undeleted.length > 0
     end
 
     def belongs_to_pool?(pool)
@@ -1087,10 +1088,9 @@ class Post < ApplicationRecord
       end
     end
 
-    def remove_pool!(pool, force = false)
+    def remove_pool!(pool)
       return unless belongs_to_pool?(pool)
       return unless CurrentUser.user.can_remove_from_pools?
-      return if pool.is_deleted? && !force
 
       with_lock do
         self.pool_string = pool_string.gsub(/(?:\A| )pool:#{pool.id}(?:\Z| )/, " ").strip
@@ -1109,7 +1109,7 @@ class Post < ApplicationRecord
     def set_pool_category_pseudo_tags
       self.pool_string = (pool_string.scan(/\S+/) - ["pool:series", "pool:collection"]).join(" ")
 
-      pool_categories = pools.select("category").map(&:category)
+      pool_categories = pools.undeleted.pluck(:category)
       if pool_categories.include?("series")
         self.pool_string = "#{pool_string} pool:series".strip
       end
@@ -1148,53 +1148,11 @@ class Post < ApplicationRecord
   end
 
   module CountMethods
-    def fix_post_counts
-      post.set_tag_counts
-      post.update_columns(
-        :tag_count => post.tag_count,
-        :tag_count_general => post.tag_count_general,
-        :tag_count_artist => post.tag_count_artist,
-        :tag_count_copyright => post.tag_count_copyright,
-        :tag_count_character => post.tag_count_character
-      )
-    end
-
-    def get_count_from_cache(tags)
-      count = Cache.get(count_cache_key(tags))
-
-      if count.nil? && !CurrentUser.safe_mode? && !CurrentUser.hide_deleted_posts?
-        count = select_value_sql("SELECT post_count FROM tags WHERE name = ?", tags.to_s)
-      end
-
-      count
-    end
-
-    def set_count_in_cache(tags, count, expiry = nil)
-      if expiry.nil?
-        if count < 100
-          expiry = 1.minute
-        else
-          expiry = (count * 4).minutes
-        end
-      end
-
-      Cache.put(count_cache_key(tags), count, expiry)
-    end
-
-    def count_cache_key(tags)
-      if CurrentUser.safe_mode?
-        tags = "#{tags} rating:s".strip
-      end
-      
-      if CurrentUser.user && CurrentUser.hide_deleted_posts? && tags !~ /(?:^|\s)(?:-)?status:.+/
-        tags = "#{tags} -status:deleted".strip
-      end
-
-      "pfc:#{Cache.sanitize(tags)}"
-    end
-
     def fast_count(tags = "", options = {})
-      tags = tags.to_s.strip
+      tags = tags.to_s
+      tags += " rating:s" if CurrentUser.safe_mode?
+      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && tags !~ /(?:^|\s)(?:-)?status:.+/
+      tags = Tag.normalize_query(tags)
 
       # optimize some cases. these are just estimates but at these
       # quantities being off by a few hundred doesn't matter much
@@ -1219,11 +1177,11 @@ class Post < ApplicationRecord
 
       count = get_count_from_cache(tags)
 
-      if count.to_i == 0
+      if count.nil?
         count = fast_count_search(tags, options)
       end
 
-      count.to_i
+      count
     rescue SearchError
       0
     end
@@ -1233,17 +1191,18 @@ class Post < ApplicationRecord
         PostReadOnly.tag_match(tags).count
       end
 
-      if count == nil && tags !~ / /
+      if count.nil?
         count = fast_count_search_batched(tags, options)
       end
 
-      if count
-        set_count_in_cache(tags, count)
-      else
+      if count.nil?
+        # give up
         count = Danbooru.config.blank_tag_search_fast_count
+      else
+        set_count_in_cache(tags, count)
       end
 
-      count
+      count ? count.to_i : nil
     end
 
     def fast_count_search_batched(tags, options)
@@ -1262,19 +1221,36 @@ class Post < ApplicationRecord
       end
       sum
     end
-  end
 
-  module CacheMethods
-    def expire_cache_for_all(tag_names)
-      Danbooru.config.all_server_hosts.each do |host|
-        delay(:queue => host).expire_cache(tag_names)
+    def fix_post_counts(post)
+      post.set_tag_counts(false)
+      if post.changed?
+        args = Hash[TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}].update(:tag_count => post.tag_count)
+        post.update_columns(args)
       end
     end
 
-    def expire_cache(tag_names)
-      tag_names.each do |tag_name|
-        Cache.delete(Post.count_cache_key(tag_name))
+    def get_count_from_cache(tags)
+      if Tag.is_simple_tag?(tags)
+        count = select_value_sql("SELECT post_count FROM tags WHERE name = ?", tags.to_s)
+      else
+        # this will only have a value for multi-tag searches or single metatag searches
+        count = Cache.get(count_cache_key(tags))
       end
+
+      count.try(:to_i)
+    end
+
+    def set_count_in_cache(tags, count, expiry = nil)
+      if expiry.nil?
+        [count.seconds, 20.hours].min
+      end
+
+      Cache.put(count_cache_key(tags), count, expiry)
+    end
+
+    def count_cache_key(tags)
+      "pfc:#{Cache.hash(tags)}"
     end
   end
 
@@ -1292,17 +1268,8 @@ class Post < ApplicationRecord
     # - Move favorites to the first child.
     # - Reparent all children to the first child.
 
-    module ClassMethods
-      def update_has_children_flag_for(post_id)
-        return if post_id.nil?
-        has_children = Post.where("parent_id = ?", post_id).exists?
-        has_active_children = Post.where("parent_id = ? and is_deleted = ?", post_id, false).exists?
-        execute_sql("UPDATE posts SET has_children = ?, has_active_children = ? WHERE id = ?", has_children, has_active_children, post_id)
-      end
-    end
-
-    def self.included(m)
-      m.extend(ClassMethods)
+    def update_has_children_flag
+      update({has_children: children.exists?, has_active_children: children.undeleted.exists?}, without_protection: true)
     end
 
     def blank_out_nonexistent_parents
@@ -1319,32 +1286,25 @@ class Post < ApplicationRecord
     end
 
     def update_parent_on_destroy
-      Post.update_has_children_flag_for(parent_id) if parent_id
+      parent.update_has_children_flag if parent
     end
 
     def update_children_on_destroy
-      if children.size == 0
-        # do nothing
-      elsif children.size == 1
-        children.first.update_column(:parent_id, nil)
-      else
-        cached_children = children
-        eldest = cached_children[0]
-        siblings = cached_children[1..-1]
-        eldest.update_column(:parent_id, nil)
-        Post.where(:id => siblings.map(&:id)).update_all(:parent_id => eldest.id)
-      end
+      return unless children.present?
+
+      eldest = children[0]
+      siblings = children[1..-1]
+
+      eldest.update(parent_id: nil)
+      Post.where(id: siblings).find_each { |p| p.update(parent_id: eldest.id) }
+      # Post.where(id: siblings).update(parent_id: eldest.id) # XXX rails 5
     end
 
     def update_parent_on_save
-      if parent_id == parent_id_was
-        Post.update_has_children_flag_for(parent_id)
-      elsif !parent_id_was.nil?
-        Post.update_has_children_flag_for(parent_id)
-        Post.update_has_children_flag_for(parent_id_was)
-      else
-        Post.update_has_children_flag_for(parent_id)
-      end
+      return unless parent_id_changed? || is_deleted_changed?
+
+      parent.update_has_children_flag if parent.present?
+      Post.find(parent_id_was).update_has_children_flag if parent_id_was.present?
     end
 
     def give_favorites_to_parent
@@ -1387,16 +1347,19 @@ class Post < ApplicationRecord
         return false
       end
 
-      ModAction.log("permanently deleted post ##{id}")
-      delete!("Permanently deleted post ##{id}", :without_mod_action => true)
-      Post.without_timeout do
-        give_favorites_to_parent
-        update_children_on_destroy
-        decrement_tag_post_counts
-        remove_from_all_pools
-        remove_from_fav_groups
-        destroy
-        update_parent_on_destroy
+      transaction do
+        Post.without_timeout do
+          ModAction.log("permanently deleted post ##{id}")
+
+          give_favorites_to_parent
+          update_children_on_destroy
+          decrement_tag_post_counts
+          remove_from_all_pools
+          remove_from_fav_groups
+          remove_from_favorites
+          destroy
+          update_parent_on_destroy
+        end
       end
     end
 
@@ -1456,7 +1419,6 @@ class Post < ApplicationRecord
       self.approver_id = CurrentUser.id
       flags.each {|x| x.resolve!}
       save
-      Post.expire_cache_for_all(tag_array)
       ModAction.log("undeleted post ##{id}")
     end
 
@@ -1505,7 +1467,7 @@ class Post < ApplicationRecord
     def notify_pubsub
       return unless Danbooru.config.google_api_project
 
-      PostUpdate.insert(id)
+      # PostUpdate.insert(id)
     end
   end
 
@@ -1551,7 +1513,7 @@ class Post < ApplicationRecord
     end
 
     def method_attributes
-      list = super + [:uploader_name, :has_large, :tag_string_artist, :tag_string_character, :tag_string_copyright, :tag_string_general, :has_visible_children, :children_ids]
+      list = super + [:uploader_name, :has_large, :has_visible_children, :children_ids] + TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
       if visible?
         list += [:file_url, :large_file_url, :preview_file_url]
       end
@@ -1569,7 +1531,7 @@ class Post < ApplicationRecord
       super(options)
     end
 
-    def to_legacy_json
+    def legacy_attributes
       hash = {
         "has_comments" => last_commented_at.present?,
         "parent_id" => parent_id,
@@ -1595,7 +1557,7 @@ class Post < ApplicationRecord
         hash["md5"] = md5
       end
 
-      hash.to_json
+      hash
     end
 
     def status
@@ -1772,7 +1734,6 @@ class Post < ApplicationRecord
   include PoolMethods
   include VoteMethods
   extend CountMethods
-  extend CacheMethods
   include ParentMethods
   include DeletionMethods
   include VersionMethods
@@ -1786,6 +1747,7 @@ class Post < ApplicationRecord
 
   BOOLEAN_ATTRIBUTES = %w(
     has_embedded_notes
+    has_cropped
   )
   has_bit_flags BOOLEAN_ATTRIBUTES
 

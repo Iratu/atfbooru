@@ -62,6 +62,7 @@ class ArtistsController < ApplicationController
 
   def update
     @artist.update(params[:artist], :as => CurrentUser.role)
+    flash[:notice] = @artist.valid? ? "Artist updated" : @artist.errors.full_messages.join("; ")
     respond_with(@artist)
   end
 
@@ -100,21 +101,14 @@ class ArtistsController < ApplicationController
   end
 
   def finder
-    begin
-      @artists = Artist.url_matches(params[:url]).order("id desc").limit(20)
-      if @artists.empty? && params[:referer_url].present? && params[:referer_url] != params[:url]
-        @artists = Artist.url_matches(params[:referer_url]).order("id desc").limit(20)
-      end
-    rescue PixivApiClient::Error => e
-      @artists = []
-    end
+    @artists = Artist.find_artists(params[:url], params[:referer_url])
 
     respond_with(@artists) do |format|
       format.xml do
-        render :xml => @artists.to_xml(:include => [:urls], :root => "artists")
+        render :xml => @artists.to_xml(:include => [:sorted_urls], :root => "artists")
       end
       format.json do
-        render :json => @artists.to_json(:include => [:urls])
+        render :json => @artists.to_json(:include => [:sorted_urls])
       end
     end
   end

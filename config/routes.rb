@@ -5,9 +5,6 @@ Rails.application.routes.draw do
     resource  :alias_and_implication_import, :only => [:new, :create]
     resource  :dashboard, :only => [:show]
   end
-  namespace :mobile do
-    resources :posts, :only => [:index, :show]
-  end
   namespace :moderator do
     resource :bulk_revert, :only => [:new, :create]
     resource :dashboard, :only => [:show]
@@ -51,6 +48,7 @@ Rails.application.routes.draw do
     resources :posts do
       collection do
         get :popular
+        get :viewed
         get :searches
         get :missed_searches
         get :intro
@@ -117,6 +115,10 @@ Rails.application.routes.draw do
     end
   end
   resources :dmails, :only => [:new, :create, :index, :show, :destroy] do
+    member do
+      post :spam
+      post :ham
+    end
     collection do
       post :mark_all_as_read
     end
@@ -239,6 +241,8 @@ Rails.application.routes.draw do
   get "reports/upload_tags" => "reports#upload_tags"
   get "reports/post_versions" => "reports#post_versions"
   post "reports/post_versions_create" => "reports#post_versions_create"
+  get "reports/down_voting_post" => "reports#down_voting_post"
+  post "reports/down_voting_post_create" => "reports#down_voting_post_create"
   resources :saved_searches, :except => [:show] do
     collection do
       get :labels
@@ -269,11 +273,6 @@ Rails.application.routes.draw do
     end
   end
   resource :tag_implication_request, :only => [:new, :create]
-  resources :tag_subscriptions, :only => [:index, :destroy, :migrate]  do
-    member do
-      post :migrate
-    end
-  end
   resources :uploads do
     collection do
       get :batch
@@ -327,8 +326,6 @@ Rails.application.routes.draw do
   resources :wpages, :controller => "wiki_pages"
   resources :ftopics, :controller => "forum_topics"
   resources :fposts, :controller => "forum_posts"
-  get "/m/posts", :controller => "mobile/posts", :action => "index"
-  get "/m/posts/:id", :controller => "mobile/posts", :action => "show"
 
   # legacy aliases
   get "/artist" => redirect {|params, req| "/artists?page=#{req.params[:page]}&search[name]=#{CGI::escape(req.params[:name].to_s)}"}

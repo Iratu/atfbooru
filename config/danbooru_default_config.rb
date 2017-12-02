@@ -151,6 +151,11 @@ module Danbooru
       2
     end
 
+    # Whether safe mode should be enabled. Safe mode hides all non-rating:safe posts from view.
+    def enable_safe_mode?(request, user)
+      !!(request.host =~ /safe/ || request.params[:safe_mode] || user.enable_safe_mode?)
+    end
+
     # Determines who can see ads.
     def can_see_ads?(user)
       !user.is_gold?
@@ -169,19 +174,14 @@ module Danbooru
       end
     end
 
-    # Max number of posts to cache
-    def tag_subscription_post_limit
-      200
+    # Return true if the given tag shouldn't count against the user's tag search limit.
+    def is_unlimited_tag?(tag)
+      !!(tag =~ /\A(-?status:deleted|rating:s.*|limit:.+)\z/i)
     end
 
     # After this many pages, the paginator will switch to sequential mode.
     def max_numbered_pages
       1_000
-    end
-
-    # Max number of tag subscriptions per user
-    def max_tag_subscriptions
-      5
     end
 
     # Maximum size of an upload.
@@ -214,45 +214,92 @@ module Danbooru
       "albert"
     end
 
-    # Returns a hash mapping various tag categories to a numerical value.
-    # Be sure to update the reverse_tag_category_mapping also.
-    def tag_category_mapping
-      @tag_category_mapping ||= {
-        "general" => 0,
-        "gen" => 0,
+#TAG CONFIGURATION
 
-        "artist" => 1,
-        "art" => 1,
-
-        "copyright" => 3,
-        "copy" => 3,
-        "co" => 3,
-
-        "character" => 4,
-        "char" => 4,
-        "ch" => 4
+    #Full tag configuration info for all tags
+    def full_tag_config_info
+      @full_tag_category_mapping ||= {
+        "general" => {
+          "category" => 0,
+          "short" => "gen",
+          "extra" => [],
+          "header" => %{<h1 class="general-tag-list">Tags</h1>},
+          "humanized" => nil,
+          "relatedbutton" => "General"
+        },
+        "character" => {
+          "category" => 4,
+          "short" => "char",
+          "extra" => ["ch"],
+          "header" => %{<h2 class="character-tag-list">Characters</h2>},
+          "humanized" => {
+            "slice" => 5,
+            "exclusion" => [],
+            "regexmap" => /^(.+?)(?:_\(.+\))?$/,
+            "formatstr" => "%s"
+          },
+          "relatedbutton" => "Characters"
+        },
+        "copyright" => {
+          "category" => 3,
+          "short" => "copy",
+          "extra" => ["co"],
+          "header" => %{<h2 class="copyright-tag-list">Copyrights</h2>},
+          "humanized" => {
+            "slice" => 5,
+            "exclusion" => [],
+            "regexmap" => //,
+            "formatstr" => "(%s)"
+          },
+          "relatedbutton" => "Copyrights"
+        },
+        "artist" => {
+          "category" => 1,
+          "short" => "art",
+          "extra" => [],
+          "header" => %{<h2 class="artist-tag-list">Artists</h2>},
+          "humanized" => {
+            "slice" => 0,
+            "exclusion" => %w(banned_artist),
+            "regexmap" => //,
+            "formatstr" => "drawn by %s"
+          },
+          "relatedbutton" => "Artists"
+        },
+        "meta" => {
+          "category" => 5,
+          "short" => "meta",
+          "extra" => [],
+          "header" => %{<h2 class="meta-tag-list">Meta</h2>},
+          "humanized" => nil,
+          "relatedbutton" => nil
+        }
       }
     end
 
-    def canonical_tag_category_mapping
-      @canonical_tag_category_mapping ||= {
-        "General" => 0,
-        "Artist" => 1,
-        "Copyright" => 3,
-        "Character" => 4
-      }
+#TAG ORDERS
+
+    #Sets the order of the humanized essential tag string (models/post.rb)
+    def humanized_tag_category_list
+      @humanized_tag_category_list ||= ["character","copyright","artist"]
     end
 
-    # Returns a hash maping numerical category values to their
-    # string equivalent. Be sure to update the tag_category_mapping also.
-    def reverse_tag_category_mapping
-      @reverse_tag_category_mapping ||= {
-        0 => "General",
-        1 => "Artist",
-        3 => "Copyright",
-        4 => "Character"
-      }
+    #Sets the order of the split tag header list (presenters/tag_set_presenter.rb)
+    def split_tag_header_list
+      @split_tag_header_list ||= ["copyright","character","artist","general","meta"]
     end
+
+    #Sets the order of the categorized tag string (presenters/post_presenter.rb)
+    def categorized_tag_list
+      @categorized_tag_list ||= ["copyright","character","artist","meta","general"]
+    end
+
+    #Sets the order of the related tag buttons (javascripts/related_tag.js)
+    def related_tag_button_list
+      @related_tag_button_list ||= ["general","artist","character","copyright"]
+    end
+
+#END TAG
 
     # If enabled, users must verify their email addresses.
     def enable_email_verification?
@@ -322,14 +369,6 @@ module Danbooru
     end
 
     def pixiv_password
-      nil
-    end
-
-    def pixiv_whitecube_login
-      nil
-    end
-
-    def pixiv_whitecube_password
       nil
     end
 
@@ -417,10 +456,20 @@ module Danbooru
       false
     end
 
+    # The default headers to be sent with outgoing http requests. Some external
+    # services will fail if you don't set a valid User-Agent.
+    def http_headers
+      {
+        "User-Agent" => "#{Danbooru.config.safe_app_name}/#{Danbooru.config.version}",
+      }
+    end
+
     def httparty_options
       # proxy example:
       # {http_proxyaddr: "", http_proxyport: "", http_proxyuser: nil, http_proxypass: nil}
-      {}
+      {
+        headers: Danbooru.config.http_headers,
+      }
     end
 
     # you should override this
@@ -560,6 +609,15 @@ module Danbooru
     end
 
     def aws_sqs_archives_url
+    end
+
+    def ccs_server
+    end
+
+    def ccs_key
+    end
+
+    def aws_sqs_cropper_url
     end
   end
 

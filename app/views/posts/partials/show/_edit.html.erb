@@ -4,7 +4,7 @@
   </div>
 <% end %>
 
-<%= render "sources/info_for_post" %>
+<%= render "sources/info" %>
 
 <%= form_for(post, :html => {:class => "simple_form", :id => "form"}) do |f| %>
   <%= hidden_field_tag :tags_query, params[:tags] %>
@@ -34,13 +34,6 @@
     <% end %>
   </div>
 
-  <% unless post.is_note_locked? %>
-    <div class="input">
-      <%= f.label :has_embedded_notes, "Embed notes" %>
-      <%= f.check_box :has_embedded_notes %>
-    </div>
-  <% end %>
-
   <% if CurrentUser.is_builder? %>
     <div class="input">
       <%= f.label :blank, "Lock" %>
@@ -68,8 +61,8 @@
   <div class="input">
     <%= f.label :source %>
     <%= f.text_field :source %>
-    <%= button_tag "Similar", :id => "similar-button", :type => "button" %>
-    <%= button_tag "Artist", :id => "find-artist-button", :type => "button" %>
+    <%= button_tag "Similar", :id => "similar-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+    <%= button_tag "Artist", :id => "find-artist-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
   </div>
 
   <% if Danbooru.config.iqdbs_server %>
@@ -83,15 +76,15 @@
       <span id="open-edit-dialog" class="ui-icon ui-icon-arrow-1-ne" title="detach" style="display: none;"/>
     </div>
 
-    <%= button_tag "Related tags", :id => "related-tags-button", :type => "button" %>
-    <%= button_tag "General", :id => "related-general-button", :type => "button" %>
-    <%= button_tag "Artists", :id => "related-artists-button", :type => "button" %>
-    <%= button_tag "Characters", :id => "related-characters-button", :type => "button" %>
-    <%= button_tag "Copyrights", :id => "related-copyrights-button", :type => "button" %>
+    <%= button_tag "Related tags", :id => "related-tags-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+
+    <% TagCategory.related_button_list.each do |category| %>
+      <%= button_tag "#{TagCategory.related_button_mapping[category]}", :id => "related-#{category}-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+    <% end %>
   </div>
 
   <div class="input">
-    <%= submit_tag "Submit", :data => { :disable_with => "Submitting..." } %>
+    <%= submit_tag "Submit", :data => { :disable_with => "Submitting..." }, :class => "ui-button ui-widget ui-corner-all" %>
   </div>
 
   <div id="related-tags-container">

@@ -21,6 +21,8 @@ class PostTest < ActiveSupport::TestCase
     CurrentUser.user = @user
     CurrentUser.ip_addr = "127.0.0.1"
     mock_saved_search_service!
+    mock_pool_archive_service!
+    ImageCropper.stubs(:enabled?).returns(false)
   end
 
   def teardown
@@ -36,6 +38,7 @@ class PostTest < ActiveSupport::TestCase
         @upload = FactoryGirl.create(:jpg_upload)
         @upload.process!
         @post = @upload.post
+        Favorite.add(post: @post, user: @user)
       end
 
       should "delete the files" do
@@ -50,6 +53,40 @@ class PostTest < ActiveSupport::TestCase
         assert_equal(false, File.exists?(@post.preview_file_path))
         assert_equal(false, File.exists?(@post.large_file_path))
         assert_equal(false, File.exists?(@post.file_path))
+      end
+
+      should "remove all favorites" do
+        TestAfterCommit.with_commits(true) do
+          @post.expunge!
+        end
+
+        assert_equal(0, Favorite.for_user(@user.id).where("post_id = ?", @post.id).count)
+      end
+
+      should "decrement the uploader's upload count" do
+        assert_difference("@post.uploader.reload.post_upload_count", -1) do
+          @post.expunge!
+        end
+      end
+
+      should "decrement the user's note update count" do
+        FactoryGirl.create(:note, post: @post)
+        assert_difference(["@post.uploader.reload.note_update_count"], -1) do
+          @post.expunge!
+        end
+      end
+
+      should "decrement the user's post update count" do
+        assert_difference(["@post.uploader.reload.post_update_count"], -1) do
+          @post.expunge!
+        end
+      end
+
+      should "decrement the user's favorite count" do
+        @post.add_favorite!(@post.uploader)
+        assert_difference(["@post.uploader.reload.favorite_count"], -1) do
+          @post.expunge!
+        end
       end
 
       should "remove the post from iqdb" do
@@ -74,16 +111,28 @@ class PostTest < ActiveSupport::TestCase
 
       context "that belongs to a pool" do
         setup do
+          # must be a builder to update deleted pools. must be >1 week old to remove posts from pools.
+          CurrentUser.user = FactoryGirl.create(:builder_user, created_at: 1.month.ago)
+
           SqsService.any_instance.stubs(:send_message)
           @pool = FactoryGirl.create(:pool)
           @pool.add!(@post)
-          @post.reload
+
+          @deleted_pool = FactoryGirl.create(:pool)
+          @deleted_pool.add!(@post)
+          @deleted_pool.update_columns(is_deleted: true)
+
           @post.expunge!
+          @pool.reload
+          @deleted_pool.reload
         end
 
         should "remove the post from all pools" do
-          @pool.reload
           assert_equal("", @pool.post_ids)
+        end
+
+        should "remove the post from deleted pools" do
+          assert_equal("", @deleted_pool.post_ids)
         end
 
         should "destroy the record" do
@@ -236,18 +285,39 @@ class PostTest < ActiveSupport::TestCase
       end
 
       context "two or more children" do
+        setup do
+          # ensure initial post versions won't be merged.
+          travel_to(1.day.ago) do
+            @p1 = FactoryGirl.create(:post)
+            @c1 = FactoryGirl.create(:post, :parent_id => @p1.id)
+            @c2 = FactoryGirl.create(:post, :parent_id => @p1.id)
+            @c3 = FactoryGirl.create(:post, :parent_id => @p1.id)
+          end
+        end
+
         should "reparent all children to the first child" do
-          p1 = FactoryGirl.create(:post)
-          c1 = FactoryGirl.create(:post, :parent_id => p1.id)
-          c2 = FactoryGirl.create(:post, :parent_id => p1.id)
-          c3 = FactoryGirl.create(:post, :parent_id => p1.id)
-          p1.expunge!
-          c1.reload
-          c2.reload
-          c3.reload
-          assert_nil(c1.parent_id)
-          assert_equal(c1.id, c2.parent_id)
-          assert_equal(c1.id, c3.parent_id)
+          @p1.expunge!
+          @c1.reload
+          @c2.reload
+          @c3.reload
+
+          assert_nil(@c1.parent_id)
+          assert_equal(@c1.id, @c2.parent_id)
+          assert_equal(@c1.id, @c3.parent_id)
+        end
+
+        should "save a post version record for each child" do
+          assert_difference(["@c1.versions.count", "@c2.versions.count", "@c3.versions.count"]) do
+            @p1.expunge!
+            @c1.reload
+            @c2.reload
+            @c3.reload
+          end
+        end
+
+        should "set the has_children flag on the new parent" do
+          @p1.expunge!
+          assert_equal(true, @c1.reload.has_children?)
         end
       end
     end
@@ -577,8 +647,8 @@ class PostTest < ActiveSupport::TestCase
           assert_equal(Tag.categories.copyright, Tag.find_by_name("abc").category)
         end
 
-        should "update the category cache of the tag" do
-          assert_equal(Tag.categories.copyright, Cache.get("tc:abc"))
+        should "1234 update the category cache of the tag" do
+          assert_equal(Tag.categories.copyright, Cache.get("tc:#{Cache.hash('abc')}"))
         end
 
         should "update the tag counts of the posts" do
@@ -668,6 +738,49 @@ class PostTest < ActiveSupport::TestCase
       end
 
       context "tagged with a metatag" do
+
+        context "for typing a tag" do
+          setup do
+            @post = FactoryGirl.create(:post, tag_string: "char:hoge")
+            @tags = @post.tag_array
+          end
+
+          should "change the type" do
+            assert(Tag.where(name: "hoge", category: 4).exists?, "expected 'moge' tag to be created as a character")
+          end
+        end
+
+        context "for typing an aliased tag" do
+          setup do
+            @alias = FactoryGirl.create(:tag_alias, antecedent_name: "hoge", consequent_name: "moge")
+            @post = FactoryGirl.create(:post, tag_string: "char:hoge")
+            @tags = @post.tag_array
+          end
+
+          should "change the type" do
+            assert_equal(["moge"], @tags)
+            assert(Tag.where(name: "moge", category: 0).exists?, "expected 'moge' tag to be created as a character")
+            assert(Tag.where(name: "hoge", category: 4).exists?, "expected 'moge' tag to be created as a character")
+          end
+        end
+
+        context "for a cosplay tag" do
+          setup do
+            @post = FactoryGirl.create(:post, tag_string: "char:someone_(cosplay)")
+            @tags = @post.tag_array
+          end
+
+          should "add the cosplay tag" do
+            assert(@tags.include?("cosplay"))
+          end
+
+          should "create the tag" do
+            assert(Tag.where(name: "someone_(cosplay)").exists?, "expected 'someone_(cosplay)' tag to be created")
+            assert(Tag.where(name: "someone_(cosplay)", category: 4).exists?, "expected 'someone_(cosplay)' tag to be created as character")
+            assert(Tag.where(name: "someone", category: 4).exists?, "expected 'someone' tag to be created")
+          end
+        end
+
         context "for a parent" do
           setup do
             @parent = FactoryGirl.create(:post)
@@ -1123,11 +1236,13 @@ class PostTest < ActiveSupport::TestCase
         should "increment the updater's post_update_count" do
           PostArchive.sqs_service.stubs(:merge?).returns(false)
           post = FactoryGirl.create(:post, :tag_string => "aaa bbb ccc")
-          CurrentUser.reload
 
-          assert_difference("CurrentUser.post_update_count", 1) do
+          # XXX in the test environment the update count gets bumped twice: and
+          # once by Post#post_update_count, and once by the counter cache. in
+          # production the counter cache doesn't bump the count, because
+          # versions are created on a separate server.
+          assert_difference("CurrentUser.user.reload.post_update_count", 2) do
             post.update_attributes(:tag_string => "zzz")
-            CurrentUser.reload
           end
         end
 
@@ -1360,7 +1475,7 @@ class PostTest < ActiveSupport::TestCase
           end
 
           context "but doesn't have a pixiv id" do
-            should "not save the pixiv id" do
+            should "save the pixiv id" do
               @post.pixiv_id = 1234
               @post.update(source: "http://i1.pixiv.net/novel-cover-original/img/2016/11/03/20/10/58/7436075_f75af69f3eacd1656d3733c72aa959cf.jpg")
               assert_nil(@post.pixiv_id)
@@ -1933,6 +2048,17 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(all - [flagged], "-status:active")
     end
 
+    should "respect the 'Deleted post filter' option when using the status:banned metatag" do
+      deleted = FactoryGirl.create(:post, is_deleted: true, is_banned: true)
+      undeleted = FactoryGirl.create(:post, is_banned: true)
+
+      CurrentUser.hide_deleted_posts = true
+      assert_tag_match([undeleted], "status:banned")
+
+      CurrentUser.hide_deleted_posts = false
+      assert_tag_match([undeleted, deleted], "status:banned")
+    end
+
     should "return posts for the filetype:<ext> metatag" do
       png = FactoryGirl.create(:post, file_ext: "png")
       jpg = FactoryGirl.create(:post, file_ext: "jpg")
@@ -2076,6 +2202,8 @@ class PostTest < ActiveSupport::TestCase
 
     should "return posts ordered by a particular attribute" do
       posts = (1..2).map do |n|
+        tags = ["tagme", "gentag1 gentag2 artist:arttag char:chartag copy:copytag"]
+
         p = FactoryGirl.create(
           :post,
           score: n,
@@ -2084,6 +2212,7 @@ class PostTest < ActiveSupport::TestCase
           # posts[0] is portrait, posts[1] is landscape. posts[1].mpixels > posts[0].mpixels.
           image_height: 100*n*n,
           image_width: 100*(3-n)*n,
+          tag_string: tags[n-1],
         )
 
         FactoryGirl.create(:artist_commentary, post: p)
@@ -2103,6 +2232,11 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(posts.reverse, "order:mpixels")
       assert_tag_match(posts.reverse, "order:portrait")
       assert_tag_match(posts.reverse, "order:filesize")
+      assert_tag_match(posts.reverse, "order:tagcount")
+      assert_tag_match(posts.reverse, "order:gentags")
+      assert_tag_match(posts.reverse, "order:arttags")
+      assert_tag_match(posts.reverse, "order:chartags")
+      assert_tag_match(posts.reverse, "order:copytags")
       assert_tag_match(posts.reverse, "order:rank")
 
       assert_tag_match(posts, "order:id_asc")
@@ -2116,6 +2250,11 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(posts, "order:mpixels_asc")
       assert_tag_match(posts, "order:landscape")
       assert_tag_match(posts, "order:filesize_asc")
+      assert_tag_match(posts, "order:tagcount_asc")
+      assert_tag_match(posts, "order:gentags_asc")
+      assert_tag_match(posts, "order:arttags_asc")
+      assert_tag_match(posts, "order:chartags_asc")
+      assert_tag_match(posts, "order:copytags_asc")
     end
 
     should "return posts for order:comment_bumped" do
@@ -2154,6 +2293,14 @@ class PostTest < ActiveSupport::TestCase
       assert_raise(::Post::SearchError) do
         Post.tag_match("a b c rating:s width:10 height:10 user:bob")
       end
+    end
+
+    should "not count free tags against the user's search limit" do
+      post1 = FactoryGirl.create(:post, tag_string: "aaa bbb rating:s")
+
+      Danbooru.config.expects(:is_unlimited_tag?).with("rating:s").once.returns(true)
+      Danbooru.config.expects(:is_unlimited_tag?).with(anything).twice.returns(false)
+      assert_tag_match([post1], "aaa bbb rating:s")
     end
 
     should "succeed for exclusive tag searches with no other tag" do
@@ -2243,92 +2390,111 @@ class PostTest < ActiveSupport::TestCase
       setup do
         Danbooru.config.stubs(:blank_tag_search_fast_count).returns(nil)
         Danbooru.config.stubs(:estimate_post_counts).returns(false)
+        FactoryGirl.create(:tag_alias, :antecedent_name => "alias", :consequent_name => "aaa")
+        FactoryGirl.create(:post, :tag_string => "aaa", "score" => 42)
       end
 
-      context "with a primed cache" do
-        setup do
-          Cache.put("pfc:aaa", 0)
-          Cache.put("pfc:alias", 0)
-          Cache.put("pfc:width:50", 0)
-          Danbooru.config.stubs(:blank_tag_search_fast_count).returns(1_000_000)
-          FactoryGirl.create(:tag_alias, :antecedent_name => "alias", :consequent_name => "aaa")
-          FactoryGirl.create(:post, :tag_string => "aaa")
+      context "a single basic tag" do
+        should "return the cached count" do
+          Tag.find_or_create_by_name("aaa").update_columns(post_count: 100)
+          assert_equal(100, Post.fast_count("aaa"))
+        end
+      end
+
+      context "a single metatag" do
+        should "return the correct cached count" do
+          FactoryGirl.build(:tag, name: "score:42", post_count: -100).save(validate: false)
+          Post.set_count_in_cache("score:42", 100)
+
+          assert_equal(100, Post.fast_count("score:42"))
         end
 
-        should "be counted correctly in fast_count" do
-          assert_equal(1, Post.count)
+        should "return the correct cached count for a pool:<id> search" do
+          FactoryGirl.build(:tag, name: "pool:1234", post_count: -100).save(validate: false)
+          Post.set_count_in_cache("pool:1234", 100)
+
+          assert_equal(100, Post.fast_count("pool:1234"))
+        end
+      end
+
+      context "a multi-tag search" do
+        should "return the cached count, if it exists" do
+          Post.set_count_in_cache("aaa score:42", 100)
+          assert_equal(100, Post.fast_count("aaa score:42"))
+        end
+
+        should "return the true count, if not cached" do
+          assert_equal(1, Post.fast_count("aaa score:42"))
+        end
+      end
+
+      context "a blank search" do
+        should "should execute a search" do
+          Cache.delete(Post.count_cache_key(''))
+          Post.expects(:fast_count_search).with("", kind_of(Hash)).once.returns(1)
           assert_equal(1, Post.fast_count(""))
-          assert_equal(1, Post.fast_count("aaa"))
+        end
+
+        should "set the value in cache" do
+          Post.expects(:set_count_in_cache).with("", kind_of(Integer)).once
+          Post.fast_count("")
+        end
+
+        context "with a primed cache" do
+          setup do
+            Cache.put(Post.count_cache_key(''), "100")
+          end
+
+          should "fetch the value from the cache" do
+            assert_equal(100, Post.fast_count(""))
+          end
+        end
+
+        should "translate an alias" do
           assert_equal(1, Post.fast_count("alias"))
+        end
+
+        should "return 0 for a nonexisting tag" do
           assert_equal(0, Post.fast_count("bbb"))
         end
-      end
 
-      should "increment the post count" do
-        assert_equal(0, Post.fast_count(""))
-        post = FactoryGirl.create(:post, :tag_string => "aaa bbb")
-        assert_equal(1, Post.fast_count(""))
-        assert_equal(1, Post.fast_count("aaa"))
-        assert_equal(1, Post.fast_count("bbb"))
-        assert_equal(0, Post.fast_count("ccc"))
+        context "in safe mode" do
+          setup do
+            CurrentUser.stubs(:safe_mode?).returns(true)
+            FactoryGirl.create(:post, "rating" => "s")
+          end
 
-        post.tag_string = "ccc"
-        post.save
+          should "work for a blank search" do
+            assert_equal(1, Post.fast_count(""))
+          end
 
-        assert_equal(1, Post.fast_count(""))
-        assert_equal(0, Post.fast_count("aaa"))
-        assert_equal(0, Post.fast_count("bbb"))
-        assert_equal(1, Post.fast_count("ccc"))
-      end
-    end
+          should "work for a nil search" do
+            assert_equal(1, Post.fast_count(nil))
+          end
 
-    context "The cache" do
-      context "when shared between users on danbooru/safebooru" do
-        setup do
-          Danbooru.config.stubs(:blank_tag_search_fast_count).returns(nil)
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :rating => "q")
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :rating => "s")
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :rating => "s")
-          CurrentUser.stubs(:safe_mode?).returns(true)
-          Post.fast_count("aaa")
-          CurrentUser.stubs(:safe_mode?).returns(false)
-          Post.fast_count("bbb")
-        end
+          should "not fail for a two tag search by a member" do
+            post1 = FactoryGirl.create(:post, tag_string: "aaa bbb rating:s")
+            post2 = FactoryGirl.create(:post, tag_string: "aaa bbb rating:e")
 
-        should "be accurate on danbooru" do
-          CurrentUser.stubs(:safe_mode?).returns(false)
-          assert_equal(3, Post.fast_count("aaa"))
-          assert_equal(3, Post.fast_count("bbb"))
-        end
+            Danbooru.config.expects(:is_unlimited_tag?).with("rating:s").once.returns(true)
+            Danbooru.config.expects(:is_unlimited_tag?).with(anything).twice.returns(false)
+            assert_equal(1, Post.fast_count("aaa bbb"))
+          end
 
-        should "be accurate on safebooru" do
-          CurrentUser.stubs(:safe_mode?).returns(true)
-          assert_equal(2, Post.fast_count("aaa"))
-          assert_equal(2, Post.fast_count("bbb"))
-        end
-      end
+          should "set the value in cache" do
+            Post.expects(:set_count_in_cache).with("rating:s", kind_of(Integer)).once
+            Post.fast_count("")
+          end
 
-      context "when shared between users with the deleted post filter on/off" do
-        setup do
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :is_deleted => true)
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :is_deleted => false)
-          FactoryGirl.create(:post, :tag_string => "aaa bbb", :is_deleted => false)
-          CurrentUser.user.stubs(:hide_deleted_posts?).returns(true)
-          Post.fast_count("aaa")
-          CurrentUser.user.stubs(:hide_deleted_posts?).returns(false)
-          Post.fast_count("bbb")
-        end
+          context "with a primed cache" do
+            setup do
+              Cache.put(Post.count_cache_key('rating:s'), "100")
+            end
 
-        should "be accurate with the deleted post filter on" do
-          CurrentUser.user.stubs(:hide_deleted_posts?).returns(true)
-          assert_equal(2, Post.fast_count("aaa"))
-          assert_equal(2, Post.fast_count("bbb"))
-        end
-
-        should "be accurate with the deleted post filter off" do
-          CurrentUser.user.stubs(:hide_deleted_posts?).returns(false)
-          assert_equal(3, Post.fast_count("aaa"))
-          assert_equal(3, Post.fast_count("bbb"))
+            should "fetch the value from the cache" do
+              assert_equal(100, Post.fast_count(""))
+            end
+          end
         end
       end
     end

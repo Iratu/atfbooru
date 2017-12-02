@@ -8,6 +8,8 @@
   <% unless cookies[:dm] %>
     <meta name="viewport" content="width=device-width,initial-scale=1">
   <% end %>
+  <meta name="tag-category-names" content="<%= TagCategory.categories %>">
+  <meta name="short-tag-category-names" content="<%= TagCategory.short_name_list %>">
   <meta name="current-user-name" content="<%= CurrentUser.name %>">
   <meta name="current-user-id" content="<%= CurrentUser.id %>">
   <meta name="current-user-can-approve-posts" content="<%= CurrentUser.can_approve_posts? %>">
@@ -26,6 +28,7 @@
   <meta name="mobile-mode" content="<%= CurrentUser.mobile_mode? %>">
   <meta name="last-forum-read-at" content="<%= CurrentUser.user.last_forum_read_at %>">
   <meta name="disable-labeled-saved-searches" content="<%= CurrentUser.disable_categorized_saved_searches? %>">
+  <%= content_tag(:meta, nil, name: "disable-mobile-gestures", content: CurrentUser.disable_mobile_gestures?) %>
   <%= auto_discovery_link_tag :atom, posts_path(:format => "atom", :tags => params[:tags]) %>
   <%= stylesheet_link_tag "application", :media => "screen" %>
   <% if CurrentUser.user.custom_style.present? %>

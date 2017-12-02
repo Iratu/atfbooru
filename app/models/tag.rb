@@ -1,6 +1,7 @@
 class Tag < ApplicationRecord
-  COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 1000
-  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|gentags|arttags|chartags|copytags|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype|flagger|-flagger|appealer|-appealer"
+  COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 300
+  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype|flagger|-flagger|appealer|-appealer|" +
+    TagCategory.short_name_list.map {|x| "#{x}tags"}.join("|")
   SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm|flagger|-flagger|appealer|-appealer"
   attr_accessible :category, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :is_locked, :as => [:moderator, :admin]
@@ -11,6 +12,7 @@ class Tag < ApplicationRecord
   has_many :consequent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "consequent_name", :primary_key => "name"
 
   validates :name, uniqueness: true, tag_name: true, on: :create
+  validates_inclusion_of :category, in: TagCategory.category_ids
 
   module ApiMethods
     def to_legacy_json
@@ -26,18 +28,18 @@ class Tag < ApplicationRecord
   end
 
   class CategoryMapping
-    Danbooru.config.reverse_tag_category_mapping.each do |value, category|
-      define_method(category.downcase) do
+    TagCategory.reverse_mapping.each do |value, category|
+      define_method(category) do
         value
       end
     end
 
     def regexp
-      @regexp ||= Regexp.compile(Danbooru.config.tag_category_mapping.keys.sort_by {|x| -x.size}.join("|"))
+      @regexp ||= Regexp.compile(TagCategory.mapping.keys.sort_by {|x| -x.size}.join("|"))
     end
 
     def value_for(string)
-      Danbooru.config.tag_category_mapping[string.to_s.downcase] || 0
+      TagCategory.mapping[string.to_s.downcase] || 0
     end
   end
 
@@ -57,12 +59,10 @@ class Tag < ApplicationRecord
 
       def increment_post_counts(tag_names)
         Tag.where(:name => tag_names).update_all("post_count = post_count + 1")
-        Post.expire_cache_for_all(tag_names)
       end
 
       def decrement_post_counts(tag_names)
         Tag.where(:name => tag_names).update_all("post_count = post_count - 1")
-        Post.expire_cache_for_all(tag_names)
       end
 
       def clean_up_negative_post_counts!
@@ -99,7 +99,7 @@ class Tag < ApplicationRecord
         if options[:disable_caching]
           select_category_for(tag_name)
         else
-          Cache.get("tc:#{Cache.sanitize(tag_name)}") do
+          Cache.get("tc:#{Cache.hash(tag_name)}") do
             select_category_for(tag_name)
           end
         end
@@ -124,7 +124,7 @@ class Tag < ApplicationRecord
     end
 
     def category_name
-      Danbooru.config.reverse_tag_category_mapping[category]
+      TagCategory.reverse_mapping[category].capitalize
     end
 
     def update_category_cache_for_all
@@ -132,21 +132,22 @@ class Tag < ApplicationRecord
       Danbooru.config.other_server_hosts.each do |host|
         delay(:queue => host).update_category_cache
       end
-      delay(:queue => "default").update_category_post_counts
+      delay(:queue => "default", :priority => 10).update_category_post_counts
     end
 
     def update_category_post_counts
       Post.with_timeout(30_000, nil, {:tags => name}) do
         Post.raw_tag_match(name).where("true /* Tag#update_category_post_counts */").find_each do |post|
           post.reload
-          post.set_tag_counts
-          Post.where(:id => post.id).update_all(:tag_count => post.tag_count, :tag_count_general => post.tag_count_general, :tag_count_artist => post.tag_count_artist, :tag_count_copyright => post.tag_count_copyright, :tag_count_character => post.tag_count_character)
+          post.set_tag_counts(false)
+          args = TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}.to_h.update(:tag_count => post.tag_count)
+          Post.where(:id => post.id).update_all(args)
         end
       end
     end
 
     def update_category_cache
-      Cache.put("tc:#{Cache.sanitize(name)}", category, 1.hour)
+      Cache.put("tc:#{Cache.hash(name)}", category, 3.hours)
     end
   end
 
@@ -175,7 +176,7 @@ class Tag < ApplicationRecord
           counts = counts.to_a.select {|x| x[1] > trending_count_limit}
           counts = counts.map do |tag_name, recent_count|
             tag = Tag.find_or_create_by_name(tag_name)
-            if tag.category == Danbooru.config.tag_category_mapping["artist"]
+            if tag.category == Tag.categories.artist
               # we're not interested in artists in the trending list
               [tag_name, 0]
             else
@@ -192,6 +193,10 @@ class Tag < ApplicationRecord
   module NameMethods
     def normalize_name(name)
       name.to_s.mb_chars.downcase.strip.tr(" ", "_").to_s
+    end
+
+    def create_for_list(names)
+      names.map {|x| find_or_create_by_name(x).name}
     end
 
     def find_or_create_by_name(name, options = {})
@@ -214,7 +219,7 @@ class Tag < ApplicationRecord
           # next few lines if the category is changed.
           tag.update_category_cache
 
-          if category_id != tag.category && !tag.is_locked? && (CurrentUser.is_builder? || tag.post_count <= 50)
+          if category_id != tag.category && !tag.is_locked? && ((CurrentUser.is_builder? && tag.post_count < 10_000) || tag.post_count <= 50)
             tag.update_column(:category, category_id)
             tag.update_category_cache_for_all
           end
@@ -313,19 +318,19 @@ class Tag < ApplicationRecord
       when :filesize
         object =~ /\A(\d+(?:\.\d*)?|\d*\.\d+)([kKmM]?)[bB]?\Z/
 
-      	size = $1.to_f
-      	unit = $2
+        size = $1.to_f
+        unit = $2
 
-      	conversion_factor = case unit
-    	  when /m/i
-    	    1024 * 1024
-    	  when /k/i
-    	    1024
-    	  else
-    	    1
-  	    end
+        conversion_factor = case unit
+        when /m/i
+          1024 * 1024
+        when /k/i
+          1024
+        else
+          1
+        end
 
-  	    (size * conversion_factor).to_i
+        (size * conversion_factor).to_i
       end
     end
 
@@ -401,13 +406,38 @@ class Tag < ApplicationRecord
         output[:include] << tag[1..-1].mb_chars.downcase
 
       elsif tag =~ /\*/
-        matches = Tag.name_matches(tag.downcase).select("name").limit(Danbooru.config.tag_query_limit).order("post_count DESC").map(&:name)
+        matches = Tag.name_matches(tag).select("name").limit(Danbooru.config.tag_query_limit).order("post_count DESC").map(&:name)
         matches = ["~no_matches~"] if matches.empty?
         output[:include] += matches
 
       else
         output[:related] << tag.mb_chars.downcase
       end
+    end
+
+    # true if query is a single "simple" tag (not a metatag, negated tag, or wildcard tag).
+    def is_simple_tag?(query)
+      is_single_tag?(query) && !is_metatag?(query) && !is_negated_tag?(query) && !is_optional_tag?(query) && !is_wildcard_tag?(query)
+    end
+
+    def is_single_tag?(query)
+      scan_query(query).size == 1
+    end
+
+    def is_metatag?(tag)
+      !!(tag =~ /\A(#{METATAGS}):(.+)\Z/i)
+    end
+
+    def is_negated_tag?(tag)
+      tag.starts_with?("-")
+    end
+
+    def is_optional_tag?(tag)
+      tag.starts_with?("~")
+    end
+
+    def is_wildcard_tag?(tag)
+      tag.include?("*")
     end
 
     def parse_query(query, options = {})
@@ -422,299 +452,292 @@ class Tag < ApplicationRecord
       }
 
       scan_query(query).each do |token|
-        q[:tag_count] += 1 unless token == "status:deleted" || token =~ /\Alimit:.+\Z/
+        q[:tag_count] += 1 unless Danbooru.config.is_unlimited_tag?(token)
 
         if token =~ /\A(#{METATAGS}):(.+)\Z/i
-          case $1.downcase
+          g1 = $1.downcase
+          g2 = $2
+          case g1
           when "-user"
             q[:uploader_id_neg] ||= []
-            user_id = User.name_to_id($2)
+            user_id = User.name_to_id(g2)
             q[:uploader_id_neg] << user_id unless user_id.blank?
 
           when "user"
-            user_id = User.name_to_id($2)
+            user_id = User.name_to_id(g2)
             q[:uploader_id] = user_id unless user_id.blank?
 
           when "-approver"
-            if $2 == "none"
+            if g2 == "none"
               q[:approver_id] = "any"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:approver_id] = "none"
             else
               q[:approver_id_neg] ||= []
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:approver_id_neg] << user_id unless user_id.blank?
             end
 
           when "approver"
-            if $2 == "none"
+            if g2 == "none"
               q[:approver_id] = "none"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:approver_id] = "any"
             else
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:approver_id] = user_id unless user_id.blank?
             end
 
           when "flagger"
             q[:flagger_ids] ||= []
 
-            if $2 == "none"
+            if g2 == "none"
               q[:flagger_ids] << "none"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:flagger_ids] << "any"
             else
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:flagger_ids] << user_id unless user_id.blank?
             end
 
           when "-flagger"
-            if $2 == "none"
+            if g2 == "none"
               q[:flagger_ids] ||= []
               q[:flagger_ids] << "any"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:flagger_ids] ||= []
               q[:flagger_ids] << "none"
             else
               q[:flagger_ids_neg] ||= []
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:flagger_ids_neg] << user_id unless user_id.blank?
             end
 
           when "appealer"
             q[:appealer_ids] ||= []
 
-            if $2 == "none"
+            if g2 == "none"
               q[:appealer_ids] << "none"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:appealer_ids] << "any"
             else
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:appealer_ids] << user_id unless user_id.blank?
             end
 
           when "-appealer"
-            if $2 == "none"
+            if g2 == "none"
               q[:appealer_ids] ||= []
               q[:appealer_ids] << "any"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:appealer_ids] ||= []
               q[:appealer_ids] << "none"
             else
               q[:appealer_ids_neg] ||= []
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:appealer_ids_neg] << user_id unless user_id.blank?
             end
 
           when "commenter", "comm"
             q[:commenter_ids] ||= []
 
-            if $2 == "none"
+            if g2 == "none"
               q[:commenter_ids] << "none"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:commenter_ids] << "any"
             else
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:commenter_ids] << user_id unless user_id.blank?
             end
 
           when "noter"
             q[:noter_ids] ||= []
 
-            if $2 == "none"
+            if g2 == "none"
               q[:noter_ids] << "none"
-            elsif $2 == "any"
+            elsif g2 == "any"
               q[:noter_ids] << "any"
             else
-              user_id = User.name_to_id($2)
+              user_id = User.name_to_id(g2)
               q[:noter_ids] << user_id unless user_id.blank?
             end
 
           when "noteupdater"
             q[:note_updater_ids] ||= []
-            user_id = User.name_to_id($2)
+            user_id = User.name_to_id(g2)
             q[:note_updater_ids] << user_id unless user_id.blank?
 
           when "artcomm"
             q[:artcomm_ids] ||= []
-            user_id = User.name_to_id($2)
+            user_id = User.name_to_id(g2)
             q[:artcomm_ids] << user_id unless user_id.blank?
 
           when "-pool"
-            if $2.downcase == "none"
+            if g2.downcase == "none"
               q[:pool] = "any"
-            elsif $2.downcase == "any"
+            elsif g2.downcase == "any"
               q[:pool] = "none"
-            elsif $2.downcase == "series"
+            elsif g2.downcase == "series"
               q[:tags][:exclude] << "pool:series"
-            elsif $2.downcase == "collection"
+            elsif g2.downcase == "collection"
               q[:tags][:exclude] << "pool:collection"
             else
-              q[:tags][:exclude] << "pool:#{Pool.name_to_id($2)}"
+              q[:tags][:exclude] << "pool:#{Pool.name_to_id(g2)}"
             end
 
           when "pool"
-            if $2.downcase == "none"
+            if g2.downcase == "none"
               q[:pool] = "none"
-            elsif $2.downcase == "any"
+            elsif g2.downcase == "any"
               q[:pool] = "any"
-            elsif $2.downcase == "series"
+            elsif g2.downcase == "series"
               q[:tags][:related] << "pool:series"
-            elsif $2.downcase == "collection"
+            elsif g2.downcase == "collection"
               q[:tags][:related] << "pool:collection"
-            elsif $2.include?("*")
-              pools = Pool.name_matches($2).select("id").limit(Danbooru.config.tag_query_limit).order("post_count DESC")
+            elsif g2.include?("*")
+              pools = Pool.name_matches(g2).select("id").limit(Danbooru.config.tag_query_limit).order("post_count DESC")
               q[:tags][:include] += pools.map {|pool| "pool:#{pool.id}"}
             else
-              q[:tags][:related] << "pool:#{Pool.name_to_id($2)}"
+              q[:tags][:related] << "pool:#{Pool.name_to_id(g2)}"
             end
 
           when "ordpool"
-            pool_id = Pool.name_to_id($2)
+            pool_id = Pool.name_to_id(g2)
             q[:tags][:related] << "pool:#{pool_id}"
             q[:ordpool] = pool_id
 
           when "-favgroup"
-            favgroup_id = FavoriteGroup.name_to_id($2)
+            favgroup_id = FavoriteGroup.name_to_id(g2)
             q[:favgroups_neg] ||= []
             q[:favgroups_neg] << favgroup_id
 
           when "favgroup"
-            favgroup_id = FavoriteGroup.name_to_id($2)
+            favgroup_id = FavoriteGroup.name_to_id(g2)
             q[:favgroups] ||= []
             q[:favgroups] << favgroup_id
 
           when "-fav"
-            q[:tags][:exclude] << "fav:#{User.name_to_id($2)}"
+            q[:tags][:exclude] << "fav:#{User.name_to_id(g2)}"
 
           when "fav"
-            q[:tags][:related] << "fav:#{User.name_to_id($2)}"
+            q[:tags][:related] << "fav:#{User.name_to_id(g2)}"
 
           when "ordfav"
-            user_id = User.name_to_id($2)
+            user_id = User.name_to_id(g2)
             q[:tags][:related] << "fav:#{user_id}"
             q[:ordfav] = user_id
 
           when "search"
             q[:saved_searches] ||= []
-            q[:saved_searches] << $2
+            q[:saved_searches] << g2
 
           when "md5"
-            q[:md5] = $2.downcase.split(/,/)
+            q[:md5] = g2.downcase.split(/,/)
 
           when "-rating"
-            q[:rating_negated] = $2.downcase
+            q[:rating_negated] = g2.downcase
 
           when "rating"
-            q[:rating] = $2.downcase
+            q[:rating] = g2.downcase
 
           when "-locked"
-            q[:locked_negated] = $2.downcase
+            q[:locked_negated] = g2.downcase
 
           when "locked"
-            q[:locked] = $2.downcase
+            q[:locked] = g2.downcase
 
           when "id"
-            q[:post_id] = parse_helper($2)
+            q[:post_id] = parse_helper(g2)
 
           when "-id"
-            q[:post_id_negated] = $2.to_i
+            q[:post_id_negated] = g2.to_i
 
           when "width"
-            q[:width] = parse_helper($2)
+            q[:width] = parse_helper(g2)
 
           when "height"
-            q[:height] = parse_helper($2)
+            q[:height] = parse_helper(g2)
 
           when "mpixels"
-            q[:mpixels] = parse_helper_fudged($2, :float)
+            q[:mpixels] = parse_helper_fudged(g2, :float)
 
           when "ratio"
-            q[:ratio] = parse_helper($2, :ratio)
+            q[:ratio] = parse_helper(g2, :ratio)
 
           when "score"
-            q[:score] = parse_helper($2)
+            q[:score] = parse_helper(g2)
 
           when "favcount"
-            q[:fav_count] = parse_helper($2)
+            q[:fav_count] = parse_helper(g2)
 
           when "filesize"
-      	    q[:filesize] = parse_helper_fudged($2, :filesize)
+            q[:filesize] = parse_helper_fudged(g2, :filesize)
 
           when "source"
-            src = $2.gsub(/\A"(.*)"\Z/, '\1')
+            src = g2.gsub(/\A"(.*)"\Z/, '\1')
             q[:source] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
 
           when "-source"
-            src = $2.gsub(/\A"(.*)"\Z/, '\1')
+            src = g2.gsub(/\A"(.*)"\Z/, '\1')
             q[:source_neg] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
 
           when "date"
-            q[:date] = parse_helper($2, :date)
+            q[:date] = parse_helper(g2, :date)
 
           when "age"
-            q[:age] = reverse_parse_helper(parse_helper($2, :age))
+            q[:age] = reverse_parse_helper(parse_helper(g2, :age))
 
           when "tagcount"
-            q[:post_tag_count] = parse_helper($2)
+            q[:post_tag_count] = parse_helper(g2)
 
-          when "gentags"
-            q[:general_tag_count] = parse_helper($2)
-
-          when "arttags"
-            q[:artist_tag_count] = parse_helper($2)
-
-          when "chartags"
-            q[:character_tag_count] = parse_helper($2)
-
-          when "copytags"
-            q[:copyright_tag_count] = parse_helper($2)
+          when /(#{TagCategory.short_name_regex})tags/
+            q["#{TagCategory.short_name_mapping[$1]}_tag_count".to_sym] = parse_helper(g2)
 
           when "parent"
-            q[:parent] = $2.downcase
+            q[:parent] = g2.downcase
 
           when "-parent"
-            if $2.downcase == "none"
+            if g2.downcase == "none"
               q[:parent] = "any"
-            elsif $2.downcase == "any"
+            elsif g2.downcase == "any"
               q[:parent] = "none"
             else
               q[:parent_neg_ids] ||= []
-              q[:parent_neg_ids] << $2.downcase
+              q[:parent_neg_ids] << g2.downcase
             end
 
           when "child"
-            q[:child] = $2.downcase
+            q[:child] = g2.downcase
 
           when "order"
-            q[:order] = $2.downcase
+            q[:order] = g2.downcase
 
           when "limit"
             # Do nothing. The controller takes care of it.
 
           when "-status"
-            q[:status_neg] = $2.downcase
+            q[:status_neg] = g2.downcase
 
           when "status"
-            q[:status] = $2.downcase
+            q[:status] = g2.downcase
 
           when "filetype"
-            q[:filetype] = $2.downcase
+            q[:filetype] = g2.downcase
 
           when "-filetype"
-            q[:filetype_neg] = $2.downcase
+            q[:filetype_neg] = g2.downcase
 
           when "pixiv_id", "pixiv"
-            q[:pixiv_id] = parse_helper($2)
+            q[:pixiv_id] = parse_helper(g2)
 
           when "upvote"
             if CurrentUser.user.is_moderator?
-              q[:upvote] = User.name_to_id($2)
+              q[:upvote] = User.name_to_id(g2)
             end
 
           when "downvote"
             if CurrentUser.user.is_moderator?
-              q[:downvote] = User.name_to_id($2)
+              q[:downvote] = User.name_to_id(g2)
             end
 
           end
@@ -739,6 +762,7 @@ class Tag < ApplicationRecord
   module RelationMethods
     def update_related
       return unless should_update_related?
+
       CurrentUser.scoped(User.first, "127.0.0.1") do
         self.related_tags = RelatedTagCalculator.calculate_from_sample_to_array(name).join(" ")
       end
@@ -748,20 +772,17 @@ class Tag < ApplicationRecord
     end
 
     def update_related_if_outdated
-      if should_update_related?
+      key = Cache.hash(name)
+
+      if Cache.get("urt:#{key}").nil? && should_update_related?
         if post_count < COSINE_SIMILARITY_RELATED_TAG_THRESHOLD
           delay(:queue => "default").update_related
-        elsif post_count >= COSINE_SIMILARITY_RELATED_TAG_THRESHOLD
-          key = Cache.sanitize(name)
-          cache_check = Cache.get("urt:#{key}")
-
-          if cache_check
-            sqs = SqsService.new(Danbooru.config.aws_sqs_reltagcalc_url)
-            sqs.send_message("calculate #{name}")
-          else
-            Cache.put("urt:#{key}", true, 600)
-          end
+        else
+          sqs = SqsService.new(Danbooru.config.aws_sqs_reltagcalc_url)
+          sqs.send_message("calculate #{name}")
         end
+
+        Cache.put("urt:#{key}", true, 600) # mutex to prevent redundant updates
       end
     end
 
@@ -787,12 +808,16 @@ class Tag < ApplicationRecord
   end
 
   module SearchMethods
+    def empty
+      where("tags.post_count <= 0")
+    end
+
     def nonempty
       where("tags.post_count > 0")
     end
 
     def name_matches(name)
-      where("tags.name LIKE ? ESCAPE E'\\\\'", name.mb_chars.downcase.to_escaped_for_sql_like)
+      where("tags.name LIKE ? ESCAPE E'\\\\'", normalize_name(name).to_escaped_for_sql_like)
     end
 
     def named(name)
@@ -804,11 +829,11 @@ class Tag < ApplicationRecord
       params = {} if params.blank?
 
       if params[:name_matches].present?
-        q = q.name_matches(params[:name_matches].strip.tr(" ", "_"))
+        q = q.name_matches(params[:name_matches])
       end
 
       if params[:name].present?
-        q = q.where("tags.name in (?)", params[:name].split(","))
+        q = q.where("tags.name": normalize_name(params[:name]).split(","))
       end
 
       if params[:category].present?
@@ -820,9 +845,9 @@ class Tag < ApplicationRecord
       end
 
       if params[:has_wiki] == "yes"
-        q = q.joins(:wiki_page)
+        q = q.joins(:wiki_page).where("wiki_pages.is_deleted = false")
       elsif params[:has_wiki] == "no"
-        q = q.joins("LEFT JOIN wiki_pages ON tags.name = wiki_pages.title").where("wiki_pages.title IS NULL")
+        q = q.joins("LEFT JOIN wiki_pages ON tags.name = wiki_pages.title").where("wiki_pages.title IS NULL OR wiki_pages.is_deleted = true")
       end
 
       if params[:has_artist] == "yes"

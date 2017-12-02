@@ -38,19 +38,6 @@ class UserTest < ActiveSupport::TestCase
       end
     end
 
-    context "favoriting a post" do
-      setup do
-        @user.update_column(:favorite_count, 999)
-        @user.stubs(:clean_favorite_count?).returns(true)
-        @post = FactoryGirl.create(:post)
-      end
-
-      should "periodically clean the favorite_count" do
-        @user.add_favorite!(@post)
-        assert_equal(1, @user.favorite_count)
-      end
-    end
-
     context "that has been invited by a mod" do
       setup do
         @mod = FactoryGirl.create(:moderator_user)
@@ -307,6 +294,20 @@ class UserTest < ActiveSupport::TestCase
 
         should "not appear" do
           assert(@user.to_xml !~ /password/)
+        end
+      end
+    end
+
+    context "that might be a sock puppet" do
+      setup do
+        @user = FactoryGirl.create(:user, last_ip_addr: "127.0.0.2")
+      end
+
+      should "not validate" do
+        CurrentUser.scoped(nil, "127.0.0.2") do
+          @user = FactoryGirl.build(:user)
+          @user.save
+          assert_equal(["Last ip addr was used recently for another account and cannot be reused for another day"], @user.errors.full_messages)
         end
       end
     end

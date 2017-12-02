@@ -1,7 +1,7 @@
 class PoolsController < ApplicationController
   respond_to :html, :xml, :json, :js
   before_filter :member_only, :except => [:index, :show, :gallery]
-  before_filter :moderator_only, :only => [:destroy]
+  before_filter :builder_only, :only => [:destroy]
 
   def new
     @pool = Pool.new
@@ -10,6 +10,9 @@ class PoolsController < ApplicationController
 
   def edit
     @pool = Pool.find(params[:id])
+    if @pool.is_deleted && !@pool.deletable_by?(CurrentUser.user)
+      raise User::PrivilegeError
+    end
     respond_with(@pool)
   end
 
@@ -36,7 +39,7 @@ class PoolsController < ApplicationController
 
   def create
     @pool = Pool.create(params[:pool])
-    flash[:notice] = "Pool created"
+    flash[:notice] = @pool.valid? ? "Pool created" : @pool.errors.full_messages.join("; ")
     respond_with(@pool)
   end
 

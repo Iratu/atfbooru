@@ -22,7 +22,6 @@ class Comment < ApplicationRecord
   attr_accessible :is_sticky, :as => [:moderator, :admin]
   mentionable(
     :message_field => :body, 
-    :user_field => :creator_id, 
     :title => lambda {|user_name| "#{creator_name} mentioned you in a comment on post ##{post_id}"},
     :body => lambda {|user_name| "@#{creator_name} mentioned you in a \"comment\":/posts/#{post_id}#comment-#{id} on post ##{post_id}:\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n"},
   )
@@ -41,11 +40,19 @@ class Comment < ApplicationRecord
     end
 
     def hidden(user)
-      where("score < ? and is_sticky = false", user.comment_threshold)
+      if user.is_moderator?
+        where("(score < ? and is_sticky = false) or is_deleted = true", user.comment_threshold)
+      else
+        where("score < ? and is_sticky = false", user.comment_threshold)
+      end
     end
 
     def visible(user)
-      where("score >= ? or is_sticky = true", user.comment_threshold)
+      if user.is_moderator?
+        where("(score >= ? or is_sticky = true) and is_deleted = false", user.comment_threshold)
+      else
+        where("score >= ? or is_sticky = true", user.comment_threshold)
+      end
     end
 
     def deleted

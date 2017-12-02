@@ -6,7 +6,7 @@
 <section id="search-box">
   <h1>Search</h1>
   <%= form_tag(path, :method => "get") do %>
-    <%= text_field_tag("tags", tags, :size => 20, :id => tags_dom_id, :data => { :autocomplete => "tag-query" }) %>
+    <%= text_field_tag("tags", tags, :size => 30, :id => tags_dom_id, :data => { :autocomplete => "tag-query" }) %>
     <% if params[:raw] %>
       <%= hidden_field_tag :raw, params[:raw] %>
     <% end %>
@@ -14,17 +14,22 @@
       <%= hidden_field_tag :random, params[:random] %>
     <% end %>
     <%= hidden_field_tag "ms", "1" %>
-    <%= submit_tag "Go", :name => nil %>
-    <%= submit_tag "+", :id => "expand-search", "data-jq-dropdown" => "#search-dropdown" %>
-    <div id="search-dropdown" class="jq-dropdown jq-dropdown-tip">
-      <ul class="jq-dropdown-menu">
-        <% if SavedSearch.enabled? && CurrentUser.show_saved_searches? %>
-          <li><%= link_to "Save search", saved_searches_path, :id => "save-search" %></li>
-        <% end %>
-
-        <li><%= link_to "Search wiki", wiki_pages_path, :id => "wiki-search" %></li>
-        <li><%= link_to "Search artists", artists_path, :id => "artist-search" %></li>
-      </ul>
-    </div>
+    <%= submit_tag "Go", :name => nil, :class => "ui-button ui-widget ui-corner-all tiny gradient" %>
   <% end %>
 </section>
+
+<% content_for(:html_header) do %>
+  <script>
+    $(function() {
+      $("#tags").on("keypress autocompleteclose", function(e) {
+        if (!$(this).data("fakeWidth")) {
+          $(this).data("fakeWidth", $('<span>').hide().appendTo(document.body));
+        }
+        var width = $(this).data("fakeWidth").text($(this).val()).css('font', $(this).css("font")).width() + 15;
+        if (width > $(this).width()) {
+          $(this).width(width);
+        }
+      });
+    });
+  </script>
+<% end %>

@@ -19,9 +19,17 @@ class PostReplacement < ApplicationRecord
 
   def process!
     transaction do
-      upload = Upload.create!(file: replacement_file, source: replacement_url, rating: post.rating, tag_string: self.tags)
+      upload = Upload.create!(
+        file: replacement_file,
+        source: replacement_url,
+        rating: post.rating,
+        tag_string: self.tags,
+        replaced_post: post,
+      )
+
       upload.process_upload
       upload.update(status: "completed", post_id: post.id)
+      md5_changed = (upload.md5 != post.md5)
 
       if replacement_file.present?
         update(replacement_url: "file://#{replacement_file.original_filename}")
@@ -32,7 +40,9 @@ class PostReplacement < ApplicationRecord
       # queue the deletion *before* updating the post so that we use the old
       # md5/file_ext to delete the old files. if saving the post fails,
       # this is rolled back so the job won't run.
-      Post.delay(queue: "default", run_at: Time.now + DELETION_GRACE_PERIOD).delete_files(post.id, post.file_path, post.large_file_path, post.preview_file_path)
+      if md5_changed
+        Post.delay(queue: "default", run_at: Time.now + DELETION_GRACE_PERIOD).delete_files(post.id, post.file_path, post.large_file_path, post.preview_file_path)
+      end
 
       post.md5 = upload.md5
       post.file_ext = upload.file_ext
@@ -44,8 +54,11 @@ class PostReplacement < ApplicationRecord
       rescale_notes
       update_ugoira_frame_data(upload)
 
-      post.comments.create!({creator: User.system, body: comment_replacement_message, do_not_bump_post: true}, without_protection: true)
-      ModAction.log(modaction_replacement_message)
+      if md5_changed
+        post.comments.create!({creator: User.system, body: comment_replacement_message, do_not_bump_post: true}, without_protection: true)
+      else
+        post.queue_backup
+      end
 
       post.save!
     end
@@ -107,10 +120,6 @@ class PostReplacement < ApplicationRecord
   module PresenterMethods
     def comment_replacement_message
       %("#{creator.name}":[/users/#{creator.id}] replaced this post with a new image:\n\n#{replacement_message})
-    end
-
-    def modaction_replacement_message
-      "replaced post ##{post.id}:\n\n#{replacement_message}"
     end
 
     def replacement_message

@@ -13,6 +13,7 @@ class ApplicationController < ActionController::Base
   layout "default"
   force_ssl :if => :ssl_login?
   helper_method :show_moderation_notice?
+  before_filter :enable_cors
 
   rescue_from Exception, :with => :rescue_exception
   rescue_from User::PrivilegeError, :with => :access_denied
@@ -90,6 +91,7 @@ class ApplicationController < ActionController::Base
       flash[:notice] = "This feature isn't available: #{@exception.message}"
       respond_to do |fmt|
         fmt.html { redirect_to :back }
+        fmt.js { render nothing: true, status: 501 }
         fmt.json { render template: "static/error", status: 501 }
         fmt.xml  { render template: "static/error", status: 501 }
       end

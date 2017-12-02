@@ -33,12 +33,24 @@ module Sources
           @artist_commentary_title = get_artist_commentary_title_from_page(page)
           @artist_commentary_desc = get_artist_commentary_desc_from_page(page)
         end
+      rescue Mechanize::ResponseCodeError
+        # try the normal url
+        if url =~ /\.(jpg|jpeg|png|gif)/
+          @image_url = url
+        end
       end
 
       def self.to_dtext(text)
         DText.from_html(text) do |element|
           if element.name == "a" && element["href"].present?
             element["href"] = element["href"].gsub(%r!\Ahttps?://www\.deviantart\.com/users/outgoing\?!i, "")
+
+            # href may be missing the `http://` bit (ex: `inprnt.com`, `//inprnt.com`). Add it if missing.
+            uri = Addressable::URI.heuristic_parse(element["href"]) rescue nil
+            if uri.present?
+              uri.scheme ||= "http"
+              element["href"] = uri.to_s
+            end
           end
         end
       end
@@ -118,23 +130,32 @@ module Sources
       def agent
         @agent ||= begin
           mech = Mechanize.new
-          auth, userinfo = session_cookies(mech)
+          auth, userinfo, auth_secure = session_cookies(mech)
 
-          # This cookie needs to be set to allow viewing of mature works
-          cookie = Mechanize::Cookie.new("agegate_state", "1")
-          cookie.domain = ".deviantart.com"
-          cookie.path = "/"
-          mech.cookie_jar.add(cookie)
+          if auth
+            # This cookie needs to be set to allow viewing of mature works
+            cookie = Mechanize::Cookie.new("agegate_state", "1")
+            cookie.domain = ".deviantart.com"
+            cookie.path = "/"
+            mech.cookie_jar.add(cookie)
 
-          cookie = Mechanize::Cookie.new("auth", auth)
-          cookie.domain = ".deviantart.com"
-          cookie.path = "/"
-          mech.cookie_jar.add(cookie)
+            cookie = Mechanize::Cookie.new("auth", auth)
+            cookie.domain = ".deviantart.com"
+            cookie.path = "/"
+            mech.cookie_jar.add(cookie)
 
-          cookie = Mechanize::Cookie.new("userinfo", userinfo)
-          cookie.domain = ".deviantart.com"
-          cookie.path = "/"
-          mech.cookie_jar.add(cookie)
+            cookie = Mechanize::Cookie.new("userinfo", userinfo)
+            cookie.domain = ".deviantart.com"
+            cookie.path = "/"
+            mech.cookie_jar.add(cookie)
+            
+            if auth_secure
+              cookie = Mechanize::Cookie.new("auth_secure", auth_secure)
+              cookie.domain = ".deviantart.com"
+              cookie.path = "/"
+              mech.cookie_jar.add(cookie)
+            end
+          end
 
           mech
         end
@@ -142,7 +163,15 @@ module Sources
 
       def session_cookies(mech)
         Cache.get(DEVIANTART_SESSION_CACHE_KEY, 2.hours) do
+          mech.request_headers = Danbooru.config.http_headers
+
           page = mech.get("https://www.deviantart.com/users/login")
+
+          if page.search('div[class="g-recaptcha"]').any?
+            # we got captcha'd, have to abort
+            return nil
+          end
+
           validate_key = page.search('input[name="validate_key"]').attribute("value").value
           validate_token = page.search('input[name="validate_token"]').attribute("value").value
 
@@ -154,11 +183,12 @@ module Sources
             remember_me: 1,
           })
 
-          auth = mech.cookies.find { |cookie| cookie.name == "auth" }.value
-          userinfo = mech.cookies.find { |cookie| cookie.name == "userinfo" }.value
+          auth = mech.cookies.find { |cookie| cookie.name == "auth" }.try(:value)
+          userinfo = mech.cookies.find { |cookie| cookie.name == "userinfo" }.try(:value)
+          auth_secure = mech.cookies.find { |cookie| cookie.name == "auth_secure" }.try(:value)
           mech.cookie_jar.clear
 
-          [auth, userinfo]
+          [auth, userinfo, auth_secure]
         end
       end
     end

@@ -4,18 +4,18 @@
 
     <% if CurrentUser.can_upload? %>
       <div id="upload-guide-notice">
-        <%= format_text(@upload_notice_wiki.try(&:body), :ragel => true) %>
+        <%= format_text(@upload_notice_wiki.try(&:body)) %>
       </div>
 
       <% unless CurrentUser.can_upload_free? %>
-        <p>You can upload <strong><%= pluralize CurrentUser.upload_limit, "more post" %></strong> today.</p>
+        <p>Upload limit: <strong><%= CurrentUser.user.presenter.upload_limit(self) %></strong>.</p>
       <% end %>
 
       <%= render "image" %>
       <%= render "post", :post => @post %>
       <%= render "sources/info", :source => @source %>
 
-      <%= error_messages_for "upload" %>
+      <div id="client-errors" class="error-messages ui-state-error ui-corner-all" style="display:none"></div>
 
       <%= form_for(@upload, :html => {:multipart => true, :class => "simple_form", :id => "form"}) do |f| %>
         <%= hidden_field_tag :url, params[:url] %>
@@ -44,8 +44,8 @@
           <% else %>
             <%= f.text_field :source, :size => 50 %>
           <% end %>
-          <%= button_tag "Similar", :id => "similar-button", :type => "button" %>
-          <%= button_tag "Artist", :id => "find-artist-button", :type => "button" %>
+          <%= button_tag "Similar", :id => "similar-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+          <%= button_tag "Artist", :id => "find-artist-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
           <span class="hint">You can enter a URL to have <%= Danbooru.config.app_name %> automatically download and process it</span>
         </div>
 
@@ -108,15 +108,15 @@
             <span id="open-edit-dialog" class="ui-icon ui-icon-arrow-1-ne" title="detach" style="display: none;"/>
           </div>
 
-          <%= button_tag "Related tags", :id => "related-tags-button", :type => "button" %>
-          <%= button_tag "General", :id => "related-general-button", :type => "button" %>
-          <%= button_tag "Artists", :id => "related-artists-button", :type => "button" %>
-          <%= button_tag "Characters", :id => "related-characters-button", :type => "button" %>
-          <%= button_tag "Copyrights", :id => "related-copyrights-button", :type => "button" %>
+          <%= button_tag "Related tags", :id => "related-tags-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+
+        <% TagCategory.related_button_list.each do |category| %>
+          <%= button_tag "#{TagCategory.related_button_mapping[category]}", :id => "related-#{category}-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
+        <% end %>
         </div>
 
         <div class="input">
-          <%= submit_tag "Submit", :class => "large", :data => { :disable_with => "Submitting..." } %>
+          <%= submit_tag "Submit", :id => "submit-button", :class => "large", :class => "ui-button ui-widget ui-corner-all gradient" %>
         </div>
 
         <div id="artist-tags-container">
@@ -139,6 +139,10 @@
 
 <% content_for(:page_title) do %>
   Upload - <%= Danbooru.config.app_name %>
+<% end %>
+
+<% content_for(:html_header) do %>
+  <meta name="related-tag-button-list" content="<%= Danbooru.config.related_tag_button_list %>">
 <% end %>
 
 <%= render "posts/partials/common/secondary_links" %>

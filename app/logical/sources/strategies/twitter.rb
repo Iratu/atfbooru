@@ -1,11 +1,13 @@
 module Sources::Strategies
   class Twitter < Base
+    attr_reader :image_urls
+
     def self.url_match?(url)
-      url =~ %r!https?://(?:mobile\.)?twitter\.com/\w+/status/\d+! || url =~ %r{https?://pbs\.twimg\.com/media/}
+      self.status_id_from_url(url).present?
     end
 
     def referer_url
-      if @referer_url =~ %r!https?://(?:mobile\.)?twitter\.com/\w+/status/\d+! && @url =~ %r{https?://pbs\.twimg\.com/media/}
+      if self.class.url_match?(@referer_url)
         @referer_url
       else
         @url
@@ -17,24 +19,21 @@ module Sources::Strategies
     end
 
     def api_response
-      status_id = status_id_from_url(url)
-      @api_response ||= TwitterService.new.client.status(status_id)
+      @api_response ||= TwitterService.new.client.status(status_id, tweet_mode: "extended")
     end
 
     def get
       attrs = api_response.attrs
       @artist_name = attrs[:user][:name]
       @profile_url = "https://twitter.com/" + attrs[:user][:screen_name]
-      @image_url = image_urls.first
+      @image_urls = TwitterService.new.image_urls(api_response)
+      @image_url = @image_urls.first
       @artist_commentary_title = ""
-      @artist_commentary_desc = attrs[:text]
+      @artist_commentary_desc = attrs[:full_text]
       @tags = attrs[:entities][:hashtags].map do |text:, indices:|
         [text, "https://twitter.com/hashtag/#{text}"]
       end
-    end
-
-    def image_urls
-      TwitterService.new.image_urls(url)
+    rescue ::Twitter::Error::Forbidden
     end
 
     def normalize_for_artist_finder!
@@ -46,11 +45,11 @@ module Sources::Strategies
     end
 
     def dtext_artist_commentary_desc
-      url_replacements = Array(api_response.attrs[:entities][:urls]).map do |url:, expanded_url:, **attrs|
-        [url, expanded_url]
+      url_replacements = api_response.urls.map do |obj|
+        [obj.url.to_s, obj.expanded_url.to_s]
       end
-      url_replacements += Array(api_response.attrs[:entities][:media]).map do |url:, expanded_url:, **attrs|
-        [url, ""]
+      url_replacements += api_response.media.map do |obj|
+        [obj.url.to_s, ""]
       end
       url_replacements = url_replacements.to_h
 
@@ -62,11 +61,15 @@ module Sources::Strategies
       desc.strip
     end
 
-    def status_id_from_url(url)
+    def status_id
+      self.class.status_id_from_url(referer_url)
+    end
+
+    def self.status_id_from_url(url)
       if url =~ %r{^https?://(?:mobile\.)?twitter\.com/\w+/status/(\d+)}
         $1.to_i
       else
-        raise Sources::Error.new("Couldn't get status ID from URL: #{url}")
+        nil
       end
     end
   end

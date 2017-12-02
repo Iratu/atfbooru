@@ -9,18 +9,6 @@ module Sources
     end
 
     context "in all cases" do
-      context "A whitecube page" do
-        setup do
-          @site = Sources::Site.new("https://www.pixiv.net/whitecube/user/277898/illust/59182257")
-          @site.get
-          @image_urls = @site.image_urls
-        end
-
-        should "get all the image urls" do
-          assert_equal(["https://i.pximg.net/img-original/img/2016/09/26/21/30/41/59182257_p0.jpg"], @image_urls)
-        end
-      end
-
       context "A touch page" do
         setup do
           @site = Sources::Site.new("http://touch.pixiv.net/member_illust.php?mode=medium&illust_id=59687915")
@@ -51,7 +39,7 @@ module Sources
         end
 
         should "get the file url" do
-          assert_equal("https://i1.pixiv.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip", @site.file_url)
+          assert_equal("https://i.pximg.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip", @site.file_url)
         end
 
         should "capture the frame data" do
@@ -59,32 +47,41 @@ module Sources
         end
       end
 
+      context "A https://i.pximg.net/img-zip/ugoira/* source" do
+        should "get the metadata" do
+          @site = Sources::Site.new("https://i.pximg.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip")
+          @site.get
+
+          assert_equal("uroobnad2", @site.artist_name)
+        end
+      end
+
       context "fetching source data for a new manga image" do
         setup do
-          get_source("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=46304614")
+          get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981735")
         end
 
         should "get the profile" do
-          assert_equal("http://www.pixiv.net/member.php?id=339253", @site.profile_url)
+          assert_equal("http://www.pixiv.net/member.php?id=696859", @site.profile_url)
         end
 
         should "get the artist name" do
-          assert_equal("evazion", @site.artist_name)
+          assert_equal("uroobnad", @site.artist_name)
         end
 
         should "get the full size image url" do
-          assert_equal("https://i.pximg.net/img-original/img/2014/10/02/14/21/39/46304614_p0.gif", @site.image_url)
+          assert_equal("https://i.pximg.net/img-original/img/2017/11/21/05/12/37/65981735_p0.jpg", @site.image_url)
         end
 
         should "get the page count" do
-          assert_equal(3, @site.image_urls.size)
+          assert_equal(1, @site.image_urls.size)
         end
 
         should "get the tags" do
           pixiv_tags  = @site.tags.map(&:first)
           pixiv_links = @site.tags.map(&:last)
 
-          assert_equal(%w[漫画 Fate/GrandOrder foo FOO 風景10users入り 伊19/陸奥 鉛筆], pixiv_tags)
+          assert_equal(%w[漫画 test], pixiv_tags)
           assert_contains(pixiv_links, /search\.php/)
         end
 
@@ -116,18 +113,47 @@ module Sources
         end
       end
 
+      context "fetching source for an illustration with swapped illust_id/mode parameters" do
+        setup do
+          get_source("https://www.pixiv.net/member_illust.php?illust_id=64476642&mode=medium")
+        end
+
+        should "get the page count" do
+          assert_equal(1, @site.image_urls.size)
+        end
+
+        should "get the full size image url" do
+          assert_equal("https://i.pximg.net/img-original/img/2017/08/18/00/09/21/64476642_p0.jpg", @site.image_url)
+        end        
+      end
+
+      context "fetching source data for a deleted work" do
+        should "raise a bad id error" do
+          assert_raise(::PixivApiClient::BadIDError) do
+            get_source("https://i.pximg.net/img-original/img/2017/11/22/01/06/44/65991677_p0.png")
+          end
+        end
+      end
+
       context "fetching the commentary" do
         should "work when the description is blank" do
-          get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=46337015")
+          get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981746")
 
-          assert_equal("Illustration (PNG) - foo & bar", @site.dtext_artist_commentary_title)
-          assert_equal("", @site.dtext_artist_commentary_desc)
+          assert_equal("title", @site.dtext_artist_commentary_title)
+          assert_equal("desc", @site.dtext_artist_commentary_desc)
+        end
+
+        should "convert html to dtext" do
+          get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65985331")
+
+          dtext_desc = "[b]bold[/b]\n[i]italic[/i]\nred"
+          assert_equal(dtext_desc, @site.dtext_artist_commentary_desc)
         end
 
         should "convert illust links and member links to dtext" do
           get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=63421642")
 
-          dtext_desc = %(foo 【pixiv #46337015 "»":[/posts?tags=pixiv:46337015]】bar 【pixiv #14901720 "»":[/posts?tags=pixiv:14901720]】\r\n\r\nbaz【"user/83739":[https://www.pixiv.net/member.php?id=83739] "»":[/artists?search%5Burl_matches%5D=https%3A%2F%2Fwww.pixiv.net%2Fmember.php%3Fid%3D83739]】)
+          dtext_desc = %(foo 【pixiv #46337015 "»":[/posts?tags=pixiv:46337015]】bar 【pixiv #14901720 "»":[/posts?tags=pixiv:14901720]】\n\nbaz【"user/83739":[https://www.pixiv.net/member.php?id=83739] "»":[/artists?search%5Burl_matches%5D=https%3A%2F%2Fwww.pixiv.net%2Fmember.php%3Fid%3D83739]】)
           assert_equal(dtext_desc, @site.dtext_artist_commentary_desc)
         end
       end
@@ -152,18 +178,18 @@ module Sources
             FactoryGirl.create(:wiki_page, title: tag, other_names: other_names)
           end
 
-          @site = get_source("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=46304614")
+          @site = get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981746")
           @tags = @site.tags.map(&:first)
           @translated_tags = @site.translated_tags.map(&:first)
         end
 
         should "get the original tags" do
-          assert_equal(%w[漫画 Fate/GrandOrder foo FOO 風景10users入り 伊19/陸奥 鉛筆], @tags)
+          assert_equal(["test", "風景", "Fate/GrandOrder", "伊19/陸奥", "鉛筆", "風景10users入り", "foo", "FOO"], @tags)
         end
 
         should "translate the tag if it matches a wiki other name" do
-          assert_includes(@tags, "漫画")
-          assert_includes(@translated_tags, "comic")
+          assert_includes(@tags, "風景")
+          assert_includes(@translated_tags, "scenery")
         end
 
         should "return the same tag if it doesn't match a wiki other name but it does match a tag" do

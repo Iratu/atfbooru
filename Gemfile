@@ -46,6 +46,8 @@ gem 'oauth2'
 gem 'bootsnap'
 gem 'addressable'
 gem 'httparty'
+gem 'rakismet'
+gem 'recaptcha', require: "recaptcha/rails"
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"

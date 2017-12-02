@@ -61,15 +61,11 @@ class AnonymousUser
   end
 
   def always_resize_images?
-    false
+    true
   end
 
   def show_samples?
     true
-  end
-
-  def tag_subscriptions
-    []
   end
 
   def favorite_tags
@@ -117,6 +113,10 @@ class AnonymousUser
   end
 
   def can_view_flagger?(flagger_id)
+    false
+  end
+
+  def can_view_flagger_on_post?(flag)
     false
   end
 
@@ -254,6 +254,18 @@ class AnonymousUser
   end
 
   def ban_expired?
+    false
+  end
+
+  def disable_cropped_thumbnails?
+    false
+  end
+
+  def disable_mobile_gestures?
+    false
+  end
+
+  def enable_safe_mode?
     false
   end
 

@@ -11,11 +11,11 @@ module Sources
       TIMESTAMP = '(?:[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{2}/[0-9]{2}/[0-9]{2})'
       EXT = "(?:jpg|jpeg|png|gif)"
 
-      WEB =   "^(?:https?://)?www\\.pixiv\\.net"
-      I12 =   "^(?:https?://)?i[0-9]+\\.pixiv\\.net"
-      IMG =   "^(?:https?://)?img[0-9]*\\.pixiv\\.net"
-      PXIMG = "^(?:https?://)?i\\.pximg\\.net"
-      TOUCH = "^(?:https?://)?touch\\.pixiv\\.net"
+      WEB =   '(?:\A(?:https?://)?www\.pixiv\.net)'
+      I12 =   '(?:\A(?:https?://)?i[0-9]+\.pixiv\.net)'
+      IMG =   '(?:\A(?:https?://)?img[0-9]*\.pixiv\.net)'
+      PXIMG = '(?:\A(?:https?://)?i\.pximg\.net)'
+      TOUCH = '(?:\A(?:https?://)?touch\.pixiv\.net)'
 
       def self.url_match?(url)
         url =~ /#{WEB}|#{IMG}|#{I12}|#{TOUCH}|#{PXIMG}/i
@@ -132,7 +132,8 @@ module Sources
           %("user/#{member_id}":[#{profile_url}] "»":[/artists?#{search_params}])
         end
 
-        text
+        text = text.gsub(/\r\n|\r|\n/, "<br>")
+        DText.from_html(text)
       end
 
       def illust_id_from_url
@@ -249,15 +250,6 @@ module Sources
         end
       end
 
-      def get_moniker_from_page(page)
-        # <a class="tab-feed" href="/stacc/gennmai-226">Feed</a>
-        stacc_link = page.search("a.tab-feed").first
-
-        if not stacc_link.nil?
-          stacc_link.attr("href").sub(%r!^/stacc/!i, '')
-        end
-      end
-
       def get_moniker_from_url
         case url
         when %r!#{IMG}/img/(#{MONIKER})!i
@@ -310,19 +302,6 @@ module Sources
         end
       end
 
-      def get_page_count_from_page(page)
-        elements = page.search("ul.meta li").find_all do |node|
-          node.text =~ /Manga|漫画|複数枚投稿|Multiple images/
-        end
-
-        if elements.any?
-          elements[0].text =~ /(?:Manga|漫画|複数枚投稿|Multiple images):? (\d+)P/
-          $1.to_i
-        else
-          1
-        end
-      end
-
       def normalized_url
         "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=#{@illust_id}"
       end
@@ -332,7 +311,7 @@ module Sources
       end
 
       def work_page?
-        return true if url =~ %r!(?:#{WEB}|#{TOUCH})/member_illust\.php\?mode=(?:medium|big|manga|manga_big)&illust_id=\d+!i
+        return true if url =~ %r!(?:#{WEB}|#{TOUCH})/member_illust\.php! && url =~ %r!mode=(?:medium|big|manga|manga_big)! && url =~ %r!illust_id=\d+!
         return true if url =~ %r!(?:#{WEB}|#{TOUCH})/i/\d+$!i
         return false
       end
@@ -352,7 +331,7 @@ module Sources
         return true if url =~ %r!#{PXIMG}/img-original/img/#{TIMESTAMP}/\d+_\w+\.#{EXT}!i
 
         # http://i1.pixiv.net/img-zip-ugoira/img/2014/10/03/17/29/16/46323924_ugoira1920x1080.zip
-        return true if url =~ %r!#{I12}/img-zip-ugoira/img/#{TIMESTAMP}/\d+_ugoira\d+x\d+\.zip$!i
+        return true if url =~ %r!(#{I12}|#{PXIMG})/img-zip-ugoira/img/#{TIMESTAMP}/\d+_ugoira\d+x\d+\.zip$!i
 
         return false
       end
