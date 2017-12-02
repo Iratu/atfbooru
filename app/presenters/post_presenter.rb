@@ -21,7 +21,7 @@ class PostPresenter < Presenter
 
     path = options[:path_prefix] || "/posts"
 
-    html =  %{<article itemscope itemtype="http://schema.org/ImageObject" id="post_#{post.id}" class="#{preview_class(post, options[:pool])}" #{data_attributes(post)}>}
+    html =  %{<article itemscope itemtype="http://schema.org/ImageObject" id="post_#{post.id}" class="#{preview_class(post, options[:pool], options)}" #{data_attributes(post)}>}
     if options[:tags].present? && !CurrentUser.is_anonymous?
       tag_param = "?tags=#{CGI::escape(options[:tags])}"
     elsif options[:pool_id] || options[:pool]
@@ -32,7 +32,14 @@ class PostPresenter < Presenter
       tag_param = nil
     end
     html << %{<a href="#{path}/#{post.id}#{tag_param}">}
-    html << %{<img itemprop="thumbnailUrl" src="#{post.preview_file_url}" alt="#{h(post.tag_string)}">}
+
+    if options[:show_cropped] && post.has_cropped?
+      src = post.cropped_file_url
+    else
+      src = post.preview_file_url
+    end
+
+    html << %{<img itemprop="thumbnailUrl" src="#{src}" alt="#{h(post.tag_string)}">}
     html << %{</a>}
 
     if options[:pool]
@@ -40,6 +47,12 @@ class PostPresenter < Presenter
       html << %{<a href="/pools/#{options[:pool].id}">}
       html << h(options[:pool].pretty_name.truncate(80))
       html << %{</a>}
+      html << %{</p>}
+    end
+
+    if options[:similarity]
+      html << %{<p class="desc">}
+      html << "Similarity: #{options[:similarity].round}%"
       html << %{</p>}
     end
 
@@ -54,8 +67,9 @@ class PostPresenter < Presenter
     html.html_safe
   end
 
-  def self.preview_class(post, description = nil)
+  def self.preview_class(post, description = nil, options = {})
     klass = "post-preview"
+    klass << " large-cropped" if post.has_cropped? && options[:show_cropped]
     klass << " pooled" if description
     klass << " post-status-pending" if post.is_pending?
     klass << " post-status-flagged" if post.is_flagged?
@@ -66,7 +80,7 @@ class PostPresenter < Presenter
   end
 
   def self.data_attributes(post)
-    %{
+    attributes = %{
       data-id="#{post.id}"
       data-has-sound="#{post.has_tag?('video_with_sound|flash_with_sound')}"
       data-tags="#{h(post.tag_string)}"
@@ -83,15 +97,22 @@ class PostPresenter < Presenter
       data-views="#{post.view_count}"
       data-fav-count="#{post.fav_count}"
       data-pixiv-id="#{post.pixiv_id}"
-      data-md5="#{post.md5}"
       data-file-ext="#{post.file_ext}"
-      data-file-url="#{post.file_url}"
-      data-large-file-url="#{post.large_file_url}"
-      data-preview-file-url="#{post.preview_file_url}"
       data-source="#{h(post.source)}"
       data-normalized-source="#{h(post.normalized_source)}"
       data-is-favorited="#{post.favorited_by?(CurrentUser.user.id)}"
-    }.html_safe
+    }
+
+    if post.visible?
+      attributes += %{
+        data-md5="#{post.md5}"
+        data-file-url="#{post.file_url}"
+        data-large-file-url="#{post.large_file_url}"
+        data-preview-file-url="#{post.preview_file_url}"
+      }
+    end
+
+    attributes.html_safe
   end
 
   def initialize(post)
@@ -114,48 +135,24 @@ class PostPresenter < Presenter
     @post.humanized_essential_tag_string
   end
 
-  def categorized_tag_string
+  def categorized_tag_groups
     string = []
 
-    if @post.copyright_tags.any?
-      string << @post.copyright_tags.join(" ")
+    TagCategory.categorized_list.each do |category|
+      if @post.typed_tags(category).any?
+        string << @post.typed_tags(category).join(" ")
+      end
     end
+    
+    string
+  end
 
-    if @post.character_tags.any?
-      string << @post.character_tags.join(" ")
-    end
-
-    if @post.artist_tags.any?
-      string << @post.artist_tags.join(" ")
-    end
-
-    if @post.general_tags.any?
-      string << @post.general_tags.join(" ")
-    end
-
-    string.join(" \n")
+  def categorized_tag_string
+    categorized_tag_groups.join(" \n")
   end
 
   def humanized_categorized_tag_string
-    string = []
-
-    if @post.copyright_tags.any?
-      string << @post.copyright_tags
-    end
-
-    if @post.character_tags.any?
-      string << @post.character_tags
-    end
-
-    if @post.artist_tags.any?
-      string << @post.artist_tags
-    end
-
-    if @post.general_tags.any?
-      string << @post.general_tags
-    end
-
-    string.flatten.slice(0, 25).join(", ").tr("_", " ")
+    categorized_tag_groups.flatten.slice(0, 25).join(", ").tr("_", " ")
   end
 
   def image_html(template)
@@ -189,7 +186,13 @@ class PostPresenter < Presenter
   end
 
   def has_nav_links?(template)
-    (CurrentUser.user.enable_sequential_post_navigation && template.params[:tags].present? && template.params[:tags] !~ /(?:^|\s)(?:order|ordfav|ordpool):/) || @post.pools.any? || @post.favorite_groups(active_id=template.params[:favgroup_id]).any?
+    has_sequential_navigation?(template.params) || @post.pools.undeleted.any? || @post.favorite_groups(active_id=template.params[:favgroup_id]).any?
+  end
+
+  def has_sequential_navigation?(params)
+    return false if params[:tags] =~ /(?:^|\s)(?:order|ordfav|ordpool):/i
+    return false if params[:pool_id].present? || params[:favgroup_id].present?
+    return CurrentUser.user.enable_sequential_post_navigation 
   end
 
   def post_footer_for_pool_html(template)
@@ -211,13 +214,13 @@ class PostPresenter < Presenter
       return if pool.nil?
       html += pool_link_html(template, pool, :include_rel => true)
 
-      other_pools = @post.pools.where("id <> ?", template.params[:pool_id]).series_first
+      other_pools = @post.pools.undeleted.where("id <> ?", template.params[:pool_id]).series_first
       other_pools.each do |other_pool|
         html += pool_link_html(template, other_pool)
       end
     else
       first = true
-      pools = @post.pools.series_first
+      pools = @post.pools.undeleted
       pools.each do |pool|
         if first && template.params[:tags].blank? && template.params[:favgroup_id].blank?
           html += pool_link_html(template, pool, :include_rel => true)

@@ -13,8 +13,8 @@ class TagCorrection
 
   def statistics_hash
     @statistics_hash ||= {
-      "category_cache" => Cache.get("tc:" + Cache.sanitize(tag.name)),
-      "post_fast_count_cache" => Cache.get("pfc:" + Cache.sanitize(tag.name))
+      "category_cache" => Cache.get("tc:" + Cache.hash(tag.name)),
+      "post_fast_count_cache" => Cache.get("pfc:" + Cache.hash(tag.name))
     }
   end
 
@@ -42,6 +42,5 @@ class TagCorrection
   def fix!
     tag.delay(:queue => "default").fix_post_count
     tag.update_category_cache_for_all
-    Post.expire_cache_for_all([tag.name])
   end
 end

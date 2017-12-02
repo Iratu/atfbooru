@@ -1009,7 +1009,8 @@ CREATE TABLE dmails (
     is_deleted boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
-    creator_ip_addr inet NOT NULL
+    creator_ip_addr inet NOT NULL,
+    is_spam boolean DEFAULT false
 );
 
 
@@ -2775,7 +2776,8 @@ CREATE TABLE posts (
     pixiv_id integer,
     last_commented_at timestamp without time zone,
     has_active_children boolean DEFAULT false,
-    bit_flags bigint DEFAULT 0 NOT NULL
+    bit_flags bigint DEFAULT 0 NOT NULL,
+    tag_count_meta integer DEFAULT 0 NOT NULL
 );
 
 
@@ -5028,6 +5030,8 @@ CREATE INDEX index_comments_on_post_id ON comments USING btree (post_id);
 --
 
 CREATE INDEX index_delayed_jobs_on_run_at ON delayed_jobs USING btree (run_at);
+CREATE INDEX index_delayed_jobs_on_locked_by ON delayed_jobs USING btree (locked_by);
+CREATE INDEX index_delayed_jobs_on_locked_at ON delayed_jobs USING btree (locked_at);
 
 
 --
@@ -7512,4 +7516,8 @@ INSERT INTO schema_migrations (version) VALUES ('20170608043651');
 INSERT INTO schema_migrations (version) VALUES ('20170613200356');
 
 INSERT INTO schema_migrations (version) VALUES ('20170709190409');
+
+INSERT INTO schema_migrations (version) VALUES ('20170914200122');
+
+INSERT INTO schema_migrations (version) VALUES ('20171106075030');
 

@@ -1,4 +1,4 @@
-<% if CurrentUser.is_moderator? || !comment.is_deleted? %>
+<% if CurrentUser.is_moderator? || (params[:search] && params[:search][:is_deleted] =~ /t/) || !comment.is_deleted? %>
   <a name="comment-<%= comment.id %>"></a>
   <article class="comment" data-post-id="<%= comment.post_id %>" data-comment-id="<%= comment.id %>" data-score="<%= comment.score %>" data-creator="<%= comment.creator_name %>" data-is-sticky="<%= comment.is_sticky %>">
     <div class="author">
@@ -14,7 +14,7 @@
     </div>
     <div class="content">
       <div class="body prose">
-        <%= format_text(comment.body, :ragel => true) %>
+        <%= format_text(comment.body) %>
 
         <% if comment.updated_at - comment.created_at > 5.minutes %>
           <p class="info">Updated by <%= link_to_user comment.updater %> <%= time_ago_in_words_tagged(comment.updated_at) %></p>

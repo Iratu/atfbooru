@@ -84,6 +84,13 @@ class PostQueryBuilder
     relation
   end
 
+  def hide_deleted_posts?(q)
+    return false if CurrentUser.admin_mode?
+    return false if q[:status].in?(%w[deleted active any all])
+    return false if q[:status_neg].in?(%w[deleted active any all])
+    return CurrentUser.user.hide_deleted_posts?
+  end
+
   def build(relation = nil)
     unless query_string.is_a?(Hash)
       q = Tag.parse_query(query_string)
@@ -111,10 +118,9 @@ class PostQueryBuilder
     relation = add_range_relation(q[:filesize], "posts.file_size", relation)
     relation = add_range_relation(q[:date], "posts.created_at", relation)
     relation = add_range_relation(q[:age], "posts.created_at", relation)
-    relation = add_range_relation(q[:general_tag_count], "posts.tag_count_general", relation)
-    relation = add_range_relation(q[:artist_tag_count], "posts.tag_count_artist", relation)
-    relation = add_range_relation(q[:copyright_tag_count], "posts.tag_count_copyright", relation)
-    relation = add_range_relation(q[:character_tag_count], "posts.tag_count_character", relation)
+    TagCategory.categories.each do |category|
+      relation = add_range_relation(q["#{category}_tag_count".to_sym], "posts.tag_count_#{category}", relation)
+    end
     relation = add_range_relation(q[:post_tag_count], "posts.tag_count", relation)
     relation = add_range_relation(q[:pixiv_id], "posts.pixiv_id", relation)
 
@@ -144,7 +150,9 @@ class PostQueryBuilder
       relation = relation.where("posts.is_banned = FALSE")
     elsif q[:status_neg] == "active"
       relation = relation.where("posts.is_pending = TRUE OR posts.is_deleted = TRUE OR posts.is_banned = TRUE")
-    elsif CurrentUser.user.hide_deleted_posts? && !CurrentUser.admin_mode?
+    end
+
+    if hide_deleted_posts?(q)
       relation = relation.where("posts.is_deleted = FALSE")
     end
 
@@ -218,7 +226,7 @@ class PostQueryBuilder
     if q[:flagger_ids_neg]
       q[:flagger_ids_neg].each do |flagger_id|
         if CurrentUser.can_view_flagger?(flagger_id)
-          post_ids = PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").pluck("distinct(post_id)")
+          post_ids = PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
           if post_ids.any?
             relation = relation.where("posts.id NOT IN (?)", post_ids)
           end
@@ -233,7 +241,8 @@ class PostQueryBuilder
         elsif flagger_id == "none"
           relation = relation.where('NOT EXISTS (' + PostFlag.unscoped.search({:category => "normal"}).where('post_id = posts.id').reorder('').select('1').to_sql + ')')
         elsif CurrentUser.can_view_flagger?(flagger_id)
-            relation = relation.where("posts.id IN (?)", PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").select(:post_id).distinct)
+          post_ids = PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
+          relation = relation.where("posts.id IN (?)", post_ids)
         end
       end
     end
@@ -496,6 +505,18 @@ class PostQueryBuilder
 
     when "filesize_asc"
       relation = relation.order("posts.file_size ASC")
+
+    when "tagcount", "tagcount_desc"
+      relation = relation.order("posts.tag_count DESC")
+
+    when "tagcount_asc"
+      relation = relation.order("posts.tag_count ASC")
+
+    when /(#{TagCategory.short_name_regex})tags(?:\Z|_desc)/
+      relation = relation.order("posts.tag_count_#{TagCategory.short_name_mapping[$1]} DESC")
+
+    when /(#{TagCategory.short_name_regex})tags_asc/
+      relation = relation.order("posts.tag_count_#{TagCategory.short_name_mapping[$1]} ASC")
 
     when "rank"
       relation = relation.order("log(3, posts.score) + (extract(epoch from posts.created_at) - extract(epoch from timestamp '2005-05-24')) / 35000 DESC")

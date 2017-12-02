@@ -7,12 +7,12 @@
 
       <%= render "posts/partials/index/blacklist" %>
 
-      <%= raw common_searches_html(CurrentUser.user) %>
-
       <section id="tag-box">
         <h1>Tags</h1>
         <%= @post_set.presenter.tag_list_html(self) %>
       </section>
+
+      <%= render "posts/partials/index/options" %>
 
       <%= render "posts/partials/index/related" %>
     </aside>
@@ -32,6 +32,8 @@
         <% elsif @post_set.is_single_tag? && !@post_set.is_metatag_search? %>
           <li><%= link_to "Wiki", "#", :id => "show-excerpt-link" %></li>
         <% end %>
+
+        <li id="searchbox-redirect-link"><a href="#search-box">Search&raquo;</a></li>
       </menu>
 
       <%= render "posts/partials/index/edit" %>
@@ -63,6 +65,11 @@
 
 <%= content_for(:html_header) do %>
   <link href="<%= posts_path(:format => 'atom', :tags => params[:tags]) %>" rel="alternate" title="ATOM" type="application/atom+xml" />
+  <%= content_tag(:link, nil, rel: "prefetch", href: next_page_url, as: "html", crossorigin: "use-credentials") %>
+  <%= content_tag :link, nil, rel: "next", href: next_page_url %>
+  <% if prev_page_url %>
+    <%= content_tag :link, nil, rel: "prev", href: prev_page_url %>
+  <% end %>
   <% if @post_set.has_wiki? %>
     <meta name="description" content="<%= @post_set.wiki_page.presenter.blurb %>">
   <% else %>

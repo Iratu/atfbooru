@@ -4,7 +4,18 @@ require 'helpers/iqdb_test_helper'
 class PostReplacementTest < ActiveSupport::TestCase
   include IqdbTestHelper
 
+  def upload_file(path, filename, &block)
+    Tempfile.open do |file|
+      file.write(File.read(path))
+      file.seek(0)
+      uploaded_file = ActionDispatch::Http::UploadedFile.new(tempfile: file, filename: filename)
+      yield uploaded_file
+    end
+  end
+
   def setup
+    super
+
     mock_iqdb_service!
     Delayed::Worker.delay_jobs = true # don't delete the old images right away
 
@@ -18,6 +29,8 @@ class PostReplacementTest < ActiveSupport::TestCase
   end
 
   def teardown
+    super
+    
     CurrentUser.user = nil
     CurrentUser.ip_addr = nil
     Delayed::Worker.delay_jobs = false
@@ -37,7 +50,6 @@ class PostReplacementTest < ActiveSupport::TestCase
         @post.update(source: "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png")
         @post.replace!(replacement_url: "https://www.google.com/intl/en_ALL/images/logo.gif", tags: "-tag1 tag2")
         @upload = Upload.last
-        @mod_action = ModAction.last
       end
 
       context "that is then undone" do
@@ -84,10 +96,6 @@ class PostReplacementTest < ActiveSupport::TestCase
         assert_equal("127.0.0.2", @post.uploader_ip_addr.to_s)
         assert_equal(@uploader.id, @post.uploader_id)
         assert_equal(false, @post.is_pending)
-      end
-
-      should "log a mod action" do
-        assert_match(/replaced post ##{@post.id}/, @mod_action.description)
       end
 
       should "leave a system comment" do
@@ -168,7 +176,7 @@ class PostReplacementTest < ActiveSupport::TestCase
         assert_equal("cad1da177ef309bf40a117c17b8eecf5", @post.md5)
         assert_equal("cad1da177ef309bf40a117c17b8eecf5", Digest::MD5.file(@post.file_path).hexdigest)
 
-        assert_equal("https://i1.pixiv.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip", @post.source)
+        assert_equal("https://i.pximg.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip", @post.source)
         assert_equal([{"file"=>"000000.jpg", "delay"=>125}, {"file"=>"000001.jpg", "delay"=>125}], @post.pixiv_ugoira_frame_data.data)
       end
     end
@@ -193,15 +201,32 @@ class PostReplacementTest < ActiveSupport::TestCase
       end
     end
 
+    context "two posts that have had their files swapped" do
+      should "not delete the still active files" do
+        @post1 = FactoryGirl.create(:post)
+        @post2 = FactoryGirl.create(:post)
+
+        # swap the images between @post1 and @post2.
+        @post1.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350")
+        @post2.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364")
+        @post2.replace!(replacement_url: "https://www.google.com/intl/en_ALL/images/logo.gif")
+        @post1.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364")
+        @post2.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350")
+
+        Timecop.travel(Time.now + PostReplacement::DELETION_GRACE_PERIOD + 1.day) do
+          Delayed::Worker.new.work_off
+        end
+
+        assert(File.exists?(@post1.file_path))
+        assert(File.exists?(@post2.file_path))
+      end
+    end
+
     context "a post with an uploaded file" do
       should "work" do
-        Tempfile.open do |file|
-          file.write(File.read("#{Rails.root}/test/files/test.png"))
-          file.seek(0)
-          uploaded_file = ActionDispatch::Http::UploadedFile.new(tempfile: file, filename: "test.png")
-
-          @post.replace!(replacement_file: uploaded_file, replacement_url: "")
-          assert_equal(@post.md5, Digest::MD5.file(file).hexdigest)
+        upload_file("#{Rails.root}/test/files/test.png", "test.png") do |file|
+          @post.replace!(replacement_file: file, replacement_url: "")
+          assert_equal(@post.md5, Digest::MD5.file(file.tempfile).hexdigest)
           assert_equal("file://test.png", @post.replacements.last.replacement_url)
         end
       end
@@ -220,10 +245,28 @@ class PostReplacementTest < ActiveSupport::TestCase
     context "a post when replaced with a HTML source" do
       should "record the image URL as the replacement URL, not the HTML source" do
         replacement_url = "https://twitter.com/nounproject/status/540944400767922176"
-        image_url = "http://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"
+        image_url = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"
         @post.replace!(replacement_url: replacement_url)
 
         assert_equal(image_url, @post.replacements.last.replacement_url)
+      end
+    end
+
+    context "a post with the same file" do
+      should "not raise a duplicate error" do
+        upload_file("#{Rails.root}/test/files/test.jpg", "test.jpg") do |file|
+          assert_nothing_raised do
+            @post.replace!(replacement_file: file, replacement_url: "")
+          end
+        end
+      end
+
+      should "not queue a deletion or log a comment" do
+        upload_file("#{Rails.root}/test/files/test.jpg", "test.jpg") do |file|
+          assert_no_difference(["@post.comments.count"]) do
+            @post.replace!(replacement_file: file, replacement_url: "")
+          end
+        end
       end
     end
   end

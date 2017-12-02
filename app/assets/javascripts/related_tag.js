@@ -2,7 +2,7 @@
   Danbooru.RelatedTag = {};
 
   Danbooru.RelatedTag.initialize_all = function() {
-    if ($("#c-posts").length || $("#c-uploads").length) {
+    if ($("#c-posts #a-show").length || $("#c-uploads #a-new").length) {
       this.initialize_buttons();
       $("#related-tags-container").hide();
       $("#artist-tags-container").hide();
@@ -12,10 +12,15 @@
 
   Danbooru.RelatedTag.initialize_buttons = function() {
     this.common_bind("#related-tags-button", "");
-    this.common_bind("#related-general-button", "general");
-    this.common_bind("#related-artists-button", "artist");
-    this.common_bind("#related-characters-button", "character");
-    this.common_bind("#related-copyrights-button", "copyright");
+    var related_buttons;
+    try {
+      related_buttons = JSON.parse(Danbooru.meta("related-tag-button-list"));
+    } catch (e) {
+      related_buttons = [];
+    }
+    $.each(related_buttons, function(i,category) {
+      Danbooru.RelatedTag.common_bind("#related-" + category + "-button", category);
+    });
     $("#find-artist-button").click(Danbooru.RelatedTag.find_artist);
   }
 
@@ -57,8 +62,8 @@
     var $field = $("#upload_tag_string,#post_tag_string");
     var string = $field.val();
     var n = string.length;
-    var a = $field.get(0).selectionStart;
-    var b = $field.get(0).selectionStart;
+    var a = $field.prop('selectionStart');
+    var b = $field.prop('selectionStart');
 
     if ((a > 0) && (a < (n - 1)) && (!/\s/.test(string[a])) && (/\s/.test(string[a - 1]))) {
       // 4 is the only case where we need to scan forward. in all other cases we
@@ -138,7 +143,7 @@
         if (Danbooru.RelatedTag.recent_artists[0].is_banned === true) {
           tags.push(["BANNED_ARTIST", "banned"]);
         }
-        $.each(Danbooru.RelatedTag.recent_artists[0].urls, function(i, url) {
+        $.each(Danbooru.RelatedTag.recent_artists[0].sorted_urls, function(i, url) {
           tags.push([" " + url.url, 0]);
         });
       } else if (Danbooru.RelatedTag.recent_artists.length >= 10) {
@@ -226,7 +231,11 @@
         if (text.match(/^ http/)) {
           text = text.substring(1, 1000);
           var $url = $("<a/>");
-          $url.text(text);
+          var desc = text.replace(/^https?:\/\//, "");
+          if (desc.length > 30) {
+            desc = desc.substring(0, 30) + "...";
+          }
+          $url.text(desc);
           $url.attr("href", text);
           $url.attr("target", "_blank");
           $ul.append($("<li/>").html($url));
@@ -252,12 +261,13 @@
     }
     $field.val($field.val().trim().replace(/ +/g, " ") + " ");
 
-    $field[0].selectionStart = $field.val().length;
     Danbooru.RelatedTag.update_selected();
     if (Danbooru.RelatedTag.recent_artist && $("#artist-tags-container").css("display") === "block") {
       Danbooru.RelatedTag.process_artist(Danbooru.RelatedTag.recent_artist);
     }
 
+    //The timeout is needed on Chrome since it will clobber the field attribute otherwise
+    setTimeout(function () { $field.prop('selectionStart', $field.val().length);}, 100);
     e.preventDefault();
   }
 

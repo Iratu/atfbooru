@@ -25,13 +25,13 @@
       <% if user.is_banned? && user.recent_ban %>
         <tr>
           <th>Ban reason</th>
-          <td><%= format_text presenter.ban_reason, :ragel => true %></td>
+          <td><%= format_text presenter.ban_reason %></td>
         </tr>
       <% end %>
 
       <tr>
         <th>Upload Limit</th>
-        <td><%= presenter.upload_limit %></td>
+        <td><%= presenter.upload_limit(self) %> (<%= link_to "help", wiki_pages_path(title: "about:upload_limits") %>)</td>
       </tr>
 
       <tr>
@@ -160,13 +160,6 @@
             </td>
           </tr>
         <% end %>
-
-        <tr>
-          <th>Subscriptions</th>
-          <td>
-            <em>This feature has been disabled. <%= link_to "Migrate your tag subscriptions to saved searches", tag_subscriptions_path %>.</em>
-          </td>
-        </tr>
 
         <tr>
           <th>API Key</th>

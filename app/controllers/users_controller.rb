@@ -1,6 +1,7 @@
 class UsersController < ApplicationController
   respond_to :html, :xml, :json
   skip_before_filter :api_check
+  before_filter :process_session_actions, only: [:update]
 
   def new
     @user = User.new
@@ -43,12 +44,17 @@ class UsersController < ApplicationController
   def create
     @user = User.new(params[:user], :as => CurrentUser.role)
     @user.last_ip_addr = request.remote_ip
-    @user.save
-    if @user.errors.empty?
-      session[:user_id] = @user.id
+    if verify_recaptcha(model: @user)
+      @user.save
+      if @user.errors.empty?
+        session[:user_id] = @user.id
+      end
+      set_current_user
+      respond_with(@user)
+    else
+      flash[:notice] = "Sign up failed"
+      redirect_to new_user_path
     end
-    set_current_user
-    respond_with(@user)
   end
 
   def update
@@ -62,7 +68,7 @@ class UsersController < ApplicationController
     else
       flash[:notice] = "Settings updated"
     end
-    respond_with(@user)
+    respond_with(@user, location: edit_user_path(@user))
   end
 
   def cache
@@ -72,6 +78,16 @@ class UsersController < ApplicationController
   end
 
 private
+
+  def process_session_actions
+    if params[:user].has_key?(:desktop_mode)
+      if params[:user].delete(:desktop_mode) == "0"
+        cookies.delete(:dm)
+      else
+        cookies[:dm] = "1"
+      end
+    end
+  end
 
   def check_privilege(user)
     raise User::PrivilegeError unless (user.id == CurrentUser.id || CurrentUser.is_admin?)

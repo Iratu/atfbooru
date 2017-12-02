@@ -3,18 +3,20 @@ require 'uri'
 
 class DText
   MENTION_REGEXP = /(?<=^| )@\S+/
-  
-  def self.u(string)
-    CGI.escape(string)
-  end
-
-  def self.h(string)
-    CGI.escapeHTML(string)
-  end
 
   def self.quote(message, creator_name)
     stripped_body = DText.strip_blocks(message, "quote")
     "[quote]\n#{creator_name} said:\n\n#{stripped_body}\n[/quote]\n\n"
+  end
+
+  def self.parse_mentions(text)
+    text = strip_blocks(text.to_s, "quote")
+
+    names = text.scan(MENTION_REGEXP).map do |mention|
+      mention.gsub(/(?:^\s*@)|(?:[:;,.!?\)\]<>]$)/, "")
+    end
+
+    names.uniq
   end
 
   def self.strip_blocks(string, tag)
@@ -423,4 +425,3 @@ class DText
     excerpt
   end
 end
-

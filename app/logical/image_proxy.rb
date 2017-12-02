@@ -1,6 +1,8 @@
 class ImageProxy
   def self.needs_proxy?(url)
     fake_referer_for(url).present?
+  rescue Sources::Site::NoStrategyError
+    false
   end
 
   def self.fake_referer_for(url)
@@ -16,11 +18,7 @@ class ImageProxy
       raise "Proxy not allowed for this site"
     end
 
-    headers = {
-      "Referer" => fake_referer_for(url),
-      "User-Agent" => "#{Danbooru.config.safe_app_name}/#{Danbooru.config.version}"
-    }
-    response = HTTParty.get(url, Danbooru.config.httparty_options.merge(headers: headers))
+    response = HTTParty.get(url, Danbooru.config.httparty_options.deep_merge(headers: {"Referer" => fake_referer_for(url)}))
     if response.success?
       return response
     else

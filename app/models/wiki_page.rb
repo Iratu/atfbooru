@@ -10,6 +10,7 @@ class WikiPage < ApplicationRecord
   belongs_to :updater, :class_name => "User"
   validates_uniqueness_of :title, :case_sensitive => false
   validates_presence_of :title
+  validates_presence_of :body, :unless => -> { is_deleted? || other_names.present? }
   validate :validate_rename
   validate :validate_locker_is_builder
   validate :validate_not_locked
@@ -44,8 +45,8 @@ class WikiPage < ApplicationRecord
       end
     end
 
-    def other_names_equal(names)
-      query_sql = names.map(&:to_escaped_for_tsquery).join(" | ")
+    def other_names_equal(name)
+      query_sql = name.unicode_normalize(:nfkc).to_escaped_for_tsquery
       where("other_names_index @@ to_tsquery('danbooru', E?)", query_sql)
     end
 
@@ -54,7 +55,7 @@ class WikiPage < ApplicationRecord
         subquery = WikiPage.from("unnest(string_to_array(other_names, ' ')) AS other_name").where("other_name ILIKE ?", name.to_escaped_for_sql_like)
         where(id: subquery)
       else
-        other_names_equal([name])
+        other_names_equal(name)
       end
     end
 
@@ -169,7 +170,7 @@ class WikiPage < ApplicationRecord
   end
 
   def normalize_other_names
-    normalized_other_names = other_names.to_s.gsub(/\u3000/, " ").scan(/\S+/)
+    normalized_other_names = other_names.to_s.unicode_normalize(:nfkc).scan(/[^[:space:]]+/)
     self.other_names = normalized_other_names.uniq.join(" ")
   end
 

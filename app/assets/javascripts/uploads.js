@@ -12,8 +12,8 @@
       this.initialize_info_bookmarklet();
       this.initialize_similar();
       this.initialize_shortcuts();
+      this.initialize_submit();
       $("#related-tags-button").trigger("click");
-      $("#find-artist-button").trigger("click");
 
       $("#toggle-artist-commentary").click(function(e) {
         Danbooru.Upload.toggle_commentary();
@@ -24,6 +24,28 @@
     if ($("#iqdb-similar").length) {
       this.initialize_iqdb_source();
     }
+  }
+
+  Danbooru.Upload.initialize_submit = function() {
+    $("#form").submit(function(e) {
+      var error_messages = [];
+      if (($("#upload_file").val() === "") && ($("#upload_source").val() === "")) {
+        error_messages.push("Must choose file or specify source");
+      }
+      if (!$("#upload_rating_s")[0].checked && !$("#upload_rating_q")[0].checked && !$("#upload_rating_e")[0].checked &&
+          ($("#upload_tag_string").val().search(/\brating:[sqe]/i) < 0)) {
+        error_messages.push("Must specify a rating");
+      }
+      if (error_messages.length === 0) {
+        $("#submit-button")[0].setAttribute("disabled","true");
+        $("#submit-button")[0].setAttribute("value","Submitting...");
+        $("#client-errors").hide();
+      } else {
+        $("#client-errors")[0].innerHTML = "<strong>Error</strong>: " + error_messages.join(", ");
+        $("#client-errors").show();
+        e.preventDefault();
+      }
+    });
   }
 
   Danbooru.Upload.initialize_shortcuts = function() {
@@ -59,37 +81,36 @@
   }
 
   Danbooru.Upload.initialize_info_bookmarklet = function() {
-    $("#source-info ul").hide();
-    $("#fetch-data-bookmarklet").click(function(e) {
-      var xhr = $.get(e.target.href);
-      xhr.success(Danbooru.Upload.fill_source_info);
-      xhr.fail(function(data) {
-        $("#source-info span#loading-data").html("Error: " + data.responseJSON["message"])
-      });
-      e.preventDefault();
+    $("#upload_source").change(function (e) {
+      $("#fetch-data-manual").click();
     });
-    $("#fetch-data-bookmarklet").trigger("click");
+
+    $("#fetch-data-manual").click();
   }
 
   Danbooru.Upload.initialize_info_manual = function() {
-    $("#source-info ul").hide();
-
     $("#fetch-data-manual").click(function(e) {
       var source = $("#upload_source,#post_source").val();
-      if (!/\S/.test(source)) {
-        Danbooru.error("Error: You must enter a URL into the source field to get its data");
-      } else if (!/^https?:\/\//.test(source)) {
-        Danbooru.error("Error: Source is not a URL");
-      } else {
+      var referer = $("#upload_referer_url").val();
+
+      if (/^https?:\/\//.test(source)) {
         $("#source-info span#loading-data").show();
-        var xhr = $.get("/source.json?url=" + encodeURIComponent(source));
-        xhr.success(Danbooru.Upload.fill_source_info);
-        xhr.fail(function(data) {
-          $("#source-info span#loading-data").html("Error: " + data.responseJSON["message"])
-        });
+        Danbooru.Upload.fetch_source_data(source, referer);
       }
+
       e.preventDefault();
     });
+  }
+
+  Danbooru.Upload.fetch_source_data = function(url, referer_url) {
+    var xhr = $.getJSON("/source.json", { url: url, ref: referer_url });
+
+    xhr.success(Danbooru.Upload.fill_source_info);
+    xhr.fail(function(data) {
+      $("#source-info span#loading-data").html("Error: " + data.responseJSON["message"])
+    });
+
+    return xhr;
   }
 
   Danbooru.Upload.fill_source_info = function(data) {
@@ -98,17 +119,28 @@
       $("<a>").attr("href", v[1]).text(v[0]).appendTo("#source-tags");
     });
 
-    $("#source-artist").html($("<a>").attr("href", data.profile_url).text(data.artist_name));
+    $("#source-artist-profile").attr("href", data.profile_url).text(data.artist_name);
 
+    Danbooru.RelatedTag.process_artist(data.artists);
     Danbooru.RelatedTag.translated_tags = data.translated_tags;
     Danbooru.RelatedTag.build_all();
 
-    var new_artist_href = "/artists/new?other_names="
-                        + encodeURIComponent(data.artist_name)
-                        + "&urls="
-                        + encodeURIComponent($.unique([data.profile_url, data.normalized_for_artist_finder_url]).join("\n"));
+    if (data.artists.length === 0) {
+      var new_artist_params = $.param({
+        name: data.unique_id,
+        other_names: data.artist_name,
+        urls: $.unique([data.profile_url, data.normalized_for_artist_finder_url]).join("\n")
+      });
 
-    $("#source-record").html($("<a>").attr("href", new_artist_href).text("Create New"));
+      var link = $("<a>").attr("href", "/artists/new?" + new_artist_params).text("Create new artist");
+      $("#source-danbooru-artists").html(link);
+    } else {
+      var artistLinks = data.artists.map(function (artist) {
+        return $('<a class="tag-type-1">').attr("href", "/artists/" + artist.id).text(artist.name);
+      });
+
+      $("#source-danbooru-artists").html(artistLinks)
+    }
 
     if (data.image_urls.length > 1) {
       $("#gallery-warning").show();

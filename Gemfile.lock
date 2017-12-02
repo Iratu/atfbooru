@@ -15,9 +15,9 @@ GIT
 
 GIT
   remote: https://github.com/r888888888/dtext_rb.git
-  revision: dea55e6cc85b9a3c8fa8365d892e9d7b660b62d2
+  revision: cde341011c0b7ceddcd0123c88bd67e1cdd9743c
   specs:
-    dtext_rb (1.5.0)
+    dtext_rb (1.6.0)
       nokogiri (~> 1.6)
 
 GIT
@@ -277,6 +277,9 @@ GEM
       thor (>= 0.18.1, < 2.0)
     raindrops (0.17.0)
     rake (12.0.0)
+    rakismet (1.5.4)
+    recaptcha (4.4.1)
+      json
     ref (2.0.0)
     representable (2.3.0)
       uber (~> 0.0.7)
@@ -294,7 +297,7 @@ GEM
     retriable (2.1.0)
     rmagick (2.16.0)
     ruby-prof (0.15.8)
-    rubyzip (1.1.7)
+    rubyzip (1.2.1)
     safe_yaml (1.0.4)
     sanitize (4.5.0)
       crass (~> 1.0.2)
@@ -432,6 +435,8 @@ DEPENDENCIES
   pry-byebug
   radix62 (~> 1.0.1)
   rails (~> 4.2.0)
+  rakismet
+  recaptcha
   responders
   rmagick
   ruby-imagespec!

@@ -2,6 +2,7 @@ require 'test_helper'
 
 class CurrentUserTest < ActiveSupport::TestCase
   setup do
+    User.any_instance.stubs(:validate_sock_puppets).returns(true)
     CurrentUser.user = nil
     CurrentUser.ip_addr = nil
   end
@@ -23,8 +24,20 @@ class CurrentUserTest < ActiveSupport::TestCase
       req = mock()
       req.stubs(:host).returns("danbooru")
       req.stubs(:params).returns({})
+      CurrentUser.user = FactoryGirl.create(:user)
       CurrentUser.set_safe_mode(req)
       assert_equal(false, CurrentUser.safe_mode?)
+    end
+
+    should "return true if the user has enabled the safe mode account setting" do
+      req = mock
+      req.stubs(:host).returns("danbooru")
+      req.stubs(:params).returns({})
+
+      CurrentUser.user = FactoryGirl.create(:user, enable_safe_mode: true)
+      CurrentUser.set_safe_mode(req)
+
+      assert_equal(true, CurrentUser.safe_mode?)
     end
   end 
 

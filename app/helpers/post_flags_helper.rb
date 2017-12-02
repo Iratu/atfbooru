@@ -5,9 +5,9 @@ module PostFlagsHelper
 
     post.flags.each do |flag|
       html << '<li>'
-      html << DText.parse_inline(flag.reason).html_safe
+      html << format_text(flag.reason, inline: true)
 
-      if CurrentUser.can_view_flagger?(flag.creator_id)
+      if CurrentUser.can_view_flagger_on_post?(flag)
         html << " - #{link_to_user(flag.creator)}"
         if CurrentUser.is_moderator?
            html << " (#{link_to_ip(flag.creator_ip_addr)})"

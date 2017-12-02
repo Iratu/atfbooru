@@ -1,17 +1,8 @@
-class TagAlias < ApplicationRecord
-  attr_accessor :skip_secondary_validations
-
+class TagAlias < TagRelationship
   before_save :ensure_tags_exist
   after_save :clear_all_cache
   after_destroy :clear_all_cache
   after_save :create_mod_action
-  before_validation :initialize_creator, :on => :create
-  before_validation :normalize_names
-  validates_format_of :status, :with => /\A(active|deleted|pending|processing|queued|error: .*)\Z/
-  validates_presence_of :creator_id, :antecedent_name, :consequent_name
-  validates :creator, presence: { message: "must exist" }, if: lambda { creator_id.present? }
-  validates :approver, presence: { message: "must exist" }, if: lambda { approver_id.present? }
-  validates :forum_topic, presence: { message: "must exist" }, if: lambda { forum_topic_id.present? }
   validates_uniqueness_of :antecedent_name
   validate :absence_of_transitive_relation
   validate :antecedent_and_consequent_are_different
@@ -24,46 +15,12 @@ class TagAlias < ApplicationRecord
   attr_accessible :antecedent_name, :consequent_name, :forum_topic_id, :skip_secondary_validations
   attr_accessible :status, :approver_id, :as => [:admin]
 
-  module SearchMethods
-    def name_matches(name)
-      where("(antecedent_name like ? escape E'\\\\' or consequent_name like ? escape E'\\\\')", name.mb_chars.downcase.to_escaped_for_sql_like, name.downcase.to_escaped_for_sql_like)
-    end
-    
-    def active
-      where("status IN (?)", ["active", "processing"])
-    end
-
-    def search(params)
-      q = where("true")
-      return q if params.blank?
-
-      if params[:name_matches].present?
-        q = q.name_matches(params[:name_matches])
-      end
-
-      if params[:antecedent_name].present?
-        q = q.where("antecedent_name = ?", params[:antecedent_name])
-      end
-
-      if params[:id].present?
-        q = q.where("id in (?)", params[:id].split(",").map(&:to_i))
-      end
-
-      case params[:order]
-      when "created_at"
-        q = q.order("created_at desc")
-      end
-
-      q
-    end
-  end
-
   module CacheMethods
     extend ActiveSupport::Concern
 
     module ClassMethods
       def clear_cache_for(name)
-        Cache.delete("ta:#{Cache.sanitize(name)}")
+        Cache.delete("ta:#{Cache.hash(name)}")
       end
     end
 
@@ -85,26 +42,6 @@ class TagAlias < ApplicationRecord
         delay(:queue => "default").process!(update_topic: update_topic)
       end
     end
-
-    def approval_message
-      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been approved."
-    end
-
-    def failure_message(e = nil)
-      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) failed during processing. Reason: #{e}"
-    end
-
-    def reject_message
-      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has been rejected."
-    end
-
-    def conflict_message
-      "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] (alias ##{id}) has conflicting wiki pages. [[#{consequent_name}]] should be updated to include information from [[#{antecedent_name}]] if necessary."
-    end
-
-    def date_timestamp
-      Time.now.strftime("%Y-%m-%d")
-    end
   end
 
   module ForumMethods
@@ -124,7 +61,6 @@ class TagAlias < ApplicationRecord
     end
   end
 
-  extend SearchMethods
   include CacheMethods
   include ApprovalMethods
   include ForumMethods
@@ -150,7 +86,7 @@ class TagAlias < ApplicationRecord
         clear_all_cache
         ensure_category_consistency
         update_posts
-        forum_updater.update(approval_message, "APPROVED") if update_topic
+        forum_updater.update(approval_message(approver), "APPROVED") if update_topic
         rename_wiki_and_artist
         update({ :status => "active", :post_count => consequent_tag.post_count }, :as => CurrentUser.role)
       end
@@ -170,32 +106,6 @@ class TagAlias < ApplicationRecord
         NewRelic::Agent.notice_error(e, :custom_params => {:tag_alias_id => id, :antecedent_name => antecedent_name, :consequent_name => consequent_name})
       end
     end
-  end
-
-  def is_pending?
-    status == "pending"
-  end
-
-  def is_active?
-    status == "active"
-  end
-  
-  def normalize_names
-    self.antecedent_name = antecedent_name.mb_chars.downcase.tr(" ", "_")
-    self.consequent_name = consequent_name.downcase.tr(" ", "_")
-  end
-
-  def initialize_creator
-    self.creator_id ||= CurrentUser.user.id
-    self.creator_ip_addr ||= CurrentUser.ip_addr
-  end
-
-  def antecedent_tag
-    Tag.find_or_create_by_name(antecedent_name)
-  end
-
-  def consequent_tag
-    Tag.find_or_create_by_name(consequent_name)
   end
 
   def absence_of_transitive_relation
@@ -310,21 +220,10 @@ class TagAlias < ApplicationRecord
     end
   end
 
-  def deletable_by?(user)
-    return true if user.is_admin?
-    return true if is_pending? && user.is_builder?
-    return true if is_pending? && user.id == creator_id
-    return false
-  end
-
-  def editable_by?(user)
-    deletable_by?(user)
-  end
-
   def reject!
     update({ :status => "deleted" }, :as => CurrentUser.role)
     clear_all_cache
-    forum_updater.update(reject_message, "REJECTED")
+    forum_updater.update(reject_message(CurrentUser.user), "REJECTED")
     destroy
   end
 

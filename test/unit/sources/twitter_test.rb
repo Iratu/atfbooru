@@ -26,12 +26,12 @@ module Sources
 
     context "A twitter summary card" do
       setup do
-        @site = Sources::Site.new("https://twitter.com/NatGeo/status/787654447937847296")
+        @site = Sources::Site.new("https://twitter.com/NatGeo/status/932700115936178177")
         @site.get
       end
 
       should "get the image url" do
-        assert_equal("http://yourshot.nationalgeographic.com/u/fQYSUbVfts-T7odkrFJckdiFeHvab0GWOfzhj7tYdC0uglagsDcUxj3Tf7HBF3kZEj7S5m-zeDmZP6DBxBJlyJX_1mFp-hGf4JPt97xp0QJkwf4po1MmnZH73WC3a2Pa1Ky62C-v0cYXTur3-QwD3Pz5UI_cKIi81GABTXII8VwKUopxlNW2MYAR8kPYU2IoUhOjlvVefNcLYI74J-0IpI4tHDXE/", @site.image_url)
+        assert_equal("https://pmdvod.nationalgeographic.com/NG_Video/205/302/smpost_1510342850295.jpg", @site.image_url)
       end
     end
 
@@ -57,6 +57,28 @@ module Sources
       end
     end
 
+    context "An extended tweet" do
+      should "extract the correct image url" do
+        @site = Sources::Site.new("https://twitter.com/onsen_musume_jp/status/865534101918330881")
+        @site.get
+
+        assert_equal(["https://pbs.twimg.com/media/DAL-ntWV0AEbhes.jpg:orig"], @site.image_urls)
+      end
+
+      should "extract all the image urls" do
+        @site = Sources::Site.new("https://twitter.com/aoimanabu/status/892370963630743552")
+        @site.get
+
+        urls = %w[
+          https://pbs.twimg.com/media/DGJWp59UIAA_-en.jpg:orig
+          https://pbs.twimg.com/media/DGJWqGLUwAAn2RL.jpg:orig
+          https://pbs.twimg.com/media/DGJWqT_UMAAvmSK.jpg:orig
+        ]
+
+        assert_equal(urls, @site.image_urls)
+      end
+    end
+
     context "The source site for a restricted twitter" do
       setup do
         @site = Sources::Site.new("https://mobile.twitter.com/Strangestone/status/556440271961858051")
@@ -64,7 +86,7 @@ module Sources
       end
 
       should "get the image url" do
-        assert_equal("http://pbs.twimg.com/media/B7jfc1JCcAEyeJh.png:orig", @site.image_url)
+        assert_equal("https://pbs.twimg.com/media/B7jfc1JCcAEyeJh.png:orig", @site.image_url)
       end
     end
 
@@ -83,7 +105,7 @@ module Sources
       end
 
       should "get the image url" do
-        assert_equal("http://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
+        assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
       end
 
       should "get the tags" do
@@ -98,6 +120,21 @@ module Sources
         assert_nothing_raised do
           @site.to_json
         end
+      end
+    end
+
+    context "The source site for a direct image and a referer" do
+      setup do
+        @site = Sources::Site.new("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:large", referer_url: "https://twitter.com/nounproject/status/540944400767922176")
+        @site.get
+      end
+
+      should "get the artist name" do
+        assert_equal("Noun Project", @site.artist_name)
+      end
+
+      should "get the image url" do
+        assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
       end
     end
 

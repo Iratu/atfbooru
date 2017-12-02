@@ -3,9 +3,13 @@
 
   Danbooru.Autocomplete.AUTOCOMPLETE_VERSION = 1;
 
+  //Just under 5MB of 16-bit characters
+  Danbooru.Autocomplete.MAX_STORAGE_SIZE = 2500000;
+
   Danbooru.Autocomplete.initialize_all = function() {
     if (Danbooru.meta("enable-auto-complete") === "true") {
       Danbooru.Autocomplete.enable_local_storage = this.test_local_storage();
+      this.update_static_metatags();
       this.initialize_tag_autocomplete();
       this.initialize_mention_autocomplete();
       this.prune_local_storage();
@@ -25,8 +29,9 @@
   Danbooru.Autocomplete.prune_local_storage = function() {
     if (this.enable_local_storage) {
       var cached_autocomplete_version = $.localStorage.get("danbooru-autocomplete-version");
-      if (cached_autocomplete_version !== this.AUTOCOMPLETE_VERSION || $.localStorage.keys().length > 4000) {
-        $.each($.localStorage.keys(), function(i, key) {
+      var current_cache_size = Object.keys(localStorage).reduce( function(total, key) { return total + localStorage[key].length; }, 0);
+      if (cached_autocomplete_version !== this.AUTOCOMPLETE_VERSION || current_cache_size > this.MAX_STORAGE_SIZE) {
+        $.each(Object.keys(localStorage), function(i, key) {
           if (key.substr(0, 3) === "ac-") {
             $.localStorage.remove(key);
           }
@@ -90,7 +95,7 @@
     var $fields_multiple = $('[data-autocomplete="tag-query"], [data-autocomplete="tag-edit"]');
     var $fields_single = $('[data-autocomplete="tag"]');
 
-    var prefixes = "-|~|general:|gen:|artist:|art:|copyright:|copy:|co:|character:|char:|ch:";
+    var prefixes = "-|~|" + $.map(JSON.parse(Danbooru.meta("tag-category-names")), function (category) { return category + ':'}).join('|');
     var metatags = "order|-status|status|-rating|rating|-locked|locked|child|filetype|-filetype|" +
       "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-fav|fav|ordfav|" +
       "-pool|pool|ordpool|favgroup|-search|search";
@@ -122,7 +127,12 @@
           return;
         }
 
-        var term = before_caret_text.match(/\S+/g).pop();
+        var term = before_caret_text.match(/\S+/g);
+        if (!term) {
+          return;
+        }
+
+        term = term.pop();
         var regexp = new RegExp("^(?:" + prefixes + ")(.*)$", "i");
         var match = term.match(regexp);
         if (match) {
@@ -218,7 +228,7 @@
   }
 
   Danbooru.Autocomplete.normal_source = function(term, resp) {
-    var key = "ac-" + term;
+    var key = "ac-" + term.replace(/\./g,'\uFFFF');
     if (this.enable_local_storage) {
       var cached = $.localStorage.get(key);
       if (cached) {
@@ -307,6 +317,7 @@
       "id", "id_desc",
       "score", "score_asc",
       "favcount", "favcount_asc",
+      "created_at", "created_at_asc",
       "change", "change_asc",
       "comment", "comment_asc",
       "comment_bumped", "comment_bumped_asc",
@@ -315,6 +326,7 @@
       "mpixels", "mpixels_asc",
       "portrait", "landscape",
       "filesize", "filesize_asc",
+      "tagcount", "tagcount_asc",
       "rank",
       "random"
     ],
@@ -333,6 +345,11 @@
     filetype: [
       "jpg", "png", "gif", "swf", "zip", "webm", "mp4"
     ],
+  }
+
+  //This must be done as a separate function as Danbooru.meta does not exist at program initialization
+  Danbooru.Autocomplete.update_static_metatags = function () {
+    Array.prototype.push.apply(Danbooru.Autocomplete.static_metatags.order,$.map(JSON.parse(Danbooru.meta("short-tag-category-names")), function(shorttag) { return [shorttag + "tags", shorttag + "tags_asc"]}));
   }
 
   Danbooru.Autocomplete.static_metatag_source = function(term, resp, metatag) {
