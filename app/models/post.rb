@@ -1255,9 +1255,7 @@ class Post < ApplicationRecord
     end
     
     def expire_cache(tag_names)
-      tag_names.each do |tag_name|
-        Cache.delete(Post.count_cache_key(tag_name))
-      end
+       ""
     end
     
   end
