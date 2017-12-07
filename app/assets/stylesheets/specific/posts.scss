@@ -55,6 +55,12 @@ article.post-preview {
   }
 }
 
+@media screen and (max-width:1050px) {  
+  #artistadv {
+    display: none;
+  }
+}
+
 #saved-searches-nav {
   margin-top: 1em;
 }
