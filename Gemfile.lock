@@ -15,10 +15,10 @@ GIT
 
 GIT
   remote: https://github.com/r888888888/dtext_rb.git
-  revision: cde341011c0b7ceddcd0123c88bd67e1cdd9743c
+  revision: ebeb807f4a33fb212d306ef90e1bc113b3533c25
   specs:
-    dtext_rb (1.6.0)
-      nokogiri (~> 1.6)
+    dtext_rb (1.6.1)
+      nokogiri (~> 1.8)
 
 GIT
   remote: https://github.com/r888888888/ruby-imagespec.git
@@ -64,8 +64,8 @@ GEM
       minitest (~> 5.1)
       thread_safe (~> 0.3, >= 0.3.4)
       tzinfo (~> 1.1)
-    addressable (2.5.1)
-      public_suffix (~> 2.0, >= 2.0.2)
+    addressable (2.5.2)
+      public_suffix (>= 2.0.2, < 4.0)
     arel (6.0.4)
     awesome_print (1.7.0)
     aws-sdk (2.7.4)
@@ -108,7 +108,7 @@ GEM
     cityhash (0.8.1)
     coderay (1.1.1)
     colorize (0.7.7)
-    crack (0.4.2)
+    crack (0.4.3)
       safe_yaml (~> 1.0.0)
     crass (1.0.2)
     daemons (1.2.3)
@@ -156,6 +156,7 @@ GEM
       multi_json (~> 1.11)
       os (~> 0.9)
       signet (~> 0.7)
+    hashdiff (0.3.7)
     highline (1.7.8)
     hike (1.2.3)
     http (2.2.2)
@@ -202,7 +203,7 @@ GEM
     metaclass (0.0.4)
     method_source (0.8.2)
     mime-types (2.99.3)
-    mini_portile2 (2.2.0)
+    mini_portile2 (2.3.0)
     minitest (5.10.1)
     mocha (1.2.1)
       metaclass (~> 0.0.1)
@@ -220,11 +221,11 @@ GEM
       net-ssh (>= 2.6.5)
     net-ssh (2.9.2)
     netrc (0.10.3)
-    newrelic_rpm (3.13.0.299)
-    nokogiri (1.8.0)
-      mini_portile2 (~> 2.2.0)
-    nokogiri (1.8.0-x64-mingw32)
-      mini_portile2 (~> 2.2.0)
+    newrelic_rpm (4.6.0.338)
+    nokogiri (1.8.1)
+      mini_portile2 (~> 2.3.0)
+    nokogiri (1.8.1-x64-mingw32)
+      mini_portile2 (~> 2.3.0)
     nokogumbo (1.4.13)
       nokogiri
     ntlm-http (0.1.1)
@@ -246,7 +247,7 @@ GEM
     pry-byebug (3.4.2)
       byebug (~> 9.0)
       pry (~> 0.10)
-    public_suffix (2.0.5)
+    public_suffix (3.0.1)
     rack (1.6.5)
     rack-test (0.6.3)
       rack (>= 1.0)
@@ -385,9 +386,10 @@ GEM
     unicorn-worker-killer (0.4.4)
       get_process_mem (~> 0)
       unicorn (>= 4, < 6)
-    webmock (1.21.0)
+    webmock (3.1.1)
       addressable (>= 2.3.6)
       crack (>= 0.3.2)
+      hashdiff
     webrobots (0.1.2)
     whenever (0.9.7)
       chronic (>= 0.6.3)

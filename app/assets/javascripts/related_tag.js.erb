@@ -12,15 +12,9 @@
 
   Danbooru.RelatedTag.initialize_buttons = function() {
     this.common_bind("#related-tags-button", "");
-    var related_buttons;
-    try {
-      related_buttons = JSON.parse(Danbooru.meta("related-tag-button-list"));
-    } catch (e) {
-      related_buttons = [];
-    }
-    $.each(related_buttons, function(i,category) {
-      Danbooru.RelatedTag.common_bind("#related-" + category + "-button", category);
-    });
+    <% TagCategory.related_button_list.each do |category| %>
+      Danbooru.RelatedTag.common_bind("#related-<%= category %>-button", "<%= category %>");
+    <% end %>
     $("#find-artist-button").click(Danbooru.RelatedTag.find_artist);
   }
 
@@ -124,6 +118,7 @@
     var query = Danbooru.RelatedTag.recent_search.query;
     var related_tags = Danbooru.RelatedTag.recent_search.tags;
     var wiki_page_tags = Danbooru.RelatedTag.recent_search.wiki_page_tags;
+    var other_wikis = Danbooru.RelatedTag.recent_search.other_wikis;
     var $dest = $("#related-tags");
     $dest.empty();
 
@@ -134,6 +129,9 @@
     if (wiki_page_tags.length) {
       $dest.append(Danbooru.RelatedTag.build_html("wiki:" + query, wiki_page_tags, "wiki"));
     }
+    $.each(other_wikis, function(i,wiki) {
+      $dest.append(Danbooru.RelatedTag.build_html("wiki:" + wiki.title, wiki.wiki_page_tags, "otherwiki" + i.toString()));
+    });
     if (Danbooru.RelatedTag.recent_artists) {
       var tags = [];
       if (Danbooru.RelatedTag.recent_artists.length === 0) {

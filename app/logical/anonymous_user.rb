@@ -218,7 +218,7 @@ class AnonymousUser
   end
 
   def custom_style
-    nil
+    ""
   end
 
   def show_deleted_children?
@@ -266,6 +266,10 @@ class AnonymousUser
   end
 
   def enable_safe_mode?
+    false
+  end
+
+  def disable_responsive_mode?
     false
   end
 

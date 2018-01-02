@@ -36,9 +36,12 @@ module Danbooru
       "webmaster@#{server_host}"
     end
 
-    # System actions, such as sending automated dmails, will be performed with this account.
+    # System actions, such as sending automated dmails, will be performed with
+    # this account. This account must have Moderator privileges.
+    #
+    # Run `rake db:seed` to create this account if it doesn't already exist in your install.
     def system_user
-      User.find_by_name("DanbooruBot") || User.admins.first
+      "DanbooruBot"
     end
 
     def upload_feedback_topic
@@ -225,7 +228,11 @@ module Danbooru
           "extra" => [],
           "header" => %{<h1 class="general-tag-list">Tags</h1>},
           "humanized" => nil,
-          "relatedbutton" => "General"
+          "relatedbutton" => "General",
+          "css" => {
+            "color" => "$link_color",
+            "hover" => "$link_hover_color"
+          }
         },
         "character" => {
           "category" => 4,
@@ -238,7 +245,11 @@ module Danbooru
             "regexmap" => /^(.+?)(?:_\(.+\))?$/,
             "formatstr" => "%s"
           },
-          "relatedbutton" => "Characters"
+          "relatedbutton" => "Characters",
+          "css" => {
+            "color" => "#0A0",
+            "hover" => "#6B6"
+          }
         },
         "copyright" => {
           "category" => 3,
@@ -251,7 +262,11 @@ module Danbooru
             "regexmap" => //,
             "formatstr" => "(%s)"
           },
-          "relatedbutton" => "Copyrights"
+          "relatedbutton" => "Copyrights",
+          "css" => {
+            "color" => "#A0A",
+            "hover" => "#B6B"
+          }
         },
         "artist" => {
           "category" => 1,
@@ -264,7 +279,11 @@ module Danbooru
             "regexmap" => //,
             "formatstr" => "drawn by %s"
           },
-          "relatedbutton" => "Artists"
+          "relatedbutton" => "Artists",
+          "css" => {
+            "color" => "#A00",
+            "hover" => "#B66"
+          }
         },
         "meta" => {
           "category" => 5,
@@ -272,7 +291,11 @@ module Danbooru
           "extra" => [],
           "header" => %{<h2 class="meta-tag-list">Meta</h2>},
           "humanized" => nil,
-          "relatedbutton" => nil
+          "relatedbutton" => nil,
+          "css" => {
+            "color" => "#F80",
+            "hover" => "#FA6"
+          }
         }
       }
     end
@@ -482,6 +505,10 @@ module Danbooru
       true
     end
 
+    def image_magick_srgb_profile_path
+      # "/usr/share/ghostscript/9.06/Resource/ColorSpace/sRGB"
+    end
+
     # For downloads, if the host matches any of these IPs, block it
     def banned_ip_for_download?(ip_addr)
       raise ArgumentError unless ip_addr.is_a?(IPAddr)
@@ -630,6 +657,23 @@ module Danbooru
     end
 
     def recaptcha_secret_key
+    end
+    
+    # Akismet API key. Used for Dmail spam detection. http://akismet.com/signup/
+    def rakismet_key
+    end
+
+    def rakismet_url
+    end
+
+    # Cloudflare data
+    def cloudflare_email
+    end
+
+    def cloudflare_zone
+    end
+
+    def cloudflare_key
     end
   end
 

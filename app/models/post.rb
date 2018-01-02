@@ -18,6 +18,11 @@ class Post < ApplicationRecord
   validates_uniqueness_of :md5, :on => :create
   validates_inclusion_of :rating, in: %w(s q e), message: "rating must be s, q, or e"
   validate :tag_names_are_valid
+  validate :added_tags_are_valid
+  validate :removed_tags_are_valid
+  validate :has_artist_tag
+  validate :has_copyright_tag
+  validate :has_enough_tags
   validate :post_is_not_its_own_parent
   validate :updater_can_change_rating
   before_save :update_tag_post_counts
@@ -194,6 +199,18 @@ class Post < ApplicationRecord
 
     def complete_preview_file_url
       "http://#{Danbooru.config.hostname}#{preview_file_url}"
+    end
+
+    def open_graph_image_url
+      if is_image?
+        if has_large?
+          "http://#{Danbooru.config.hostname}#{large_file_url}"
+        else
+          "http://#{Danbooru.config.hostname}#{file_url}"
+        end
+      else
+        complete_preview_file_url
+      end
     end
 
     def file_url_for(user)
@@ -592,6 +609,18 @@ class Post < ApplicationRecord
       @tag_array_was ||= Tag.scan_tags(tag_string_was)
     end
 
+    def tags
+      Tag.where(name: tag_array)
+    end
+
+    def tags_was
+      Tag.where(name: tag_array_was)
+    end
+
+    def added_tags
+      tags - tags_was
+    end
+
     def decrement_tag_post_counts
       Tag.where(:name => tag_array).update_all("post_count = post_count - 1") if tag_array.any?
     end
@@ -633,12 +662,18 @@ class Post < ApplicationRecord
     end
 
     def merge_old_changes
+      @removed_tags = []
+
       if old_tag_string
         # If someone else committed changes to this post before we did,
         # then try to merge the tag changes together.
         current_tags = tag_array_was()
         new_tags = tag_array()
         old_tags = Tag.scan_tags(old_tag_string)
+
+        kept_tags = current_tags & new_tags
+        @removed_tags = old_tags - kept_tags
+
         set_tag_string(((current_tags + new_tags) - old_tags + (current_tags & new_tags)).uniq.sort.join(" "))
       end
 
@@ -678,13 +713,13 @@ class Post < ApplicationRecord
       normalized_tags = remove_negated_tags(normalized_tags)
       normalized_tags = TagAlias.to_aliased(normalized_tags)
       normalized_tags = %w(tagme) if normalized_tags.empty?
-      normalized_tags = TagImplication.with_descendants(normalized_tags)
-      normalized_tags = Tag.create_for_list(add_automatic_tags(normalized_tags))
+      normalized_tags = add_automatic_tags(normalized_tags)
       normalized_tags = normalized_tags + Tag.create_for_list(TagImplication.automatic_tags_for(normalized_tags))
-      normalized_tags = normalized_tags.compact
+      normalized_tags = TagImplication.with_descendants(normalized_tags)
+      normalized_tags = normalized_tags.compact.uniq.sort
+      normalized_tags = Tag.create_for_list(normalized_tags)
+      set_tag_string(normalized_tags.join(" "))
 	  normalized_tags = check_tagme(normalized_tags)
-      normalized_tags.sort!
-      set_tag_string(normalized_tags.uniq.sort.join(" "))
     end
 
     def check_tagme(tags)
@@ -699,10 +734,10 @@ class Post < ApplicationRecord
     
     
     def remove_negated_tags(tags)
-      negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
-      negated_tags = negated_tags.map {|x| x[1..-1]}
-      negated_tags = TagAlias.to_aliased(negated_tags)
-      return tags - negated_tags
+      @negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
+      @negated_tags = @negated_tags.map {|x| x[1..-1]}
+      @negated_tags = TagAlias.to_aliased(@negated_tags)
+      return tags - @negated_tags
     end
 
     def add_automatic_tags(tags)
@@ -1388,18 +1423,15 @@ class Post < ApplicationRecord
       Post.transaction do
         flag!(reason, is_deletion: true)
 
-        self.is_deleted = true
-        self.is_pending = false
-        self.is_flagged = false
-        self.is_banned = true if options[:ban] || has_tag?("banned_artist")
-        update_columns(
-          :is_deleted => is_deleted,
-          :is_pending => is_pending,
-          :is_flagged => is_flagged,
-          :is_banned => is_banned
-        )
+        update({
+          is_deleted: true,
+          is_pending: false,
+          is_flagged: false,
+          is_banned: is_banned || options[:ban] || has_tag?("banned_artist")
+        }, without_protection: true)
+
+        # XXX This must happen *after* the `is_deleted` flag is set to true (issue #3419).
         give_favorites_to_parent if options[:move_favorites]
-        update_parent_on_save
 
         unless options[:without_mod_action]
           ModAction.log("deleted post ##{id}, reason: #{reason}")
@@ -1633,11 +1665,14 @@ class Post < ApplicationRecord
       where("uploader_id = ?", user_id)
     end
 
-    def available_for_moderation(hidden)
+    def available_for_moderation(hidden, user = CurrentUser.user)
+      approved_posts = user.post_approvals.select(:post_id)
+      disapproved_posts = user.post_disapprovals.select(:post_id)
+
       if hidden.present?
-        where("posts.id IN (SELECT pd.post_id FROM post_disapprovals pd WHERE pd.user_id = ?)", CurrentUser.id)
+        where("posts.uploader_id = ? OR posts.id IN (#{approved_posts.to_sql}) OR posts.id IN (#{disapproved_posts.to_sql})", user.id)
       else
-        where("posts.id NOT IN (SELECT pd.post_id FROM post_disapprovals pd WHERE pd.user_id = ?)", CurrentUser.id)
+        where.not(uploader: user).where.not(id: approved_posts).where.not(id: disapproved_posts)
       end
     end
 
@@ -1727,6 +1762,68 @@ class Post < ApplicationRecord
         end
       end
     end
+
+    def added_tags_are_valid
+      new_tags = added_tags.select { |t| t.post_count <= 0 }
+      new_general_tags = new_tags.select { |t| t.category == Tag.categories.general }
+      new_artist_tags = new_tags.select { |t| t.category == Tag.categories.artist }
+      repopulated_tags = new_tags.select { |t| (t.category != Tag.categories.general) && (t.category != Tag.categories.meta) && (t.created_at < 1.hour.ago) }
+
+      if new_general_tags.present?
+        n = new_general_tags.size
+        tag_wiki_links = new_general_tags.map { |tag| "[[#{tag.name}]]" }
+        self.warnings[:base] << "Created #{n} new #{n == 1 ? "tag" : "tags"}: #{tag_wiki_links.join(", ")}"
+      end
+
+      if repopulated_tags.present?
+        n = repopulated_tags.size
+        tag_wiki_links = repopulated_tags.map { |tag| "[[#{tag.name}]]" }
+        self.warnings[:base] << "Repopulated #{n} old #{n == 1 ? "tag" : "tags"}: #{tag_wiki_links.join(", ")}"
+      end
+
+      new_artist_tags.each do |tag|
+        if tag.artist.blank?
+          self.warnings[:base] << "Artist [[#{tag.name}]] requires an artist entry. \"Create new artist entry\":[/artists/new?name=#{CGI::escape(tag.name)}]"
+        end
+      end
+    end
+
+    def removed_tags_are_valid
+      attempted_removed_tags = @removed_tags + @negated_tags
+      unremoved_tags = tag_array & attempted_removed_tags
+
+      if unremoved_tags.present?
+        unremoved_tags_list = unremoved_tags.map { |t| "[[#{t}]]" }.to_sentence
+        self.warnings[:base] << "#{unremoved_tags_list} could not be removed. Check for implications and try again"
+      end
+    end
+
+    def has_artist_tag
+      return if !new_record?
+      return if source !~ %r!\Ahttps?://!
+      return if has_tag?("artist_request") || has_tag?("official_art")
+      return if tags.any? { |t| t.category == Tag.categories.artist }
+
+      site = Sources::Site.new(source)
+      self.warnings[:base] << "Artist tag is required. Create a new tag with [[artist:<artist_name>]]. Ask on the forum if you need naming help"
+    rescue Sources::Site::NoStrategyError => e
+      # unrecognized source; do nothing.
+    end
+
+    def has_copyright_tag
+      return if !new_record?
+      return if has_tag?("copyright_request") || tags.any? { |t| t.category == Tag.categories.copyright }
+
+      self.warnings[:base] << "Copyright tag is required. Consider adding [[copyright request]] or [[original]]"
+    end
+
+    def has_enough_tags
+      return if !new_record?
+
+      if tags.count { |t| t.category == Tag.categories.general } < 10
+        self.warnings[:base] << "Uploads must have at least 10 general tags. Read [[howto:tag]] for guidelines on tagging your uploads"
+      end
+    end
   end
   
   include FileMethods
@@ -1757,11 +1854,22 @@ class Post < ApplicationRecord
   )
   has_bit_flags BOOLEAN_ATTRIBUTES
 
+  def safeblocked?
+    CurrentUser.safe_mode? && (rating != "s" || has_tag?("toddlercon|toddler|diaper|tentacle|rape|bestiality|beastiality|lolita|loli|nude|shota|pussy|penis"))
+  end
+
+  def levelblocked?
+    !Danbooru.config.can_user_see_post?(CurrentUser.user, self)
+  end
+
+  def banblocked?
+    is_banned? && !CurrentUser.is_gold?
+  end
+
   def visible?
-    return false if !Danbooru.config.can_user_see_post?(CurrentUser.user, self)
-    return false if CurrentUser.safe_mode? && rating != "s"
-    return false if CurrentUser.safe_mode? && has_tag?("toddlercon|toddler|diaper|tentacle|rape|bestiality|beastiality|lolita|loli|nude|shota|pussy|penis")
-    return false if is_banned? && !CurrentUser.is_gold?
+    return false if safeblocked?
+    return false if levelblocked?
+    return false if banblocked?
     return true
   end
 
@@ -1817,5 +1925,3 @@ class Post < ApplicationRecord
     ret
   end
 end
-
-Post.connection.extend(PostgresExtensions)

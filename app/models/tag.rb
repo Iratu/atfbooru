@@ -6,6 +6,7 @@ class Tag < ApplicationRecord
   attr_accessible :category, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :is_locked, :as => [:moderator, :admin]
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
+  has_one :artist, :foreign_key => "name", :primary_key => "name"
   has_one :antecedent_alias, lambda {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
   has_many :consequent_aliases, lambda {active}, :class_name => "TagAlias", :foreign_key => "consequent_name", :primary_key => "name"
   has_many :antecedent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "antecedent_name", :primary_key => "name"
@@ -13,6 +14,8 @@ class Tag < ApplicationRecord
 
   validates :name, uniqueness: true, tag_name: true, on: :create
   validates_inclusion_of :category, in: TagCategory.category_ids
+
+  after_save :update_category_cache_for_all, if: :category_changed?
 
   module ApiMethods
     def to_legacy_json
@@ -199,7 +202,7 @@ class Tag < ApplicationRecord
       names.map {|x| find_or_create_by_name(x).name}
     end
 
-    def find_or_create_by_name(name, options = {})
+    def find_or_create_by_name(name, creator: CurrentUser.user)
       name = normalize_name(name)
       category = nil
 
@@ -219,9 +222,8 @@ class Tag < ApplicationRecord
           # next few lines if the category is changed.
           tag.update_category_cache
 
-          if category_id != tag.category && !tag.is_locked? && ((CurrentUser.is_builder? && tag.post_count < 10_000) || tag.post_count <= 50)
-            tag.update_column(:category, category_id)
-            tag.update_category_cache_for_all
+          if tag.editable_by?(creator)
+            tag.update(category: category_id)
           end
         end
 
@@ -274,7 +276,7 @@ class Tag < ApplicationRecord
       when :float
         object.to_f
 
-      when :date
+      when :date, :datetime
         begin
           Time.zone.parse(object)
         rescue Exception
@@ -608,22 +610,52 @@ class Tag < ApplicationRecord
 
           when "-favgroup"
             favgroup_id = FavoriteGroup.name_to_id(g2)
+            favgroup = FavoriteGroup.find(favgroup_id)
+
+            if !favgroup.viewable_by?(CurrentUser.user)
+              raise User::PrivilegeError.new
+            end
+
             q[:favgroups_neg] ||= []
             q[:favgroups_neg] << favgroup_id
 
           when "favgroup"
             favgroup_id = FavoriteGroup.name_to_id(g2)
+            favgroup = FavoriteGroup.find(favgroup_id)
+
+            if !favgroup.viewable_by?(CurrentUser.user)
+              raise User::PrivilegeError.new
+            end
+
             q[:favgroups] ||= []
             q[:favgroups] << favgroup_id
 
           when "-fav"
+            favuser = User.find_by_name(g2)
+
+            if favuser.hide_favorites?
+              raise User::PrivilegeError.new
+            end
+
             q[:tags][:exclude] << "fav:#{User.name_to_id(g2)}"
 
           when "fav"
+            favuser = User.find_by_name(g2)
+
+            if favuser.hide_favorites?
+              raise User::PrivilegeError.new
+            end
+
             q[:tags][:related] << "fav:#{User.name_to_id(g2)}"
 
           when "ordfav"
             user_id = User.name_to_id(g2)
+            favuser = User.find(user_id)
+
+            if favuser.hide_favorites?
+              raise User::PrivilegeError.new
+            end
+
             q[:tags][:related] << "fav:#{user_id}"
             q[:ordfav] = user_id
 
@@ -780,6 +812,8 @@ class Tag < ApplicationRecord
         else
           sqs = SqsService.new(Danbooru.config.aws_sqs_reltagcalc_url)
           sqs.send_message("calculate #{name}")
+          self.related_tags_updated_at = Time.now
+          save
         end
 
         Cache.put("urt:#{key}", true, 600) # mutex to prevent redundant updates
@@ -816,6 +850,18 @@ class Tag < ApplicationRecord
       where("tags.post_count > 0")
     end
 
+    # ref: https://www.postgresql.org/docs/current/static/pgtrgm.html#idm46428634524336
+    def order_similarity(name)
+      # trunc(3 * sim) reduces the similarity score from a range of 0.0 -> 1.0 to just 0, 1, or 2.
+      # This groups tags first by approximate similarity, then by largest tags within groups of similar tags.
+      order("trunc(3 * similarity(name, #{sanitize(name)})) DESC", "post_count DESC", "name DESC")
+    end
+
+    # ref: https://www.postgresql.org/docs/current/static/pgtrgm.html#idm46428634524336
+    def fuzzy_name_matches(name)
+      where("tags.name % ?", name)
+    end
+
     def name_matches(name)
       where("tags.name LIKE ? ESCAPE E'\\\\'", normalize_name(name).to_escaped_for_sql_like)
     end
@@ -825,8 +871,12 @@ class Tag < ApplicationRecord
     end
 
     def search(params)
-      q = where("true")
+      q = super
       params = {} if params.blank?
+
+      if params[:fuzzy_name_matches].present?
+        q = q.fuzzy_name_matches(params[:fuzzy_name_matches])
+      end
 
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])
@@ -864,6 +914,8 @@ class Tag < ApplicationRecord
         q = q.reorder("id desc")
       when "count"
         q = q.reorder("post_count desc")
+      when "similarity"
+        q = q.order_similarity(params[:fuzzy_name_matches]) if params[:fuzzy_name_matches].present?
       else
         q = q.reorder("id desc")
       end
@@ -872,26 +924,37 @@ class Tag < ApplicationRecord
     end
 
     def names_matches_with_aliases(name)
-      query1 = Tag.select("tags.name, tags.post_count, tags.category, null AS antecedent_name")
-        .search(:name_matches => name, :order => "count").limit(10)
+      name = normalize_name(name)
+      wildcard_name = name + '*'
 
-      name = name.mb_chars.downcase.to_escaped_for_sql_like
+      query1 = Tag.select("tags.name, tags.post_count, tags.category, null AS antecedent_name")
+        .search(:name_matches => wildcard_name, :order => "count").limit(10)
+
       query2 = TagAlias.select("tags.name, tags.post_count, tags.category, tag_aliases.antecedent_name")
         .joins("INNER JOIN tags ON tags.name = tag_aliases.consequent_name")
-        .where("tag_aliases.antecedent_name LIKE ? ESCAPE E'\\\\'", name)
+        .where("tag_aliases.antecedent_name LIKE ? ESCAPE E'\\\\'", wildcard_name.to_escaped_for_sql_like)
         .active
-        .where("tags.name NOT LIKE ? ESCAPE E'\\\\'", name)
+        .where("tags.name NOT LIKE ? ESCAPE E'\\\\'", wildcard_name.to_escaped_for_sql_like)
         .where("tag_aliases.post_count > 0")
         .order("tag_aliases.post_count desc")
         .limit(20) # Get 20 records even though only 10 will be displayed in case some duplicates get filtered out.
 
       sql_query = "((#{query1.to_sql}) UNION ALL (#{query2.to_sql})) AS unioned_query"
-      Tag.select("DISTINCT ON (name, post_count) *").from(sql_query).order("post_count desc").limit(10)
+      tags = Tag.select("DISTINCT ON (name, post_count) *").from(sql_query).order("post_count desc").limit(10)
+
+      if tags.empty?
+        tags = Tag.fuzzy_name_matches(name).order_similarity(name).nonempty.limit(10)
+      end
+
+      tags
     end
   end
 
   def editable_by?(user)
-    user.is_builder? || (user.is_member? && post_count <= 50)
+    return true if user.is_admin?
+    return true if !is_locked? && user.is_builder? && post_count < 1_000
+    return true if !is_locked? && user.is_member? && post_count < 50
+    return false
   end
 
   include ApiMethods

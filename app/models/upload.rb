@@ -1,4 +1,3 @@
-require "danbooru_image_resizer/danbooru_image_resizer"
 require "tmpdir"
 
 class Upload < ApplicationRecord
@@ -158,6 +157,8 @@ class Upload < ApplicationRecord
       else
         update_attribute(:status, "error: " + post.errors.full_messages.join(", "))
       end
+
+      post
     end
 
     def process!(force = false)
@@ -165,7 +166,7 @@ class Upload < ApplicationRecord
       return if !force && status =~ /processing|completed|error/
 
       process_upload
-      create_post_from_upload
+      post = create_post_from_upload
 
     rescue Timeout::Error, Net::HTTP::Persistent::Error => x
       if @tries > 3
@@ -174,9 +175,11 @@ class Upload < ApplicationRecord
         @tries += 1
         retry
       end
+      nil
 
     rescue Exception => x
       update_attributes(:status => "error: #{x.class} - #{x.message}", :backtrace => x.backtrace.join("\n"))
+      nil
       
     ensure
       delete_temp_file
@@ -279,7 +282,7 @@ class Upload < ApplicationRecord
 
       output_path = resized_file_path_for(width)
       if is_image?
-        Danbooru.resize(source_path, output_path, width, height, quality)
+        DanbooruImageResizer.resize(source_path, output_path, width, height, quality)
       elsif is_ugoira?
         if Delayed::Worker.delay_jobs
           # by the time this runs we'll have moved source_path to md5_file_path
@@ -501,7 +504,7 @@ class Upload < ApplicationRecord
     end
 
     def search(params)
-      q = where("true")
+      q = super
       return q if params.blank?
 
       if params[:uploader_id].present?
