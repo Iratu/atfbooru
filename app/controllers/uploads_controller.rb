@@ -53,7 +53,15 @@ class UploadsController < ApplicationController
 
   def create
     @upload = Upload.create(params[:upload].merge(:server => Socket.gethostname))
-    @upload.process! if @upload.errors.empty?
+
+    if @upload.errors.empty?
+      post = @upload.process!
+
+      if post.present? && post.valid? && post.warnings.any?
+        flash[:notice] = post.warnings.full_messages.join(".\n \n")
+      end
+    end
+
     save_recent_tags
     respond_with(@upload)
   end

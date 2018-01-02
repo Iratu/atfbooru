@@ -16,6 +16,7 @@ class PostTest < ActiveSupport::TestCase
     super
 
     Timecop.travel(2.weeks.ago) do
+      User.any_instance.stubs(:validate_sock_puppets).returns(true)
       @user = FactoryGirl.create(:user)
     end
     CurrentUser.user = @user
@@ -352,6 +353,17 @@ class PostTest < ActiveSupport::TestCase
           c1.delete!("test")
           p1.reload
           assert(p1.has_children?, "Parent should have children")
+        end
+
+        should "clear the has_active_children flag when the 'move favorites' option is set" do
+          user = FactoryGirl.create(:gold_user)
+          p1 = FactoryGirl.create(:post)
+          c1 = FactoryGirl.create(:post, :parent_id => p1.id)
+          c1.add_favorite!(user)
+
+          assert_equal(true, p1.reload.has_active_children?)
+          c1.delete!("test", :move_favorites => true)
+          assert_equal(false, p1.reload.has_active_children?)
         end
       end
 
@@ -779,6 +791,22 @@ class PostTest < ActiveSupport::TestCase
             assert(Tag.where(name: "someone_(cosplay)", category: 4).exists?, "expected 'someone_(cosplay)' tag to be created as character")
             assert(Tag.where(name: "someone", category: 4).exists?, "expected 'someone' tag to be created")
           end
+
+          should "apply aliases when the character tag is added" do
+            FactoryGirl.create(:tag_alias, antecedent_name: "jim", consequent_name: "james")
+            @post.add_tag("jim_(cosplay)")
+            @post.save
+
+            assert(@post.has_tag?("james"), "expected 'jim' to be aliased to 'james'")
+          end
+
+          should "apply implications after the character tag is added" do
+            FactoryGirl.create(:tag_implication, antecedent_name: "jimmy", consequent_name: "jim")
+            @post.add_tag("jimmy_(cosplay)")
+            @post.save
+
+            assert(@post.has_tag?("jim"), "expected 'jimmy' to imply 'jim'")
+          end
         end
 
         context "for a parent" do
@@ -813,6 +841,25 @@ class PostTest < ActiveSupport::TestCase
 
             @post.update(:tag_string => "-parent:#{@parent.id}")
             assert_nil(@post.parent_id)
+          end
+        end
+
+        context "for a favgroup" do
+          setup do
+            @favgroup = FactoryGirl.create(:favorite_group, creator: @user)
+            @post = FactoryGirl.create(:post, :tag_string => "aaa favgroup:#{@favgroup.id}")
+          end
+
+          should "add the post to the favgroup" do
+            assert_equal(1, @favgroup.reload.post_count)
+            assert_equal(true, !!@favgroup.contains?(@post.id))
+          end
+
+          should "remove the post from the favgroup" do
+            @post.update(:tag_string => "-favgroup:#{@favgroup.id}")
+
+            assert_equal(0, @favgroup.reload.post_count)
+            assert_equal(false, !!@favgroup.contains?(@post.id))
           end
         end
 
@@ -1173,6 +1220,7 @@ class PostTest < ActiveSupport::TestCase
 
       context "with a .webm file extension" do
         setup do
+          FactoryGirl.create(:tag_implication, antecedent_name: "webm", consequent_name: "animated")
           @post.file_ext = "webm"
           @post.tag_string = ""
           @post.save
@@ -1180,6 +1228,10 @@ class PostTest < ActiveSupport::TestCase
 
         should "have the appropriate file type tag added automatically" do
           assert_match(/webm/, @post.tag_string)
+        end
+
+        should "apply implications after adding the file type tag" do
+          assert(@post.has_tag?("animated"), "expected 'webm' to imply 'animated'")
         end
       end
 
@@ -1547,6 +1599,47 @@ class PostTest < ActiveSupport::TestCase
 
           @post.source = "http://pictures.hentai-foundry.com/a/AnimeFlux/219123/Mobile-Suit-Equestria-rainbow-run.jpg"
           assert_equal("http://www.hentai-foundry.com/pictures/user/AnimeFlux/219123", @post.normalized_source)
+        end
+      end
+
+      context "when validating tags" do
+        should "warn when creating a new general tag" do
+          @post.add_tag("tag")
+          @post.save
+
+          assert_match(/Created 1 new tag: \[\[tag\]\]/, @post.warnings.full_messages.join)
+        end
+
+        should "warn when adding an artist tag without an artist entry" do
+          @post.add_tag("artist:bkub")
+          @post.save
+
+          assert_match(/Artist \[\[bkub\]\] requires an artist entry./, @post.warnings.full_messages.join)
+        end
+
+        should "warn when a tag removal failed due to implications or automatic tags" do
+          ti = FactoryGirl.create(:tag_implication, antecedent_name: "cat", consequent_name: "animal")
+          @post.reload
+          @post.update(old_tag_string: @post.tag_string, tag_string: "chen_(cosplay) chen cosplay cat animal")
+          @post.reload
+          @post.update(old_tag_string: @post.tag_string, tag_string: "chen_(cosplay) chen cosplay cat -cosplay")
+
+          assert_match(/\[\[animal\]\] and \[\[cosplay\]\] could not be removed./, @post.warnings.full_messages.join)
+        end
+
+        should "warn when a post from a known source is missing an artist tag" do
+          post = FactoryGirl.build(:post, source: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65985331")
+          post.save
+          assert_match(/Artist tag is required/, post.warnings.full_messages.join)
+        end
+
+        should "warn when missing a copyright tag" do
+          assert_match(/Copyright tag is required/, @post.warnings.full_messages.join)
+        end
+
+        should "warn when an upload doesn't have enough tags" do
+          post = FactoryGirl.create(:post, tag_string: "tagme")
+          assert_match(/Uploads must have at least \d+ general tags/, post.warnings.full_messages.join)
         end
       end
     end

@@ -57,13 +57,14 @@ class User < ApplicationRecord
     disable_cropped_thumbnails
     disable_mobile_gestures
     enable_safe_mode
+    disable_responsive_mode
   )
 
   include Danbooru::HasBitFlags
   has_bit_flags BOOLEAN_ATTRIBUTES, :field => "bit_prefs"
 
   attr_accessor :password, :old_password
-  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :disable_cropped_thumbnails, :disable_mobile_gestures, :enable_safe_mode, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
+  attr_accessible :dmail_filter_attributes, :enable_privacy_mode, :enable_post_navigation, :new_post_navigation_layout, :password, :old_password, :password_confirmation, :password_hash, :email, :last_logged_in_at, :last_forum_read_at, :has_mail, :receive_email_notifications, :comment_threshold, :always_resize_images, :favorite_tags, :blacklisted_tags, :name, :ip_addr, :time_zone, :default_image_size, :enable_sequential_post_navigation, :per_page, :hide_deleted_posts, :style_usernames, :enable_auto_complete, :custom_style, :show_deleted_children, :disable_categorized_saved_searches, :disable_tagged_filenames, :enable_recent_searches, :disable_cropped_thumbnails, :disable_mobile_gestures, :enable_safe_mode, :disable_responsive_mode, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
   attr_accessible :level, :as => :admin
 
   validates :name, user_name: true, on: :create
@@ -90,6 +91,7 @@ class User < ApplicationRecord
   has_many :feedback, :class_name => "UserFeedback", :dependent => :destroy
   has_many :posts, :foreign_key => "uploader_id"
   has_many :post_approvals, :dependent => :destroy
+  has_many :post_disapprovals, :dependent => :destroy
   has_many :post_votes
   has_many :bans, lambda {order("bans.id desc")}
   has_one :recent_ban, lambda {order("bans.id desc")}, :class_name => "Ban"
@@ -315,7 +317,7 @@ class User < ApplicationRecord
 
     module ClassMethods
       def system
-        Danbooru.config.system_user
+        User.find_by!(name: Danbooru.config.system_user)
       end
 
       def level_hash
@@ -365,7 +367,7 @@ class User < ApplicationRecord
     def promote_to_admin_if_first_user
       return if Rails.env.test?
 
-      if User.count == 0
+      if User.admins.count == 0
         self.level = Levels::ADMIN
         self.can_approve_posts = true
         self.can_upload_free = true
@@ -812,7 +814,7 @@ end
     end
 
     def search(params)
-      q = where("true")
+      q = super
       return q if params.blank?
 
       if params[:name].present?
@@ -833,10 +835,6 @@ end
 
       if params[:level].present?
         q = q.where("level = ?", params[:level].to_i)
-      end
-
-      if params[:id].present?
-        q = q.where("id in (?)", params[:id].split(",").map(&:to_i))
       end
 
       bitprefs_length = BOOLEAN_ATTRIBUTES.length

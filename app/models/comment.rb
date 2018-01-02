@@ -92,14 +92,10 @@ class Comment < ApplicationRecord
     end
 
     def search(params)
-      q = where("true")
+      q = super
 
       if params[:body_matches].present?
         q = q.body_matches(params[:body_matches])
-      end
-
-      if params[:id].present?
-        q = q.where("id in (?)", params[:id].split(",").map(&:to_i))
       end
 
       if params[:post_id].present?
@@ -182,8 +178,8 @@ class Comment < ApplicationRecord
   end
 
   def initialize_updater
-    self.updater_id ||= CurrentUser.user.id
-    self.updater_ip_addr ||= CurrentUser.ip_addr
+    self.updater_id = CurrentUser.user.id
+    self.updater_ip_addr = CurrentUser.ip_addr
   end
 
   def creator_name
@@ -260,5 +256,3 @@ class Comment < ApplicationRecord
     DText.quote(body, creator_name)
   end
 end
-
-Comment.connection.extend(PostgresExtensions)

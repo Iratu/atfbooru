@@ -120,15 +120,15 @@ module Sources
 
       def normalized_url
         @normalized_url ||= begin
-          if url =~ %r!\Ahttp://lohas\.nicoseiga\.jp/o/[a-f0-9]+/\d+/(\d+)!
+          if url =~ %r!\Ahttps?://lohas\.nicoseiga\.jp/o/[a-f0-9]+/\d+/(\d+)!
             "http://seiga.nicovideo.jp/seiga/im#{$1}"
-          elsif url =~ %r{\Ahttp://lohas\.nicoseiga\.jp/priv/(\d+)\?e=\d+&h=[a-f0-9]+}i
+          elsif url =~ %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/(\d+)\?e=\d+&h=[a-f0-9]+}i
             "http://seiga.nicovideo.jp/seiga/im#{$1}"
-          elsif url =~ %r{\Ahttp://lohas\.nicoseiga\.jp/priv/[a-f0-9]+/\d+/(\d+)}i
+          elsif url =~ %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/[a-f0-9]+/\d+/(\d+)}i
             "http://seiga.nicovideo.jp/seiga/im#{$1}"
-          elsif url =~ %r{\Ahttp://lohas\.nicoseiga\.jp/priv/(\d+)}i
+          elsif url =~ %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/(\d+)}i
             "http://seiga.nicovideo.jp/seiga/im#{$1}"
-          elsif url =~ %r{\Ahttp://lohas\.nicoseiga\.jp//?thumb/(\d+)}i
+          elsif url =~ %r{\Ahttps?://lohas\.nicoseiga\.jp//?thumb/(\d+)i?}i
             "http://seiga.nicovideo.jp/seiga/im#{$1}"
           elsif url =~ %r{/seiga/im\d+}
             url
@@ -141,6 +141,7 @@ module Sources
       def agent
         @agent ||= begin
           mech = Mechanize.new
+          mech.redirect_ok = false
           mech.keep_alive = false
 
           session = Cache.get("nico-seiga-session")
@@ -150,7 +151,7 @@ module Sources
             cookie.path = "/"
             mech.cookie_jar.add(cookie)
           else
-            mech.get("https://secure.nicovideo.jp/secure/login_form") do |page|
+            mech.get("https://account.nicovideo.jp/login") do |page|
               page.form_with(:id => "login_form") do |form|
                 form["mail_tel"] = Danbooru.config.nico_seiga_login
                 form["password"] = Danbooru.config.nico_seiga_password
@@ -170,6 +171,7 @@ module Sources
           cookie.path = "/"
           mech.cookie_jar.add(cookie)
 
+          mech.redirect_ok = true
           mech
         end
       end
