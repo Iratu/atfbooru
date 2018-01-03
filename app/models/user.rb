@@ -76,7 +76,7 @@ class User < ApplicationRecord
   validates_presence_of :email, :if => lambda {|rec| rec.new_record? && Danbooru.config.enable_email_verification?}
   validates_presence_of :comment_threshold
   validate :validate_ip_addr_is_not_banned, :on => :create
-  validate :validate_sock_puppets, :on => :create
+  validate :validate_sock_puppets, :on => :create, :if => lambda { Danbooru.config.enable_sock_puppet_validation? }
   before_validation :normalize_blacklisted_tags
   before_validation :set_per_page
   before_validation :normalize_email
@@ -103,7 +103,7 @@ class User < ApplicationRecord
   has_many :note_versions, :foreign_key => "updater_id"
   has_many :dmails, lambda {order("dmails.id desc")}, :foreign_key => "owner_id"
   has_many :saved_searches
-  has_many :forum_posts, lambda {order("forum_posts.created_at")}, :foreign_key => "creator_id"
+  has_many :forum_posts, lambda {order("forum_posts.created_at, forum_posts.id")}, :foreign_key => "creator_id"
   has_many :user_name_change_requests, lambda {visible.order("user_name_change_requests.created_at desc")}
   belongs_to :inviter, :class_name => "User"
   after_update :create_mod_action

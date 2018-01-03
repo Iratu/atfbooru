@@ -16,7 +16,6 @@ class PostTest < ActiveSupport::TestCase
     super
 
     Timecop.travel(2.weeks.ago) do
-      User.any_instance.stubs(:validate_sock_puppets).returns(true)
       @user = FactoryGirl.create(:user)
     end
     CurrentUser.user = @user
@@ -2130,7 +2129,7 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([flagged], "status:flagged")
       assert_tag_match([deleted], "status:deleted")
       assert_tag_match([banned],  "status:banned")
-      assert_tag_match([flagged], "status:active")
+      assert_tag_match([], "status:active")
       assert_tag_match(all, "status:any")
       assert_tag_match(all, "status:all")
 
