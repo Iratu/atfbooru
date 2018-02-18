@@ -1,9 +1,6 @@
 require 'test_helper'
-require 'helpers/iqdb_test_helper'
 
 class IqdbQueriesControllerTest < ActionController::TestCase
-  include IqdbTestHelper
-
   context "The iqdb controller" do
     setup do
       @user = FactoryGirl.create(:user)
@@ -31,7 +28,7 @@ class IqdbQueriesControllerTest < ActionController::TestCase
 
       should "render for a json response" do
         mock_iqdb_matches!(@posts[0].source, @posts)
-        get :index, { url: @posts[0].source, format: "json" }, { user_id: @user.id }
+        get :show, { url: @posts[0].source, format: "json" }, { user_id: @user.id }
 
         assert_response :success
       end

@@ -872,7 +872,6 @@ class Tag < ApplicationRecord
 
     def search(params)
       q = super
-      params = {} if params.blank?
 
       if params[:fuzzy_name_matches].present?
         q = q.fuzzy_name_matches(params[:fuzzy_name_matches])
@@ -909,15 +908,15 @@ class Tag < ApplicationRecord
       params[:order] ||= params.delete(:sort)
       case params[:order]
       when "name"
-        q = q.reorder("name")
+        q = q.order("name")
       when "date"
-        q = q.reorder("id desc")
+        q = q.order("id desc")
       when "count"
-        q = q.reorder("post_count desc")
+        q = q.order("post_count desc")
       when "similarity"
         q = q.order_similarity(params[:fuzzy_name_matches]) if params[:fuzzy_name_matches].present?
       else
-        q = q.reorder("id desc")
+        q = q.apply_default_order(params)
       end
 
       q
@@ -948,6 +947,19 @@ class Tag < ApplicationRecord
 
       tags
     end
+  end
+
+  def self.convert_cosplay_tags(tags)
+    cosplay_tags,other_tags = tags.partition {|tag| tag.match(/\A(.+)_\(cosplay\)\Z/) }
+    cosplay_tags.grep(/\A(.+)_\(cosplay\)\Z/) { "#{TagAlias.to_aliased([$1]).first}_(cosplay)" } + other_tags
+  end
+
+  def self.invalid_cosplay_tags(tags)
+    tags.grep(/\A(.+)_\(cosplay\)\Z/) {|match| [match,TagAlias.to_aliased([$1]).first] }.
+      select do |name|
+        tag = Tag.find_by_name(name[1])
+        !tag.nil? && tag.category != Tag.categories.character
+      end.map {|tag| tag[0]}
   end
 
   def editable_by?(user)

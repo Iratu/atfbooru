@@ -439,10 +439,10 @@ class User < ApplicationRecord
 
     def create_mod_action
       if level_changed?
-        ModAction.log(%{"#{name}":/users/#{id} level changed #{level_string_was} -> #{level_string}})
+        ModAction.log(%{"#{name}":/users/#{id} level changed #{level_string_was} -> #{level_string}},:user_level)
       end
     end
-    
+
     def set_per_page
       if per_page.nil? || !is_gold?
         self.per_page = Danbooru.config.posts_per_page
@@ -815,7 +815,6 @@ end
 
     def search(params)
       q = super
-      return q if params.blank?
 
       if params[:name].present?
         q = q.name_matches(params[:name].mb_chars.downcase.strip.tr(" ", "_"))
@@ -873,18 +872,14 @@ end
       case params[:order]
       when "name"
         q = q.order("name")
-
       when "post_upload_count"
         q = q.order("post_upload_count desc")
-
       when "note_count"
         q = q.order("note_update_count desc")
-
       when "post_update_count"
         q = q.order("post_update_count desc")
-
       else
-        q = q.order("created_at desc")
+        q = q.apply_default_order(params)
       end
 
       q

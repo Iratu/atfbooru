@@ -145,29 +145,16 @@ class Post < ApplicationRecord
     end
 
     def file_url
-       if Danbooru.config.use_s3_proxy?(self)
-         "/cached/data/#{seo_tag_string}#{file_path_prefix}#{md5}.#{file_ext}"
-       else
-         "/data/#{seo_tag_string}#{file_path_prefix}#{md5}.#{file_ext}"
-       end
+      Danbooru.config.build_file_url(self)
     end
 
     # this is for the 640x320 version
     def cropped_file_url
-      if Danbooru.config.use_s3_proxy?(self)
-        "/cached/data/cropped/large/#{md5}.jpg"
-      else
-        "/data/cropped/large/#{md5}.jpg"
-      end
     end
 
     def large_file_url
       if has_large?
-        if Danbooru.config.use_s3_proxy?(self)
-          "/cached/data/sample/#{seo_tag_string}#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
-        else
-          "/data/sample/#{seo_tag_string}#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
-        end
+        Danbooru.config.build_large_file_url(self)
       else
         file_url
       end
@@ -190,11 +177,7 @@ class Post < ApplicationRecord
         return "/images/download-preview.png"
       end
 
-      # if has_cropped? && !CurrentUser.disable_cropped_thumbnails?
-      #   "/cached/data/cropped/small/#{md5}.jpg"
-      # else
-        "/data/preview/#{file_path_prefix}#{md5}.jpg"
-      # end
+      "/data/preview/#{file_path_prefix}#{md5}.jpg"
     end
 
     def complete_preview_file_url
@@ -204,9 +187,17 @@ class Post < ApplicationRecord
     def open_graph_image_url
       if is_image?
         if has_large?
-          "http://#{Danbooru.config.hostname}#{large_file_url}"
+          if Danbooru.config.build_large_file_url(self) =~ /http/
+            large_file_url
+          else
+            "http://#{Danbooru.config.hostname}#{large_file_url}"
+          end
         else
-          "http://#{Danbooru.config.hostname}#{file_url}"
+          if Danbooru.config.build_file_url(self) =~ /http/
+            file_url
+          else
+            "http://#{Danbooru.config.hostname}#{file_url}"
+          end
         end
       else
         complete_preview_file_url
@@ -714,6 +705,8 @@ class Post < ApplicationRecord
       normalized_tags = TagAlias.to_aliased(normalized_tags)
       normalized_tags = %w(tagme) if normalized_tags.empty?
       normalized_tags = add_automatic_tags(normalized_tags)
+      normalized_tags = remove_invalid_tags(normalized_tags)
+      normalized_tags = Tag.convert_cosplay_tags(normalized_tags)
       normalized_tags = normalized_tags + Tag.create_for_list(TagImplication.automatic_tags_for(normalized_tags))
       normalized_tags = TagImplication.with_descendants(normalized_tags)
       normalized_tags = normalized_tags.compact.uniq.sort
@@ -733,6 +726,14 @@ class Post < ApplicationRecord
 	end
     
     
+    def remove_invalid_tags(tags)
+      invalid_tags = Tag.invalid_cosplay_tags(tags)
+      if invalid_tags.present?
+        self.warnings[:base] << "The root tag must be a character tag: #{invalid_tags.map {|tag| "[b]#{tag}[/b]" }.join(", ")}"
+      end
+      tags - invalid_tags
+    end
+
     def remove_negated_tags(tags)
       @negated_tags, tags = tags.partition {|x| x =~ /\A-/i}
       @negated_tags = @negated_tags.map {|x| x[1..-1]}
@@ -1239,6 +1240,8 @@ class Post < ApplicationRecord
       end
 
       count ? count.to_i : nil
+    rescue PG::ConnectionBad
+      return nil
     end
 
     def fast_count_search_batched(tags, options)
@@ -1256,6 +1259,9 @@ class Post < ApplicationRecord
         end
       end
       sum
+
+    rescue PG::ConnectionBad
+      return nil
     end
 
     def fix_post_counts(post)
@@ -1348,7 +1354,7 @@ class Post < ApplicationRecord
       Post.find(parent_id_was).update_has_children_flag if parent_id_was.present?
     end
 
-    def give_favorites_to_parent
+    def give_favorites_to_parent(options = {})
       return if parent.nil?
 
       transaction do
@@ -1356,6 +1362,10 @@ class Post < ApplicationRecord
           remove_favorite!(fav.user)
           parent.add_favorite!(fav.user)
         end
+      end
+
+      unless options[:without_mod_action]
+        ModAction.log("moved favorites from post ##{id} to post ##{parent.id}",:post_move_favorites)
       end
     end
 
@@ -1390,7 +1400,7 @@ class Post < ApplicationRecord
 
       transaction do
         Post.without_timeout do
-          ModAction.log("permanently deleted post ##{id}")
+          ModAction.log("permanently deleted post ##{id}",:post_permanent_delete)
 
           give_favorites_to_parent
           update_children_on_destroy
@@ -1406,12 +1416,12 @@ class Post < ApplicationRecord
 
     def ban!
       update_column(:is_banned, true)
-      ModAction.log("banned post ##{id}")
+      ModAction.log("banned post ##{id}",:post_ban)
     end
 
     def unban!
       update_column(:is_banned, false)
-      ModAction.log("unbanned post ##{id}")
+      ModAction.log("unbanned post ##{id}",:post_unban)
     end
 
     def delete!(reason, options = {})
@@ -1431,10 +1441,10 @@ class Post < ApplicationRecord
         }, without_protection: true)
 
         # XXX This must happen *after* the `is_deleted` flag is set to true (issue #3419).
-        give_favorites_to_parent if options[:move_favorites]
+        give_favorites_to_parent(options) if options[:move_favorites]
 
         unless options[:without_mod_action]
-          ModAction.log("deleted post ##{id}, reason: #{reason}")
+          ModAction.log("deleted post ##{id}, reason: #{reason}",:post_delete)
         end
       end
     end
@@ -1457,7 +1467,7 @@ class Post < ApplicationRecord
       self.approver_id = CurrentUser.id
       flags.each {|x| x.resolve!}
       save
-      ModAction.log("undeleted post ##{id}")
+      ModAction.log("undeleted post ##{id}",:post_undelete)
     end
 
     def replace!(params)
@@ -1687,7 +1697,11 @@ class Post < ApplicationRecord
       end
 
       if read_only
-        PostQueryBuilder.new(query).build(PostReadOnly.where("true"))
+        begin
+          PostQueryBuilder.new(query).build(PostReadOnly.where("true"))
+        rescue PG::ConnectionBad
+          PostQueryBuilder.new(query).build
+        end
       else
         PostQueryBuilder.new(query).build
       end

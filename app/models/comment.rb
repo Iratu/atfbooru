@@ -11,12 +11,12 @@ class Comment < ApplicationRecord
   before_validation :initialize_creator, :on => :create
   before_validation :initialize_updater
   after_create :update_last_commented_at_on_create
-  after_update(:if => lambda {|rec| CurrentUser.id != rec.creator_id}) do |rec|
-    ModAction.log("comment ##{rec.id} updated by #{CurrentUser.name}")
+  after_update(:if => lambda {|rec| (!rec.is_deleted? || !rec.is_deleted_changed?) && CurrentUser.id != rec.creator_id}) do |rec|
+    ModAction.log("comment ##{rec.id} updated by #{CurrentUser.name}",:comment_update)
   end
   after_save :update_last_commented_at_on_destroy, :if => lambda {|rec| rec.is_deleted? && rec.is_deleted_changed?}
   after_save(:if => lambda {|rec| rec.is_deleted? && rec.is_deleted_changed? && CurrentUser.id != rec.creator_id}) do |rec|
-    ModAction.log("comment ##{rec.id} deleted by #{CurrentUser.name}")
+    ModAction.log("comment ##{rec.id} deleted by #{CurrentUser.name}",:comment_delete)
   end
   attr_accessible :body, :post_id, :do_not_bump_post, :is_deleted, :as => [:member, :gold, :platinum, :builder, :moderator, :admin]
   attr_accessible :is_sticky, :as => [:moderator, :admin]
@@ -131,7 +131,7 @@ class Comment < ApplicationRecord
       when "updated_at", "updated_at_desc"
         q = q.order("comments.updated_at DESC")
       else
-        q = q.order("comments.id DESC")
+        q = q.apply_default_order(params)
       end
 
       q

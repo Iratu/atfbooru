@@ -1,13 +1,6 @@
 require 'test_helper'
-require 'helpers/pool_archive_test_helper'
-require 'helpers/saved_search_test_helper'
-require 'helpers/iqdb_test_helper'
 
 class PostTest < ActiveSupport::TestCase
-  include PoolArchiveTestHelper
-  include SavedSearchTestHelper
-  include IqdbTestHelper
-
   def assert_tag_match(posts, query)
     assert_equal(posts.map(&:id), Post.tag_match(query).pluck(:id))
   end
@@ -484,6 +477,7 @@ class PostTest < ActiveSupport::TestCase
         should "create a mod action" do
           @post.undelete!
           assert_equal("undeleted post ##{@post.id}", ModAction.last.description)
+          assert_equal("post_undelete", ModAction.last.category)
         end
       end
 
@@ -496,6 +490,7 @@ class PostTest < ActiveSupport::TestCase
         should "create a mod action" do
           @post.approve!
           assert_equal("undeleted post ##{@post.id}", ModAction.last.description)
+          assert_equal("post_undelete", ModAction.last.category)
         end
       end
 
@@ -792,7 +787,10 @@ class PostTest < ActiveSupport::TestCase
           end
 
           should "apply aliases when the character tag is added" do
+            FactoryGirl.create(:tag, name: "jim", category: Tag.categories.general)
+            FactoryGirl.create(:tag, name: "james", category: Tag.categories.character)
             FactoryGirl.create(:tag_alias, antecedent_name: "jim", consequent_name: "james")
+
             @post.add_tag("jim_(cosplay)")
             @post.save
 
@@ -1619,7 +1617,8 @@ class PostTest < ActiveSupport::TestCase
         should "warn when a tag removal failed due to implications or automatic tags" do
           ti = FactoryGirl.create(:tag_implication, antecedent_name: "cat", consequent_name: "animal")
           @post.reload
-          @post.update(old_tag_string: @post.tag_string, tag_string: "chen_(cosplay) chen cosplay cat animal")
+          @post.update(old_tag_string: @post.tag_string, tag_string: "chen_(cosplay) char:chen cosplay cat animal")
+          @post.warnings.clear
           @post.reload
           @post.update(old_tag_string: @post.tag_string, tag_string: "chen_(cosplay) chen cosplay cat -cosplay")
 
@@ -2137,7 +2136,7 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(all - [flagged], "-status:flagged")
       assert_tag_match(all - [deleted], "-status:deleted")
       assert_tag_match(all - [banned],  "-status:banned")
-      assert_tag_match(all - [flagged], "-status:active")
+      assert_tag_match(all, "-status:active")
     end
 
     should "respect the 'Deleted post filter' option when using the status:banned metatag" do

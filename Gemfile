@@ -21,7 +21,7 @@ gem "sanitize"
 gem 'rmagick'
 gem 'net-sftp'
 gem 'term-ansicolor', :require => "term/ansicolor"
-gem 'diff-lcs', :require => "diff/lcs/array", :git => "https://github.com/halostatue/diff-lcs.git"
+gem 'diff-lcs', :require => "diff/lcs/array"
 gem 'bcrypt-ruby', :require => "bcrypt"
 gem 'statistics2'
 gem 'capistrano', '~> 3.4.0'
@@ -60,7 +60,6 @@ end
 group :production do
   gem 'unicorn-worker-killer'
   gem 'newrelic_rpm'
-  gem 'gctools', :platforms => :ruby
   gem 'capistrano-deploytags', '~> 1.0.0', require: false
 end
 

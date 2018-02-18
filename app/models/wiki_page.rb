@@ -59,9 +59,12 @@ class WikiPage < ApplicationRecord
       end
     end
 
+    def default_order
+      order(updated_at: :desc)
+    end
+
     def search(params = {})
       q = super
-      params = {} if params.blank?
 
       if params[:title].present?
         q = q.where("title LIKE ? ESCAPE E'\\\\'", params[:title].mb_chars.downcase.tr(" ", "_").to_escaped_for_sql_like)
@@ -95,14 +98,12 @@ class WikiPage < ApplicationRecord
 
       params[:order] ||= params.delete(:sort)
       case params[:order]
-      when "time"
-        q = q.order("updated_at desc")
       when "title"
         q = q.order("title")
       when "post_count"
         q = q.includes(:tag).order("tags.post_count desc nulls last").references(:tags)
       else
-        q = q.order("updated_at desc")
+        q = q.apply_default_order(params)
       end
 
       q
@@ -190,6 +191,10 @@ class WikiPage < ApplicationRecord
     title.tr("_", " ")
   end
 
+  def wiki_page_changed?
+    title_changed? || body_changed? || is_locked_changed? || is_deleted_changed? || other_names_changed?
+  end
+
   def merge_version
     prev = versions.last
     prev.update_attributes(
@@ -219,7 +224,7 @@ class WikiPage < ApplicationRecord
   end
 
   def create_version
-    if title_changed? || body_changed? || is_locked_changed? || is_deleted_changed? || other_names_changed?
+    if wiki_page_changed?
       if merge_version?
         merge_version
       else
@@ -235,9 +240,11 @@ class WikiPage < ApplicationRecord
   def initialize_creator
     self.creator_id = CurrentUser.user.id
   end
-  
+
   def initialize_updater
-    self.updater_id = CurrentUser.user.id
+    if wiki_page_changed?
+      self.updater_id = CurrentUser.user.id
+    end
   end
 
   def post_set

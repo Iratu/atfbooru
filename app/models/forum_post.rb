@@ -20,10 +20,10 @@ class ForumPost < ApplicationRecord
   before_destroy :validate_topic_is_unlocked
   after_save :delete_topic_if_original_post
   after_update(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
-    ModAction.log("#{CurrentUser.name} updated forum ##{rec.id}")
+    ModAction.log("#{CurrentUser.name} updated forum ##{rec.id}",:forum_post_update)
   end
   after_destroy(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
-    ModAction.log("#{CurrentUser.name} deleted forum ##{rec.id}")
+    ModAction.log("#{CurrentUser.name} deleted forum ##{rec.id}",:forum_post_delete)
   end
   mentionable(
     :message_field => :body, 
@@ -67,7 +67,6 @@ class ForumPost < ApplicationRecord
     def search(params)
       q = super
       q = q.permitted
-      return q if params.blank?
 
       if params[:creator_id].present?
         q = q.where("forum_posts.creator_id = ?", params[:creator_id].to_i)
@@ -93,7 +92,7 @@ class ForumPost < ApplicationRecord
         q = q.joins(:topic).where("forum_topics.category_id = ?", params[:topic_category_id].to_i)
       end
 
-      q
+      q.apply_default_order(params)
     end
   end
 

@@ -217,6 +217,14 @@ module Danbooru
       "albert"
     end
 
+    def build_file_url(post)
+      "/data/#{post.file_path_prefix}/#{post.md5}.#{post.file_ext}"
+    end
+
+    def build_large_file_url(post)
+      "/data/sample/#{post.file_path_prefix}#{Danbooru.config.large_image_prefix}#{post.md5}.#{post.large_file_ext}"
+    end
+
 #TAG CONFIGURATION
 
     #Full tag configuration info for all tags
@@ -456,7 +464,7 @@ module Danbooru
 
     # Should return true if the given tag should be suggested for removal in the post replacement dialog box.
     def remove_tag_after_replacement?(tag)
-      tag =~ /replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts/i
+      tag =~ /replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts|corrupted_image/i
     end
 
     def shared_dir_path

@@ -49,9 +49,12 @@ class Pool < ApplicationRecord
       where("lower(pools.name) like ? escape E'\\\\'", name.to_escaped_for_sql_like)
     end
 
+    def default_order
+      order(updated_at: :desc)
+    end
+
     def search(params)
       q = super
-      params = {} if params.blank?
 
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])
@@ -75,18 +78,6 @@ class Pool < ApplicationRecord
         q = q.where("pools.is_active = false")
       end
 
-      params[:order] ||= params.delete(:sort)
-      case params[:order]
-      when "name"
-        q = q.order("pools.name")
-      when "created_at"
-        q = q.order("pools.created_at desc")
-      when "post_count"
-        q = q.order("pools.post_count desc")
-      else
-        q = q.order("pools.updated_at desc")
-      end
-
       if params[:category] == "series"
         q = q.series
       elsif params[:category] == "collection"
@@ -97,6 +88,18 @@ class Pool < ApplicationRecord
         q = q.deleted
       else
         q = q.undeleted
+      end
+
+      params[:order] ||= params.delete(:sort)
+      case params[:order]
+      when "name"
+        q = q.order("pools.name")
+      when "created_at"
+        q = q.order("pools.created_at desc")
+      when "post_count"
+        q = q.order("pools.post_count desc").default_order
+      else
+        q = q.apply_default_order(params)
       end
 
       q
@@ -218,15 +221,11 @@ class Pool < ApplicationRecord
   end
 
   def create_mod_action_for_delete
-    ModAction.log("deleted pool ##{id} (name: #{name})")
+    ModAction.log("deleted pool ##{id} (name: #{name})",:pool_delete)
   end
 
   def create_mod_action_for_undelete
-    ModAction.log("undeleted pool ##{id} (name: #{name})")
-  end
-
-  def create_mod_action_for_destroy
-    ModAction.log("permanently deleted pool ##{id} name=#{name} post_ids=#{post_ids}")
+    ModAction.log("undeleted pool ##{id} (name: #{name})",:pool_undelete)
   end
 
   def add!(post)

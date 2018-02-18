@@ -5,8 +5,7 @@ class NoteVersion < ApplicationRecord
   attr_accessible :note_id, :x, :y, :width, :height, :body, :updater_id, :updater_ip_addr, :is_active, :post_id, :html_id, :version
 
   def self.search(params)
-    q = where("true")
-    params = {} if params.blank?
+    q = super
 
     if params[:updater_id]
       q = q.where(updater_id: params[:updater_id].split(",").map(&:to_i))
@@ -20,7 +19,7 @@ class NoteVersion < ApplicationRecord
       q = q.where(note_id: params[:note_id].split(",").map(&:to_i))
     end
 
-    q
+    q.apply_default_order(params)
   end
 
   def initialize_updater
