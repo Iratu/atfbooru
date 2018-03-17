@@ -10,7 +10,7 @@
       <% end %>
 
       <% if post_set.censored_posts.present? %>
-        <%= post_set.censored_posts.size %> post(s) on this page require a <%= link_to "Gold account", new_user_upgrade_path %> to view (<%= link_to "learn more", wiki_pages_path(title: "help:censored_tags") %>).<br>
+        <%= post_set.censored_posts.size %> post(s) on this page require you to register an account and wait 1 week.<br>
       <% end %>
 
       <% if post_set.safe_posts.present? %>
