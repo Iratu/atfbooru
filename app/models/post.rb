@@ -8,6 +8,9 @@ class Post < ApplicationRecord
   class SearchError < Exception ; end
   class DeletionError < Exception ; end
 
+  # Tags to copy when copying notes.
+  NOTE_COPY_TAGS = %w[translated partially_translated check_translation translation_request reverse_translation]
+
   before_validation :initialize_uploader, :on => :create
   before_validation :merge_old_changes
   before_validation :normalize_tags
@@ -29,7 +32,6 @@ class Post < ApplicationRecord
   before_save :set_tag_counts
   before_save :set_pool_category_pseudo_tags
   before_create :autoban
-  after_save :queue_backup, if: :md5_changed?
   after_save :create_version
   after_save :update_parent_on_save
   after_save :apply_post_metatags
@@ -39,10 +41,10 @@ class Post < ApplicationRecord
   after_commit :update_iqdb_async, :on => :create
   after_commit :notify_pubsub
 
-  belongs_to :updater, :class_name => "User"
-  belongs_to :approver, :class_name => "User"
+  belongs_to :updater, :class_name => "User", optional: true # this is handled in versions
+  belongs_to :approver, class_name: "User", optional: true
   belongs_to :uploader, :class_name => "User", :counter_cache => "post_upload_count"
-  belongs_to :parent, :class_name => "Post"
+  belongs_to :parent, class_name: "Post", optional: true
   has_one :upload, :dependent => :destroy
   has_one :artist_commentary, :dependent => :destroy
   has_one :pixiv_ugoira_frame_data, :class_name => "PixivUgoiraFrameData", :dependent => :destroy
@@ -58,14 +60,6 @@ class Post < ApplicationRecord
   has_many :replacements, class_name: "PostReplacement", :dependent => :destroy
 
   serialize :keeper_data, JSON
-
-  if PostArchive.enabled?
-    has_many :versions, lambda {order("post_versions.updated_at ASC")}, :class_name => "PostArchive", :dependent => :destroy
-  end
-
-  attr_accessible :source, :rating, :tag_string, :old_tag_string, :old_parent_id, :old_source, :old_rating, :parent_id, :has_embedded_notes, :as => [:member, :builder, :gold, :platinum, :moderator, :admin, :default]
-  attr_accessible :is_rating_locked, :is_note_locked, :has_cropped, :keeper_data, :as => [:builder, :moderator, :admin]
-  attr_accessible :is_status_locked, :keeper_data, :as => [:admin]
   attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
 
   concerning :KeeperMethods do
@@ -80,7 +74,7 @@ class Post < ApplicationRecord
         uploader_id
       end
     end
-
+  
     def keeper
       User.find(keeper_id)
     end
@@ -90,191 +84,105 @@ class Post < ApplicationRecord
     end
   end
 
+  if PostArchive.enabled?
+    has_many :versions, lambda {order("post_versions.updated_at ASC")}, :class_name => "PostArchive", :dependent => :destroy
+  end
+
   module FileMethods
     extend ActiveSupport::Concern
 
     module ClassMethods
-      def delete_files(post_id, file_path, large_file_path, preview_file_path, force: false)
-        unless force
-          # XXX should pass in the md5 instead of parsing it.
-          preview_file_path =~ %r!/data/preview/(?:test\.)?([a-z0-9]{32})\.jpg\z!
-          md5 = $1
-
-          if Post.where(md5: md5).exists?
-            raise DeletionError.new("Files still in use; skipping deletion.")
-          end
+      def delete_files(post_id, md5, file_ext, force: false)
+        if Post.where(md5: md5).exists? && !force
+          raise DeletionError.new("Files still in use; skipping deletion.")
         end
 
-        backup_service = Danbooru.config.backup_service
-        backup_service.delete(file_path, type: :original)
-        backup_service.delete(large_file_path, type: :large)
-        backup_service.delete(preview_file_path, type: :preview)
+        Danbooru.config.storage_manager.delete_file(post_id, md5, file_ext, :original)
+        Danbooru.config.storage_manager.delete_file(post_id, md5, file_ext, :large)
+        Danbooru.config.storage_manager.delete_file(post_id, md5, file_ext, :preview)
 
-        # the large file and the preview don't necessarily exist. if so errors will be ignored.
-        FileUtils.rm_f(file_path)
-        FileUtils.rm_f(large_file_path)
-        FileUtils.rm_f(preview_file_path)
-
-        RemoteFileManager.new(file_path).delete
-        RemoteFileManager.new(large_file_path).delete
-        RemoteFileManager.new(preview_file_path).delete
+        Danbooru.config.backup_storage_manager.delete_file(post_id, md5, file_ext, :original)
+        Danbooru.config.backup_storage_manager.delete_file(post_id, md5, file_ext, :large)
+        Danbooru.config.backup_storage_manager.delete_file(post_id, md5, file_ext, :preview)
 
         if Danbooru.config.cloudflare_key
-          md5, ext = File.basename(file_path).split(".")
-          CloudflareService.new.delete(md5, ext)
+          CloudflareService.new.delete(md5, file_ext)
         end
       end
+    end
+
+    def queue_delete_files(grace_period)
+      Post.delay(queue: "default", run_at: Time.now + grace_period).delete_files(id, md5, file_ext)
     end
 
     def delete_files
-      Post.delete_files(id, file_path, large_file_path, preview_file_path, force: true)
+      Post.delete_files(id, md5, file_ext, force: true)
     end
 
-    def distribute_files
-      if Danbooru.config.build_file_url(self) =~ /^http/
-        # this post is archived
-        RemoteFileManager.new(file_path).distribute_to_archive(Danbooru.config.build_file_url(self))
-        RemoteFileManager.new(preview_file_path).distribute if has_preview?
-        RemoteFileManager.new(large_file_path).distribute_to_archive(Danbooru.config.build_large_file_url(self)) if has_large?
-      else
-        RemoteFileManager.new(file_path).distribute
-        RemoteFileManager.new(preview_file_path).distribute if has_preview?
-        RemoteFileManager.new(large_file_path).distribute if has_large?
-      end
+    def distribute_files(file, sample_file, preview_file)
+      storage_manager.store_file(file, self, :original)
+      storage_manager.store_file(sample_file, self, :large) if sample_file.present?
+      storage_manager.store_file(preview_file, self, :preview) if preview_file.present?
+
+      backup_storage_manager.store_file(file, self, :original)
+      backup_storage_manager.store_file(sample_file, self, :large) if sample_file.present?
+      backup_storage_manager.store_file(preview_file, self, :preview) if preview_file.present?
     end
 
-    def file_path_prefix
-      Rails.env == "test" ? "test." : ""
+    def backup_storage_manager
+      Danbooru.config.backup_storage_manager
     end
 
-    def file_path
-      "#{Rails.root}/public/data/#{file_path_prefix}#{md5}.#{file_ext}"
+    def storage_manager
+      Danbooru.config.storage_manager
     end
 
-    def large_file_path
-      if has_large?
-        "#{Rails.root}/public/data/sample/#{file_path_prefix}#{Danbooru.config.large_image_prefix}#{md5}.#{large_file_ext}"
-      else
-        file_path
-      end
+    def file(type = :original)
+      storage_manager.open_file(self, type)
     end
 
-    def large_file_ext
-      if is_ugoira?
-        "webm"
-      else
-        "jpg"
-      end
+    def tagged_file_url
+      storage_manager.file_url(self, :original, tagged_filenames: !CurrentUser.user.disable_tagged_filenames?)
     end
 
-    def preview_file_path
-      "#{Rails.root}/public/data/preview/#{file_path_prefix}#{md5}.jpg"
-    end
-
-    def file_name
-      "#{file_path_prefix}#{md5}.#{file_ext}"
+    def tagged_large_file_url
+      storage_manager.file_url(self, :large, tagged_filenames: !CurrentUser.user.disable_tagged_filenames?)
     end
 
     def file_url
-      Danbooru.config.build_file_url(self)
-    end
-
-    # this is for the 640x320 version
-    def cropped_file_url
+      storage_manager.file_url(self, :original)
     end
 
     def large_file_url
-      if has_large?
-        Danbooru.config.build_large_file_url(self)
-      else
-        file_url
-      end
-    end
-
-    def seo_tag_string
-      if Danbooru.config.enable_seo_post_urls && !CurrentUser.user.disable_tagged_filenames?
-        "__#{seo_tags}__"
-      else
-        nil
-      end
-    end
-
-    def seo_tags
-      @seo_tags ||= humanized_essential_tag_string.gsub(/[^a-z0-9]+/, "_").gsub(/(?:^_+)|(?:_+$)/, "").gsub(/_{2,}/, "_")
+      storage_manager.file_url(self, :large)
     end
 
     def preview_file_url
-      if !has_preview?
-        return "/images/download-preview.png"
-      end
-
-      "/data/preview/#{file_path_prefix}#{md5}.jpg"
-    end
-
-    def complete_preview_file_url
-      "http://#{Danbooru.config.hostname}#{preview_file_url}"
+      storage_manager.file_url(self, :preview)
     end
 
     def open_graph_image_url
       if is_image?
         if has_large?
-          if Danbooru.config.build_large_file_url(self) =~ /http/
-            large_file_url
-          else
-            "http://#{Danbooru.config.hostname}#{large_file_url}"
-          end
+          large_file_url
         else
-          if Danbooru.config.build_file_url(self) =~ /http/
-            file_url
-          else
-            "http://#{Danbooru.config.hostname}#{file_url}"
-          end
+          file_url
         end
       else
-        complete_preview_file_url
+        preview_file_url
       end
     end
 
     def file_url_for(user)
-      if CurrentUser.mobile_mode?
-        large_file_url
-      elsif user.default_image_size == "large" && image_width > Danbooru.config.large_image_width
-        large_file_url
+      if user.default_image_size == "large" && image_width > Danbooru.config.large_image_width
+        tagged_large_file_url
       else
-        file_url
-      end
-    end
-
-    def file_path_for(user)
-      if CurrentUser.mobile_mode?
-        large_file_path
-      elsif user.default_image_size == "large" && image_width > Danbooru.config.large_image_width
-        large_file_path
-      else
-        file_path
+        tagged_file_url
       end
     end
 
     def is_image?
       file_ext =~ /jpg|jpeg|gif|png/i
-    end
-
-    def is_animated_gif?
-      if file_ext =~ /gif/i && File.exists?(file_path)
-        return Magick::Image.ping(file_path).length > 1
-      else
-        return false
-      end
-    end
-    
-    def is_animated_png?
-      if file_ext =~ /png/i && File.exists?(file_path)
-        apng = APNGInspector.new(file_path)
-        apng.inspect!
-        return apng.animated?
-      else
-        return false
-      end
     end
 
     def is_flash?
@@ -298,9 +206,7 @@ class Post < ApplicationRecord
     end
 
     def has_preview?
-      # for video/ugoira we don't want to try and render a preview that
-      # might doesn't exist yet
-      is_image? || ((is_video? || is_ugoira?) && File.exists?(preview_file_path))
+      is_image? || is_video? || is_ugoira?
     end
 
     def has_dimensions?
@@ -308,24 +214,7 @@ class Post < ApplicationRecord
     end
 
     def has_ugoira_webm?
-      created_at < 1.minute.ago || (File.exists?(preview_file_path) && File.size(preview_file_path) > 0)
-    end
-  end
-
-  module BackupMethods
-    extend ActiveSupport::Concern
-
-    def queue_backup
-      Post.delay(queue: "default", priority: -1).backup_file(file_path, id: id, type: :original)
-      Post.delay(queue: "default", priority: -1).backup_file(large_file_path, id: id, type: :large) if has_large?
-      Post.delay(queue: "default", priority: -1).backup_file(preview_file_path, id: id, type: :preview) if has_preview?
-    end
-
-    module ClassMethods
-      def backup_file(file_path, options = {})
-        backup_service = Danbooru.config.backup_service
-        backup_service.backup(file_path, options)
-      end
+      true
     end
   end
 
@@ -362,7 +251,7 @@ class Post < ApplicationRecord
     end
 
     def image_width_for(user)
-      if CurrentUser.mobile_mode? || user.default_image_size == "large"
+      if user.default_image_size == "large"
         large_image_width
       else
         image_width
@@ -370,7 +259,7 @@ class Post < ApplicationRecord
     end
 
     def image_height_for(user)
-      if CurrentUser.mobile_mode? || user.default_image_size == "large"
+      if user.default_image_size == "large"
         large_image_height
       else
         image_height
@@ -481,7 +370,7 @@ class Post < ApplicationRecord
       # http://fc08.deviantart.net/files/f/2007/120/c/9/Cool_Like_Me_by_47ness.jpg
       # http://fc08.deviantart.net/images3/i/2004/088/8/f/Blackrose_for_MuzicFreq.jpg
       # http://img04.deviantart.net/720b/i/2003/37/9/6/princess_peach.jpg
-      when %r{\Ahttps?://(?:fc|th|pre|orig|img|prnt)\d{2}\.deviantart\.net/.+/(?<title>[a-z0-9_]+)_by_(?<artist>[a-z0-9_]+)-d(?<id>[a-z0-9]+)\.}i
+      when %r{\Ahttps?://(?:(?:fc|th|pre|orig|img|prnt)\d{2}|origin-orig)\.deviantart\.net/.+/(?<title>[a-z0-9_]+)_by_(?<artist>[a-z0-9_]+)-d(?<id>[a-z0-9]+)\.}i
         artist = $~[:artist].dasherize
         title = $~[:title].titleize.strip.squeeze(" ").tr(" ", "-")
         id = $~[:id].to_i(36)
@@ -628,7 +517,7 @@ class Post < ApplicationRecord
     end
 
     def tag_array_was
-      @tag_array_was ||= Tag.scan_tags(tag_string_was)
+      @tag_array_was ||= Tag.scan_tags(tag_string_before_last_save || tag_string_was)
     end
 
     def tags
@@ -667,6 +556,9 @@ class Post < ApplicationRecord
       if PostKeeperManager.enabled? && persisted?
         # no need to do this check on the initial create
         PostKeeperManager.check_and_update(self, CurrentUser.id, increment_tags)
+
+        # run this again async to check for race conditions
+        PostKeeperManager.queue_check(self, CurrentUser.id)
       end
     end
 
@@ -710,15 +602,15 @@ class Post < ApplicationRecord
         old_parent_id = old_parent_id.to_i
       end
       if old_parent_id == parent_id
-        self.parent_id = parent_id_was
+        self.parent_id = parent_id_before_last_save || parent_id_was
       end
 
       if old_source == source.to_s
-        self.source = source_was
+        self.source = source_before_last_save || source_was
       end
 
       if old_rating == rating
-        self.rating = rating_was
+        self.rating = rating_before_last_save || rating_was
       end
     end
 
@@ -781,7 +673,6 @@ class Post < ApplicationRecord
       return tags if !Danbooru.config.enable_dimension_autotagging
 
       tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize flash webm mp4)
-      tags -= %w(animated_gif animated_png) if new_record?
 
       if has_dimensions?
         if image_width >= 10_000 || image_height >= 10_000
@@ -808,14 +699,6 @@ class Post < ApplicationRecord
 
       if file_size >= 10.megabytes
         tags << "huge_filesize"
-      end
-
-      if is_animated_gif?
-        tags << "animated_gif"
-      end
-      
-      if is_animated_png?
-        tags << "animated_png"
       end
 
       if is_flash?
@@ -963,13 +846,13 @@ class Post < ApplicationRecord
           self.rating = $1
 
         when /^(-?)locked:notes?$/i
-          assign_attributes({ is_note_locked: $1 != "-" }, as: CurrentUser.role)
+          self.is_note_locked = ($1 != "-" ) if CurrentUser.is_builder?
 
         when /^(-?)locked:rating$/i
-          assign_attributes({ is_rating_locked: $1 != "-" }, as: CurrentUser.role)
+          self.is_rating_locked = ($1 != "-" ) if CurrentUser.is_builder?
 
         when /^(-?)locked:status$/i
-          assign_attributes({ is_status_locked: $1 != "-" }, as: CurrentUser.role)
+          self.is_status_locked = ($1 != "-" ) if CurrentUser.is_admin?
 
         end
       end
@@ -1104,7 +987,7 @@ class Post < ApplicationRecord
     end
 
     def remove_from_favorites
-      Favorite.delete_all(post_id: id)
+      Favorite.where(post_id: id).delete_all
       user_ids = fav_string.scan(/\d+/)
       User.where(:id => user_ids).update_all("favorite_count = favorite_count - 1")
       PostVote.where(post_id: id).delete_all
@@ -1302,7 +1185,7 @@ class Post < ApplicationRecord
 
     def fix_post_counts(post)
       post.set_tag_counts(false)
-      if post.changed?
+      if post.changes_saved?
         args = Hash[TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}].update(:tag_count => post.tag_count)
         post.update_columns(args)
       end
@@ -1352,7 +1235,7 @@ class Post < ApplicationRecord
     # - Reparent all children to the first child.
 
     def update_has_children_flag
-      update({has_children: children.exists?, has_active_children: children.undeleted.exists?}, without_protection: true)
+      update(has_children: children.exists?, has_active_children: children.undeleted.exists?)
     end
 
     def blank_out_nonexistent_parents
@@ -1384,10 +1267,10 @@ class Post < ApplicationRecord
     end
 
     def update_parent_on_save
-      return unless parent_id_changed? || is_deleted_changed?
+      return unless saved_change_to_parent_id? || saved_change_to_is_deleted?
 
       parent.update_has_children_flag if parent.present?
-      Post.find(parent_id_was).update_has_children_flag if parent_id_was.present?
+      Post.find(parent_id_before_last_save).update_has_children_flag if parent_id_before_last_save.present?
     end
 
     def give_favorites_to_parent(options = {})
@@ -1469,12 +1352,12 @@ class Post < ApplicationRecord
       Post.transaction do
         flag!(reason, is_deletion: true)
 
-        update({
+        update(
           is_deleted: true,
           is_pending: false,
           is_flagged: false,
           is_banned: is_banned || options[:ban] || has_tag?("banned_artist")
-        }, without_protection: true)
+        )
 
         # XXX This must happen *after* the `is_deleted` flag is set to true (issue #3419).
         give_favorites_to_parent(options) if options[:move_favorites]
@@ -1517,9 +1400,13 @@ class Post < ApplicationRecord
 
   module VersionMethods
     def create_version(force = false)
-      if new_record? || rating_changed? || source_changed? || parent_id_changed? || tag_string_changed? || force
+      if new_record? || saved_change_to_watched_attributes? || force
         create_new_version
       end
+    end
+
+    def saved_change_to_watched_attributes?
+      saved_change_to_rating? || saved_change_to_source? || saved_change_to_parent_id? || saved_change_to_tag_string?
     end
 
     def merge_version?
@@ -1560,36 +1447,49 @@ class Post < ApplicationRecord
       last_noted_at.present?
     end
 
-    def copy_notes_to(other_post)
-      if id == other_post.id
-        errors.add :base, "Source and destination posts are the same"
-        return false
-      end
-      unless has_notes?
-        errors.add :post, "has no notes"
-        return false
-      end
+    def copy_notes_to(other_post, copy_tags: NOTE_COPY_TAGS)
+      transaction do
+        if id == other_post.id
+          errors.add :base, "Source and destination posts are the same"
+          return false
+        end
+        unless has_notes?
+          errors.add :post, "has no notes"
+          return false
+        end
 
-      notes.active.each do |note|
-        note.copy_to(other_post)
-      end
+        notes.active.each do |note|
+          note.copy_to(other_post)
+        end
 
-      dummy = Note.new
-      if notes.active.length == 1
-        dummy.body = "Copied 1 note from post ##{id}."
-      else
-        dummy.body = "Copied #{notes.active.length} notes from post ##{id}."
+        dummy = Note.new
+        if notes.active.length == 1
+          dummy.body = "Copied 1 note from post ##{id}."
+        else
+          dummy.body = "Copied #{notes.active.length} notes from post ##{id}."
+        end
+        dummy.is_active = false
+        dummy.post_id = other_post.id
+        dummy.x = dummy.y = dummy.width = dummy.height = 0
+        dummy.save
+
+        copy_tags.each do |tag|
+          other_post.remove_tag(tag)
+          other_post.add_tag(tag) if has_tag?(tag)
+        end
+
+        other_post.has_embedded_notes = has_embedded_notes
+        other_post.save
       end
-      dummy.is_active = false
-      dummy.post_id = other_post.id
-      dummy.x = dummy.y = dummy.width = dummy.height = 0
-      dummy.save
     end
   end
 
   module ApiMethods
     def hidden_attributes
       list = super + [:tag_index]
+      unless CurrentUser.is_moderator?
+        list += [:fav_string]
+      end
       if !visible?
         list += [:md5, :file_ext]
       end
@@ -1770,8 +1670,8 @@ class Post < ApplicationRecord
     end
 
     def update_iqdb_async
-      if File.exists?(preview_file_path) && Post.iqdb_enabled?
-        Post.iqdb_sqs_service.send_message("update\n#{id}\n#{complete_preview_file_url}")
+      if Post.iqdb_enabled? && has_preview?
+        Post.iqdb_sqs_service.send_message("update\n#{id}\n#{preview_file_url}")
       end
     end
 
@@ -1833,7 +1733,7 @@ class Post < ApplicationRecord
 
       new_artist_tags.each do |tag|
         if tag.artist.blank?
-          self.warnings[:base] << "Artist [[#{tag.name}]] requires an artist entry. \"Create new artist entry\":[/artists/new?name=#{CGI::escape(tag.name)}]"
+          self.warnings[:base] << "Artist [[#{tag.name}]] requires an artist entry. \"Create new artist entry\":[/artists/new?artist%5Bname%5D=#{CGI::escape(tag.name)}]"
         end
       end
     end
@@ -1877,7 +1777,6 @@ class Post < ApplicationRecord
   end
   
   include FileMethods
-  include BackupMethods
   include ImageMethods
   include ApprovalMethods
   include PresenterMethods

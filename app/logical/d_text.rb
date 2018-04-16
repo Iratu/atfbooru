@@ -47,7 +47,7 @@ class DText
     stripped.strip
   end
 
-  def self.from_html(text, &block)
+  def self.from_html(text, inline: false, &block)
     html = Nokogiri::HTML.fragment(text)
 
     dtext = html.children.map do |element|
@@ -79,11 +79,20 @@ class DText
         title = from_html(element.inner_html, &block)
         "#{hN}. #{title}\n\n"
       when "a"
-        title = from_html(element.inner_html, &block).strip
+        title = from_html(element.inner_html, inline: true, &block).strip
         url = element["href"]
         %("#{title}":[#{url}]) if title.present? && url.present?
       when "img"
-        element.attributes["title"] || element.attributes["alt"] || ""
+        alt_text = element.attributes["title"] || element.attributes["alt"] || ""
+        src = element["src"]
+
+        if inline
+          alt_text
+        elsif alt_text.present? && src.present?
+          %("#{alt_text}":[#{src}]\n\n)
+        else
+          ""
+        end
       when "comment"
         # ignored
       else

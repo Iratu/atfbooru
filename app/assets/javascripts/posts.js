@@ -227,7 +227,7 @@
 
       if (Danbooru.meta("current-user-can-approve-posts") === "true") {
         Danbooru.keydown("shift+o", "approve", function(e) {
-          $("#quick-mod-approve").click();
+          $(".approve-link").click();
         });
       }
 
@@ -340,7 +340,11 @@
     } else {
       score = " score:" + $post.data("score");
     }
-    $img.attr("title", $post.attr("data-tags") + " user:" + $post.attr("data-uploader").replace(/_/g, " ") + " rating:" + $post.data("rating") + score);
+    var uploader = " ";
+    if ($post.attr("data-uploader")) {
+      uploader += "user:" + $post.attr("data-uploader").replace(/_/g, " ");
+    }
+    $img.attr("title", $post.attr("data-tags") + uploader + " rating:" + $post.data("rating") + score);
   }
 
   Danbooru.Post.expand_image = function(e) {
@@ -628,13 +632,17 @@
     });
 
     $("#save-search").click(function(e) {
+      $("#save-search-dialog #saved_search_query").val($("#tags").val());
+
       if (Danbooru.meta("disable-labeled-saved-searches") === "false") {
         $("#save-search-dialog").dialog("open");
       } else {
         $.post(
           "/saved_searches.js",
           {
-            "saved_search_tags": $("#tags").val()
+            "saved_search": {
+              "query": $("#tags").val()
+            }
           }
         );
       }

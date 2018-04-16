@@ -3,8 +3,6 @@ class Tag < ApplicationRecord
   METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype|flagger|-flagger|appealer|-appealer|" +
     TagCategory.short_name_list.map {|x| "#{x}tags"}.join("|")
   SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm|flagger|-flagger|appealer|-appealer"
-  attr_accessible :category, :as => [:moderator, :gold, :platinum, :member, :anonymous, :default, :builder, :admin]
-  attr_accessible :is_locked, :as => [:moderator, :admin]
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :artist, :foreign_key => "name", :primary_key => "name"
   has_one :antecedent_alias, lambda {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
@@ -15,7 +13,7 @@ class Tag < ApplicationRecord
   validates :name, uniqueness: true, tag_name: true, on: :create
   validates_inclusion_of :category, in: TagCategory.category_ids
 
-  after_save :update_category_cache_for_all, if: :category_changed?
+  after_save :update_category_cache_for_all, if: lambda {|rec| rec.saved_change_to_attribute?(:category)}
 
   module ApiMethods
     def to_legacy_json
@@ -854,7 +852,7 @@ class Tag < ApplicationRecord
     def order_similarity(name)
       # trunc(3 * sim) reduces the similarity score from a range of 0.0 -> 1.0 to just 0, 1, or 2.
       # This groups tags first by approximate similarity, then by largest tags within groups of similar tags.
-      order("trunc(3 * similarity(name, #{sanitize(name)})) DESC", "post_count DESC", "name DESC")
+      order("trunc(3 * similarity(name, #{connection.quote(name)})) DESC", "post_count DESC", "name DESC")
     end
 
     # ref: https://www.postgresql.org/docs/current/static/pgtrgm.html#idm46428634524336
