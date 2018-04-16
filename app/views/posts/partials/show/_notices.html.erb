@@ -41,16 +41,7 @@
     <%= render "post_disapprovals/counts", :disapprovals => post.disapprovals, :post => post %>
 
     <% if CurrentUser.can_approve_posts? && !post.disapproved_by?(CurrentUser.user) %>
-      <div class="quick-mod">
-        <% unless post.is_status_locked? %>
-          <%= link_to "Approve", moderator_post_approval_path(:post_id => post.id), :id => "quick-mod-approve", :method => :post, :remote => true, :class => "btn" %> |
-        <% end %>
-        <%= link_to "Breaks Rules", moderator_post_disapproval_path(:post_id => post.id, :reason => "breaks_rules"), :method => :post, :remote => true, :class => "btn" %> |
-        <%= link_to "Poor Quality", moderator_post_disapproval_path(:post_id => post.id, :reason => "poor_quality"), :method => :post, :remote => true, :class => "btn" %> |
-        <%= link_to "No Interest", moderator_post_disapproval_path(:post_id => post.id, :reason => "disinterest"), :method => :post, :remote => true, :class => "btn" %> |
-        <%= link_to "Detailed Rejection", "#", "data-post-id" => post.id, :class => "detailed-rejection-link btn" %>
-
-      </div>
+      <%= render "moderator/post/queues/quick_mod", post: post %>
     <% end %>
   </div>
 <% end %>
@@ -78,7 +69,7 @@
 
 <% if post.visible? && post.has_large? && !post.is_ugoira? %>
   <div class="ui-corner-all ui-state-highlight notice notice-resized" id="image-resize-notice" style="<%= CurrentUser.default_image_size == "original" ? "display: none;" : "" %>">
-    <span>Resized to <%= number_to_percentage post.resize_percentage.floor, :precision => 0 %> of original (<%= link_to "view original", post.file_url, :id => "image-resize-link" %>)</span>
+    <span>Resized to <%= number_to_percentage post.resize_percentage.floor, :precision => 0 %> of original (<%= link_to "view original", post.tagged_file_url, :id => "image-resize-link" %>)</span>
     <span style="display: none;">Loading...</span>
   </div>
 <% end %>

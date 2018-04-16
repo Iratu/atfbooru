@@ -11,8 +11,11 @@ class CurrentUser
     ensure
       self.user = old_user
       self.ip_addr = old_ip_addr
-      self.mobile_mode = false
     end
+  end
+
+  def self.as(user, &block)
+    scoped(user, &block)
   end
 
   def self.as_admin(&block)
@@ -49,12 +52,12 @@ class CurrentUser
     Thread.current[:current_ip_addr]
   end
 
-  def self.mobile_mode=(mode)
-    Thread.current[:mobile_mode] = mode
+  def self.root_url
+    Thread.current[:current_root_url] || "http://#{Danbooru.config.hostname}/"
   end
 
-  def self.mobile_mode?
-    Thread.current[:mobile_mode]
+  def self.root_url=(root_url)
+    Thread.current[:current_root_url] = root_url
   end
 
   def self.id
@@ -92,10 +95,6 @@ class CurrentUser
   end
 
   def self.method_missing(method, *params, &block)
-    if user.respond_to?(method)
-      user.__send__(method, *params, &block)
-    else
-      super
-    end
+    user.__send__(method, *params, &block)
   end
 end

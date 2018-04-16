@@ -58,7 +58,7 @@ class PostPresenter < Presenter
 
     if options[:size]
       html << %{<p class="desc">}
-      html << post.file_size.to_formatted_s(:human_size)
+      html << post.file_size.to_s(:human_size)
       html << " (#{post.image_width}x#{post.image_height})"
       html << %{</p>}
     end
@@ -85,7 +85,6 @@ class PostPresenter < Presenter
       data-has-sound="#{post.has_tag?('video_with_sound|flash_with_sound')}"
       data-tags="#{h(post.tag_string)}"
       data-pools="#{post.pool_string}"
-      data-uploader="#{h(post.uploader_name)}"
       data-approver-id="#{post.approver_id}"
       data-rating="#{post.rating}"
       data-width="#{post.image_width}"
@@ -99,9 +98,17 @@ class PostPresenter < Presenter
       data-pixiv-id="#{post.pixiv_id}"
       data-file-ext="#{post.file_ext}"
       data-source="#{h(post.source)}"
+      data-top-tagger="#{post.keeper_id}"
+      data-uploader-id="#{post.uploader_id}"
       data-normalized-source="#{h(post.normalized_source)}"
       data-is-favorited="#{post.favorited_by?(CurrentUser.user.id)}"
     }
+
+    if CurrentUser.is_moderator?
+      attributes += %{
+        data-uploader="#{h(post.uploader_name)}"
+      }
+    end
 
     if post.visible?
       attributes += %{
@@ -133,6 +140,10 @@ class PostPresenter < Presenter
 
   def humanized_essential_tag_string
     @post.humanized_essential_tag_string
+  end
+
+  def filename_for_download
+    "#{humanized_essential_tag_string} - #{@post.md5}.#{@post.file_ext}"
   end
 
   def categorized_tag_groups

@@ -446,19 +446,19 @@ Danbooru.Note = {
           width: $note_box.width() / ratio,
           height: $note_box.height() / ratio,
           body: $note_body.data("original-body"),
-          post_id: Danbooru.meta("post-id")
         }
       }
 
       if ($note_box.data("id").match(/x/)) {
         hash.note.html_id = $note_box.data("id");
+        hash.note.post_id = Danbooru.meta("post-id");
       }
 
       return hash;
     },
 
     error_handler: function(xhr, status, exception) {
-      Danbooru.error("Error: " + xhr.responseJSON.reasons.join("; "));
+      Danbooru.error("Error: " + (xhr.responseJSON.reason || xhr.responseJSON.reasons.join("; ")));
     },
 
     success_handler: function(data, status, xhr) {

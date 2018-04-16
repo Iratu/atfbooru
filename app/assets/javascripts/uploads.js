@@ -32,16 +32,16 @@
       if (($("#upload_file").val() === "") && ($("#upload_source").val() === "")) {
         error_messages.push("Must choose file or specify source");
       }
-      if (!$("#upload_rating_s")[0].checked && !$("#upload_rating_q")[0].checked && !$("#upload_rating_e")[0].checked &&
+      if (!$("#upload_rating_s").prop("checked") && !$("#upload_rating_q").prop("checked") && !$("#upload_rating_e").prop("checked") &&
           ($("#upload_tag_string").val().search(/\brating:[sqe]/i) < 0)) {
         error_messages.push("Must specify a rating");
       }
       if (error_messages.length === 0) {
-        $("#submit-button")[0].setAttribute("disabled","true");
-        $("#submit-button")[0].setAttribute("value","Submitting...");
+        $("#submit-button").prop("disabled","true");
+        $("#submit-button").prop("value","Submitting...");
         $("#client-errors").hide();
       } else {
-        $("#client-errors")[0].innerHTML = "<strong>Error</strong>: " + error_messages.join(", ");
+        $("#client-errors").html("<strong>Error</strong>: " + error_messages.join(", "));
         $("#client-errors").show();
         e.preventDefault();
       }
@@ -125,9 +125,11 @@
 
     if (data.artists.length === 0) {
       var new_artist_params = $.param({
-        name: data.unique_id,
-        other_names: data.artist_name,
-        urls: $.unique([data.profile_url, data.normalized_for_artist_finder_url]).join("\n")
+        artist: {
+          name: data.unique_id,
+          other_names: data.artist_name,
+          url_string: $.unique([data.profile_url, data.normalized_for_artist_finder_url]).join("\n")
+        }
       });
 
       var link = $("<a>").attr("href", "/artists/new?" + new_artist_params).text("Create new artist");
