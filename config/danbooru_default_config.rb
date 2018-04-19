@@ -198,6 +198,26 @@ module Danbooru
       1.week.ago
     end
 
+    # Permanently redirect all HTTP requests to HTTPS.
+    #
+    # https://en.wikipedia.org/wiki/HTTP_Strict_Transport_Security
+    # http://api.rubyonrails.org/classes/ActionDispatch/SSL.html
+    def ssl_options
+      {
+        redirect: { exclude: ->(request) { request.subdomain == "insecure" } },
+        hsts: {
+          expires: 1.year,
+          preload: true,
+          subdomains: false,
+        },
+      }
+    end
+
+    # Disable the forced use of HTTPS.
+    # def ssl_options
+    #   false
+    # end
+
     # The name of the server the app is hosted on.
     def server_host
       Socket.gethostname
@@ -520,6 +540,16 @@ module Danbooru
       tag =~ /replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts|corrupted_image/i
     end
 
+    # Posts with these tags will be highlighted yellow in the modqueue.
+    def modqueue_quality_warning_tags
+      %w[hard_translated self_upload nude_filter third-party_edit screencap]
+    end
+
+    # Posts with these tags will be highlighted red in the modqueue.
+    def modqueue_sample_warning_tags
+      %w[duplicate image_sample md5_mismatch resized upscaled downscaled]
+    end
+
     def shared_dir_path
       "/var/www/danbooru2/shared"
     end
@@ -762,4 +792,10 @@ module Danbooru
       end
     end
   end
+
+  def config
+    @configuration ||= EnvironmentConfiguration.new
+  end
+
+  module_function :config
 end
