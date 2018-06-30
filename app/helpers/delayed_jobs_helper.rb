@@ -1,9 +1,6 @@
 module DelayedJobsHelper
   def print_name(job)
     case job.name
-    when "PostKeeperManager.check_and_update"
-      "<strong>update post tagger</strong>"
-
     when "Tag.increment_post_counts"
       "<strong>increment post counts</strong>"
 
@@ -64,6 +61,9 @@ module DelayedJobsHelper
     when "BulkRevert#process"
       "<strong>bulk revert</strong>"
 
+    when "PostKeeperManager.check_and_update"
+      "<strong>update top tagger</strong>"
+
     else
       h(job.name)
     end
@@ -71,7 +71,7 @@ module DelayedJobsHelper
 
   def print_handler(job)
     case job.name
-    when "PostKeeperManager.check_and_update"
+    when "PostKeeperManager.check_and_assign"
       ""
 
     when "Tag.increment_post_counts", "Tag.decrement_post_counts"
@@ -131,8 +131,8 @@ module DelayedJobsHelper
     when "BulkRevert#process"
       h(job.payload_object.args.join(" "))
 
-    else
-      h(job.handler)
+    when "PostKeeperManager.check_and_update"
+      h(job.payload_object.args[0])
     end
   end
 end

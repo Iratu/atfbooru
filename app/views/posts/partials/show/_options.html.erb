@@ -17,7 +17,7 @@
     <% end %>
     <li id="add-artist-commentary-list"><%= link_to "Add commentary", "#", :id => "add-commentary" %></li>
     <li><%= link_to "Add to favorite group", "#", :id => "open-favgroup-dialog-link" %></li>
-    <li><%= link_to "Find similar", iqdb_queries_path(:post_id => post.id), :method => :post, :remote => true %></li>
+    <li><%= link_to "Find similar", iqdb_queries_path(:post_id => post.id) %></li>
     <li><a href="http://iqdb.org/?url=<%= post.file_url %>" target="_blank">IQDB Find similar</a></li>
     <% if CurrentUser.user.api_key %>
         <li><a href="https://allthefallen.ninja/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= CurrentUser.user.api_key.key %>" target="_blank">Tag Autocopy</a></li>

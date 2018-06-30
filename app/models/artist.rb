@@ -16,16 +16,16 @@ class Artist < ApplicationRecord
   belongs_to_creator
   has_many :members, :class_name => "Artist", :foreign_key => "group_name", :primary_key => "name"
   has_many :urls, :dependent => :destroy, :class_name => "ArtistUrl"
-  has_many :versions, lambda {order("artist_versions.id ASC")}, :class_name => "ArtistVersion"
+  has_many :versions, -> {order("artist_versions.id ASC")}, :class_name => "ArtistVersion"
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :tag_alias, :foreign_key => "antecedent_name", :primary_key => "name"
   has_one :tag, :foreign_key => "name", :primary_key => "name"
   attribute :notes, :string
 
-  scope :active, lambda { where(is_active: true) }
-  scope :deleted, lambda { where(is_active: false) }
-  scope :banned, lambda { where(is_banned: true) }
-  scope :unbanned, lambda { where(is_banned: false) }
+  scope :active, -> { where(is_active: true) }
+  scope :deleted, -> { where(is_active: false) }
+  scope :banned, -> { where(is_banned: true) }
+  scope :unbanned, -> { where(is_banned: false) }
 
   module UrlMethods
     extend ActiveSupport::Concern
@@ -180,8 +180,11 @@ class Artist < ApplicationRecord
 
     def save_urls
       if url_string && saved_change_to_url_string?
-        self.urls = url_string.scan(/[^[:space:]]+/).uniq.map do |url|
-          self.urls.find_or_create_by(url: url)
+        Artist.transaction do
+          self.urls.clear
+          self.urls = url_string.scan(/[^[:space:]]+/).uniq.map do |url|
+            self.urls.find_or_create_by(url: url)
+          end
         end
       end
     end
@@ -484,6 +487,9 @@ class Artist < ApplicationRecord
       else
         nil
       end
+    rescue Net::OpenTimeout, PixivApiClient::Error
+      raise if Rails.env.test?
+      nil
     rescue Exception
       nil
     end
@@ -566,17 +572,8 @@ class Artist < ApplicationRecord
         q = q.url_matches(params[:url_matches])
       end
 
-      if params[:is_active] == "true"
-        q = q.active
-      elsif params[:is_active] == "false"
-        q = q.deleted
-      end
-
-      if params[:is_banned] == "true"
-        q = q.banned
-      elsif params[:is_banned] == "false"
-        q = q.unbanned
-      end
+      q = q.attribute_matches(:is_active, params[:is_active])
+      q = q.attribute_matches(:is_banned, params[:is_banned])
 
       if params[:creator_name].present?
         q = q.where("artists.creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].tr(" ", "_").mb_chars.downcase)
@@ -587,13 +584,13 @@ class Artist < ApplicationRecord
       end
 
       # XXX deprecated, remove at some point.
-      if params[:empty_only] == "true"
+      if params[:empty_only].to_s.truthy?
         params[:has_tag] = "false"
       end
 
-      if params[:has_tag] == "true"
+      if params[:has_tag].to_s.truthy?
         q = q.joins(:tag).where("tags.post_count > 0")
-      elsif params[:has_tag] == "false"
+      elsif params[:has_tag].to_s.falsy?
         q = q.includes(:tag).where("tags.name IS NULL OR tags.post_count <= 0").references(:tags)
       end
 

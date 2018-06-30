@@ -8,7 +8,11 @@
     }
 
     if ($("#c-uploads").length) {
-      $("#image").load(this.initialize_image);
+      if ($("#image").prop("complete")) {
+        this.initialize_image();
+      } else {
+        $("#image").on("load error", this.initialize_image);
+      }
       this.initialize_info_bookmarklet();
       this.initialize_similar();
       this.initialize_shortcuts();
@@ -29,7 +33,7 @@
   Danbooru.Upload.initialize_submit = function() {
     $("#form").submit(function(e) {
       var error_messages = [];
-      if (($("#upload_file").val() === "") && ($("#upload_source").val() === "")) {
+      if (($("#upload_file").val() === "") && ($("#upload_source").val() === "") && $("#upload_md5_confirmation").val() === "") {
         error_messages.push("Must choose file or specify source");
       }
       if (!$("#upload_rating_s").prop("checked") && !$("#upload_rating_q").prop("checked") && !$("#upload_rating_e").prop("checked") &&
@@ -57,7 +61,7 @@
 
   Danbooru.Upload.initialize_iqdb_source = function() {
     if (/^https?:\/\//.test($("#normalized_url").val())) {
-      $.post("/iqdb_queries", {"url": $("#normalized_url").val()}).done(function(html) {$("#iqdb-similar").html(html)});
+      $.get("/iqdb_queries", {"url": $("#normalized_url").val()}).done(function(html) {$("#iqdb-similar").html(html)});
     }
   }
 
@@ -73,7 +77,7 @@
 
   Danbooru.Upload.initialize_similar = function() {
     $("#similar-button").click(function(e) {
-      $.post("/iqdb_queries", {"url": $("#upload_source").val()}).done(function(html) {$("#iqdb-similar").html(html).show()});
+      $.get("/iqdb_queries", {"url": $("#upload_source").val()}).done(function(html) {$("#iqdb-similar").html(html).show()});
       e.preventDefault();
     });
   }
@@ -101,14 +105,11 @@
   }
 
   Danbooru.Upload.fetch_source_data = function(url, referer_url) {
-    var xhr = $.getJSON("/source.json", { url: url, ref: referer_url });
-
-    xhr.success(Danbooru.Upload.fill_source_info);
-    xhr.fail(function(data) {
-      $("#source-info span#loading-data").html("Error: " + data.responseJSON["message"])
-    });
-
-    return xhr;
+    return $.getJSON("/source.json", { url: url, ref: referer_url })
+      .then(Danbooru.Upload.fill_source_info)
+      .catch(function(data) {
+        $("#source-info span#loading-data").html("Error: " + data.responseJSON["message"])
+      });
   }
 
   Danbooru.Upload.fill_source_info = function(data) {
@@ -168,16 +169,22 @@
 
   Danbooru.Upload.initialize_image = function() {
     var $image = $("#image");
-    if ($image.length) {
-      var width = $image.width();
-      var height = $image.height();
-      $image.data("original-width", width);
-      $image.data("original-height", height);
-      Danbooru.Post.resize_image_to_window($image);
-      Danbooru.Post.initialize_post_image_resize_to_window_link();
-      Danbooru.Upload.update_scale();
-      $("#image-resize-to-window-link").click(Danbooru.Upload.update_scale);
+    if (!$image.length) {
+      return;
     }
+    var width = $image.width();
+    var height = $image.height();
+    if (!width || !height) {
+      // try again later
+      $.timeout(100).done(function() {Danbooru.Upload.initialize_image()});
+      return;
+    }
+    $image.data("original-width", width);
+    $image.data("original-height", height);
+    Danbooru.Post.resize_image_to_window($image);
+    Danbooru.Post.initialize_post_image_resize_to_window_link();
+    Danbooru.Upload.update_scale();
+    $("#image-resize-to-window-link").click(Danbooru.Upload.update_scale);
   }
 
   Danbooru.Upload.toggle_commentary = function() {

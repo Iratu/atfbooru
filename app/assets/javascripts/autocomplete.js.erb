@@ -3,9 +3,6 @@
 
   Danbooru.Autocomplete.AUTOCOMPLETE_VERSION = 1;
 
-  //Just under 5MB of 16-bit characters
-  Danbooru.Autocomplete.MAX_STORAGE_SIZE = 2500000;
-
   Danbooru.Autocomplete.PREFIXES = /^(-|~|<%= TagCategory.mapping.keys.map {|category| category + ':'}.join('|') %>)(.*)$/i;
   Danbooru.Autocomplete.METATAGS = /^(<%= Tag::METATAGS %>):(.*)$/i;
 
@@ -13,7 +10,7 @@
     if (Danbooru.meta("enable-auto-complete") === "true") {
       $.widget("ui.autocomplete", $.ui.autocomplete, {
         options: {
-          delay: 100,
+          delay: 0,
           minLength: 1,
           autoFocus: false,
           focus: function() { return false; },
@@ -25,43 +22,19 @@
         _renderItem: Danbooru.Autocomplete.render_item,
       });
 
-      Danbooru.Autocomplete.enable_local_storage = this.test_local_storage();
       this.initialize_tag_autocomplete();
       this.initialize_mention_autocomplete($(".autocomplete-mentions textarea"));
       this.initialize_artist_autocomplete($('[data-autocomplete="artist"]'));
       this.initialize_pool_autocomplete($('[data-autocomplete="pool"]'));
       this.initialize_wiki_autocomplete($('[data-autocomplete="wiki-page"]'));
-      this.prune_local_storage();
-    }
-  }
-
-  Danbooru.Autocomplete.test_local_storage = function() {
-    try {
-      $.localStorage.set("test", "test");
-      $.localStorage.remove("test");
-      return true;
-    } catch(e) {
-      return false;
-    }
-  }
-
-  Danbooru.Autocomplete.prune_local_storage = function() {
-    if (this.enable_local_storage) {
-      var cached_autocomplete_version = $.localStorage.get("danbooru-autocomplete-version");
-      var current_cache_size = Object.keys(localStorage).reduce( function(total, key) { return total + localStorage[key].length; }, 0);
-      if (cached_autocomplete_version !== this.AUTOCOMPLETE_VERSION || current_cache_size > this.MAX_STORAGE_SIZE) {
-        $.each(Object.keys(localStorage), function(i, key) {
-          if (key.substr(0, 3) === "ac-") {
-            $.localStorage.remove(key);
-          }
-        });
-        $.localStorage.set("danbooru-autocomplete-version", this.AUTOCOMPLETE_VERSION);
-      }
     }
   }
 
   Danbooru.Autocomplete.initialize_mention_autocomplete = function($fields) {
     $fields.autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       select: function(event, ui) {
         Danbooru.Autocomplete.insert_completion(this, ui.item.value);
         return false;
@@ -100,6 +73,11 @@
     var $fields_single = $('[data-autocomplete="tag"]');
 
     $fields_multiple.autocomplete({
+      search: function() {
+        if ($(this).data("ui-autocomplete")) {
+          $(this).data("ui-autocomplete").menu.bindings = $();
+        }
+      },
       select: function(event, ui) {
         // Prevent Danbooru.Upload.initialize_enter_on_tags from running if the
         // Enter key is used to select a tag from the autocomplete menu.
@@ -115,7 +93,7 @@
         var metatag = query.metatag;
         var term = query.term;
 
-        if (!term) {
+        if (!metatag && !term) {
           this.close();
           return;
         }
@@ -184,6 +162,9 @@
     });
 
     $fields_single.autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       source: function(req, resp) {
         Danbooru.Autocomplete.normal_source(req.term, resp);
       }
@@ -192,6 +173,9 @@
 
   Danbooru.Autocomplete.initialize_artist_autocomplete = function($fields) {
     $fields.autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       source: function(req, resp) {
         $.ajax({
           url: "/artists.json",
@@ -199,7 +183,8 @@
             "search[name]": req.term + "*",
             "search[is_active]": true,
             "search[order]": "post_count",
-            "limit": 10
+            "limit": 10,
+            "expiry": 7
           },
           method: "get",
           success: function(data) {
@@ -219,6 +204,9 @@
 
   Danbooru.Autocomplete.initialize_pool_autocomplete = function($fields) {
     $fields.autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       source: function(req, resp) {
         Danbooru.Autocomplete.pool_source(req.term, resp);
       },
@@ -227,6 +215,9 @@
 
   Danbooru.Autocomplete.initialize_wiki_autocomplete = function($fields) {
     $fields.autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       source: function(req, resp) {
         $.ajax({
           url: "/wiki_pages.json",
@@ -234,7 +225,8 @@
             "search[title]": req.term + "*",
             "search[hide_deleted]": "Yes",
             "search[order]": "post_count",
-            "limit": 10
+            "limit": 10,
+            "expiry": 7
           },
           method: "get",
           success: function(data) {
@@ -254,22 +246,12 @@
 
   Danbooru.Autocomplete.normal_source = function(term, resp) {
     var key = "ac-" + term.replace(/\./g,'\uFFFF');
-    if (this.enable_local_storage) {
-      var cached = $.localStorage.get(key);
-      if (cached) {
-        if (Date.parse(cached.expires) < new Date().getTime()) {
-          $.localStorage.remove(key);
-        } else {
-          resp(cached.value);
-          return;
-        }
-      }
-    }
 
     $.ajax({
       url: "/tags/autocomplete.json",
       data: {
-        "search[name_matches]": term
+        "search[name_matches]": term,
+        "expiry": 7
       },
       method: "get",
       success: function(data) {
@@ -284,11 +266,6 @@
           };
         });
 
-        if (Danbooru.Autocomplete.enable_local_storage) {
-          var expiry = new Date();
-          expiry.setDate(expiry.getDate() + 7);
-          $.localStorage.set(key, {"value": d, "expires": expiry});
-        }
         resp(d);
       }
     });
@@ -344,7 +321,7 @@
       return;
     }
 
-    if ($autocomplete_menu.has(".ui-state-focus").length === 0) {
+    if ($autocomplete_menu.has(".ui-state-active").length === 0) {
       var $first_item = $autocomplete_menu.find(".ui-menu-item").first();
       var completion = $first_item.data().uiAutocompleteItem.value;
 
@@ -358,20 +335,21 @@
 
   Danbooru.Autocomplete.render_item = function(list, item) {
     var $link = $("<a/>");
+    $link.text(item.label);
+    $link.attr("href", "/posts?tags=" + encodeURIComponent(item.value));
+    $link.click(function(e) {
+      e.preventDefault();
+    });
 
     if (item.antecedent) {
       var antecedent = item.antecedent.replace(/_/g, " ");
       var arrow = $("<span/>").html(" &rarr; ").addClass("autocomplete-arrow");
       var antecedent_element = $("<span/>").text(antecedent).addClass("autocomplete-antecedent");
-      $link.append(antecedent_element);
-      $link.append(arrow);
+      $link.prepend([
+        antecedent_element,
+        arrow
+      ]);
     }
-
-    $link.append(document.createTextNode(item.label));
-    $link.attr("href", "/posts?tags=" + encodeURIComponent(item.value));
-    $link.click(function(e) {
-      e.preventDefault();
-    });
 
     if (item.post_count !== undefined) {
       var count;
@@ -396,7 +374,8 @@
       $link.addClass("pool-category-" + item.category);
     }
 
-    return $("<li/>").data("item.autocomplete", item).append($link).appendTo(list);
+    var $menu_item = $("<div/>").append($link);
+    return $("<li/>").data("item.autocomplete", item).append($menu_item).appendTo(list);
   };
 
   Danbooru.Autocomplete.static_metatags = {
@@ -529,7 +508,7 @@
   }
 
   Danbooru.Autocomplete.saved_search_source = function(term, resp) {
-    return Danbooru.SavedSearch.labels(term).success(function(labels) {
+    return Danbooru.SavedSearch.labels(term).then(function(labels) {
       resp(labels.map(function(label) {
         return {
           label: label.replace(/_/g, " "),

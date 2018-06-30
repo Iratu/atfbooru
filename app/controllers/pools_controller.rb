@@ -22,6 +22,10 @@ class PoolsController < ApplicationController
       format.xml do
         render :xml => @pools.to_xml(:root => "pools")
       end
+      format.json do
+        render json: @pools.to_json
+        expires_in params[:expiry].to_i.days if params[:expiry]
+      end
     end
   end
 
@@ -91,6 +95,6 @@ class PoolsController < ApplicationController
 
   def pool_params
     permitted_params = %i[name description category is_active post_ids]
-    params.require(:pool).permit(permitted_params)
+    params.require(:pool).permit(*permitted_params, post_id_array: [])
   end
 end

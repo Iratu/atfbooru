@@ -57,6 +57,7 @@ Rails.application.routes.draw do
   end
   namespace :maintenance do
     namespace :user do
+      resource :count_fixes, only: [:new, :create]
       resource :email_notification, :only => [:show, :destroy]
       resource :password_reset, :only => [:new, :create, :edit, :update]
       resource :login_reminder, :only => [:new, :create]
@@ -74,7 +75,6 @@ Rails.application.routes.draw do
       put :revert
       put :ban
       put :unban
-      post :undelete
     end
     collection do
       get :show_or_new
@@ -82,6 +82,7 @@ Rails.application.routes.draw do
       get :finder
     end
   end
+  resources :artist_urls, only: [:update]
   resources :artist_versions, :only => [:index] do
     collection do
       get :search
@@ -132,6 +133,7 @@ Rails.application.routes.draw do
     resource :order, :only => [:edit], :controller => "favorite_group_orders"
   end
   resources :forum_posts do
+    resource :votes, controller: "forum_post_votes"
     member do
       post :undelete
     end
@@ -153,8 +155,11 @@ Rails.application.routes.draw do
     resource :visit, :controller => "forum_topic_visits"
   end
   resources :ip_bans
-  resource :iqdb_queries, :only => [:create, :show, :check] do
-    get :check
+  resource :iqdb_queries, :only => [:show]  do
+    collection do
+      get :preview
+      get :check, to: redirect {|path_params, req| "/iqdb_queries?#{req.query_string}"}
+    end
   end
   resources :janitor_trials do
     collection do
@@ -219,6 +224,7 @@ Rails.application.routes.draw do
   end
   resources :post_appeals
   resources :post_flags
+  resources :post_approvals, only: [:index]
   resources :post_versions, :only => [:index, :search] do
     member do
       put :undo
@@ -277,6 +283,7 @@ Rails.application.routes.draw do
   resource :tag_implication_request, :only => [:new, :create]
   resources :uploads do
     collection do
+      post :preprocess
       get :batch
       get :image_proxy
     end

@@ -1,9 +1,10 @@
 class PostPresenter < Presenter
   attr_reader :pool, :next_post_in_pool
+  delegate :tag_list_html, :split_tag_list_html, :inline_tag_list_html, :split_inline_tag_list_html, to: :tag_set_presenter
 
   def self.preview(post, options = {})
     if post.nil?
-      return "Expunged"
+      return "<em>none</em>".html_safe
     end
 
     if !options[:show_deleted] && post.is_deleted? && options[:tags] !~ /status:(?:all|any|deleted|banned)/ && !options[:raw]
@@ -20,8 +21,15 @@ class PostPresenter < Presenter
     end
 
     path = options[:path_prefix] || "/posts"
+    if CurrentUser.id == 1 && options[:show_cropped] && post.has_cropped? && !CurrentUser.user.disable_cropped_thumbnails?
+      src = post.crop_file_url
+      imgClass = "cropped"
+    else
+      src = post.preview_file_url
+      imgClass = nil
+    end
 
-    html =  %{<article itemscope itemtype="http://schema.org/ImageObject" id="post_#{post.id}" class="#{preview_class(post, options[:pool], options)}" #{data_attributes(post)}>}
+    html =  %{<article itemscope itemtype="http://schema.org/ImageObject" id="post_#{post.id}" class="#{imgClass} #{preview_class(post, options[:pool], options)}" #{data_attributes(post)}>}
     if options[:tags].present? && !CurrentUser.is_anonymous?
       tag_param = "?tags=#{CGI::escape(options[:tags])}"
     elsif options[:pool_id] || options[:pool]
@@ -33,13 +41,8 @@ class PostPresenter < Presenter
     end
     html << %{<a href="#{path}/#{post.id}#{tag_param}">}
 
-    if options[:show_cropped] && post.has_cropped?
-      src = post.cropped_file_url
-    else
-      src = post.preview_file_url
-    end
-
-    html << %{<img itemprop="thumbnailUrl" src="#{src}" alt="#{h(post.tag_string)}">}
+    tooltip = "#{post.tag_string} rating:#{post.rating} score:#{post.score}"
+    html << %{<img class="#{imgClass}" itemprop="thumbnailUrl" src="#{src}" title="#{h(tooltip)}" alt="#{h(post.tag_string)}">}
     html << %{</a>}
 
     if options[:pool]
@@ -69,7 +72,7 @@ class PostPresenter < Presenter
 
   def self.preview_class(post, description = nil, options = {})
     klass = "post-preview"
-    klass << " large-cropped" if post.has_cropped? && options[:show_cropped]
+    # klass << " large-cropped" if post.has_cropped? && options[:show_cropped]
     klass << " pooled" if description
     klass << " post-status-pending" if post.is_pending?
     klass << " post-status-flagged" if post.is_flagged?
@@ -162,13 +165,9 @@ class PostPresenter < Presenter
     categorized_tag_groups.join(" \n")
   end
 
-  def humanized_categorized_tag_string
-    categorized_tag_groups.flatten.slice(0, 25).join(", ").tr("_", " ")
-  end
-
   def safe_mode_message(template)
     html = ["This image is unavailable on safe mode (#{Danbooru.config.app_name}). Go to "]
-    html << template.link_to("Danbooru", "http://danbooru.donmai.us") # XXX don't hardcode.
+    html << template.link_to("Danbooru", "https://danbooru.donmai.us") # XXX don't hardcode.
     html << " or disable safe mode to view ("
     html << template.link_to("learn more", template.wiki_pages_path(title: "help:user_settings"))
     html << ")."
@@ -191,18 +190,6 @@ class PostPresenter < Presenter
     elsif @post.is_image?
       template.render("posts/partials/show/image", :post => @post)
     end
-  end
-
-  def tag_list_html(template, options = {})
-    tag_set_presenter.tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
-  end
-
-  def split_tag_list_html(template, options = {})
-    tag_set_presenter.split_tag_list_html(template, options.merge(:show_extra_links => CurrentUser.user.is_gold?))
-  end
-
-  def inline_tag_list_html(template)
-    tag_set_presenter.inline_tag_list(template)
   end
 
   def has_nav_links?(template)

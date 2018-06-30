@@ -110,10 +110,12 @@ class Dmail < ApplicationRecord
       end
 
       def create_automated(params)
-        dmail = Dmail.new(from: User.system, **params)
-        dmail.owner = dmail.to
-        dmail.save
-        dmail
+        CurrentUser.as_system do
+          dmail = Dmail.new(from: User.system, **params)
+          dmail.owner = dmail.to
+          dmail.save
+          dmail
+        end
       end
     end
 
@@ -169,6 +171,10 @@ class Dmail < ApplicationRecord
       end
     end
 
+    def read
+      where(is_read: true)
+    end
+
     def unread
       where("is_read = false and is_deleted = false")
     end
@@ -212,17 +218,13 @@ class Dmail < ApplicationRecord
         q = q.where("from_id = ?", params[:from_id].to_i)
       end
 
-      if params[:is_spam].present?
-        q = q.where("is_spam = ?", true)
-      else
-        q = q.where("is_spam = ?", false)
-      end
+      params[:is_spam] = false unless params[:is_spam].present?
+      q = q.attribute_matches(:is_spam, params[:is_spam])
+      q = q.attribute_matches(:is_read, params[:is_read])
+      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
-      if params[:read] == "true"
-        q = q.where("is_read = true")
-      elsif params[:read] == "false"
-        q = q.unread
-      end
+      q = q.read if params[:read].to_s.truthy?
+      q = q.unread if params[:read].to_s.falsy?
 
       q.apply_default_order(params)
     end
@@ -254,9 +256,8 @@ class Dmail < ApplicationRecord
 
   def mark_as_read!
     update_column(:is_read, true)
-
-    unless Dmail.where(:is_read => false, :owner_id => CurrentUser.user.id).exists?
-      CurrentUser.user.update_attribute(:has_mail, false)
+    owner.dmails.unread.count.tap do |unread_count|
+      owner.update(has_mail: (unread_count > 0), unread_dmail_count: unread_count)
     end
   end
 
@@ -276,13 +277,13 @@ class Dmail < ApplicationRecord
 
   def update_recipient
     if owner_id != CurrentUser.user.id && !is_deleted? && !is_read?
-      to.update_attribute(:has_mail, true)
+      to.update(has_mail: true, unread_dmail_count: to.dmails.unread.count)
     end
   end
   
   def key
-    digest = OpenSSL::Digest.new("sha256")
-    OpenSSL::HMAC.hexdigest(digest, Danbooru.config.email_key, "#{title} #{body}")
+    verifier = ActiveSupport::MessageVerifier.new(Danbooru.config.email_key, serializer: JSON, digest: "SHA256")
+    verifier.generate("#{title} #{body}")
   end
   
   def visible_to?(user, key)

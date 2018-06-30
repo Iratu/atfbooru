@@ -15,18 +15,20 @@ class PopularSearchService
   end
 
   def each_search(limit = 100, &block)
-    fetch_data.to_s.scan(/(.+?) (\d+)\.0\n/).slice(0, limit).each(&block)
+    JSON.parse(fetch_data.to_s).slice(0, limit).each(&block)
   end
 
   def tags
-    fetch_data.to_s.scan(/(.+?) (\d+)\.0\n/).map {|x| x[0]}
+    JSON.parse(fetch_data.to_s).map {|x| x[0]}
   end
 
   def fetch_data
+    return [] unless self.class.enabled?
+    
     dates = date.strftime("%Y-%m-%d")
 
     Cache.get("ps-day-#{dates}", 1.minute) do
-      url = "#{Danbooru.config.reportbooru_server}/hits/day?date=#{dates}"
+      url = "#{Danbooru.config.reportbooru_server}/post_searches/rank?date=#{dates}"
       response = HTTParty.get(url, Danbooru.config.httparty_options.reverse_merge(timeout: 3))
       if response.success?
         response = response.body

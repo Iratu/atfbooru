@@ -15,7 +15,6 @@ class PostTest < ActiveSupport::TestCase
     CurrentUser.ip_addr = "127.0.0.1"
     mock_saved_search_service!
     mock_pool_archive_service!
-    ImageCropper.stubs(:enabled?).returns(false)
   end
 
   def teardown
@@ -28,8 +27,7 @@ class PostTest < ActiveSupport::TestCase
   context "Deletion:" do
     context "Expunging a post" do
       setup do
-        @upload = FactoryBot.create(:jpg_upload)
-        @upload.process!
+        @upload = UploadService.new(FactoryBot.attributes_for(:jpg_upload)).start!
         @post = @upload.post
         Favorite.add(post: @post, user: @user)
       end
@@ -502,20 +500,6 @@ class PostTest < ActiveSupport::TestCase
         post = FactoryBot.create(:post, :is_pending => true)
         post.approve!
         assert_equal(post.approver_id, CurrentUser.id)
-      end
-
-      context "that was uploaded by person X" do
-        setup do
-          @post = FactoryBot.create(:post)
-          @post.flag!("reason")
-        end
-
-        should "not allow person X to approve that post" do
-          approval = @post.approve!(@post.uploader)
-
-          assert(@post.invalid?)
-          assert_includes(approval.errors.full_messages, "You cannot approve a post you uploaded")
-        end
       end
 
       context "that was previously approved by person X" do
@@ -1838,6 +1822,13 @@ class PostTest < ActiveSupport::TestCase
         assert_equal(user2.id, post.uploader_id)
         assert_equal(user2.name, post.uploader_name)
       end
+
+      should "increment the uploaders post_upload_count" do
+        assert_difference(-> { CurrentUser.user.post_upload_count }) do
+          post = FactoryBot.create(:post, uploader: CurrentUser.user)
+          CurrentUser.user.reload
+        end
+      end
     end
   end
 
@@ -2089,7 +2080,7 @@ class PostTest < ActiveSupport::TestCase
     end
 
     should "return posts for the date:<d> metatag" do
-      post = FactoryBot.create(:post, created_at: Time.parse("2017-01-01"))
+      post = FactoryBot.create(:post, created_at: Time.parse("2017-01-01 12:00"))
 
       assert_tag_match([post], "date:2017-01-01")
     end
@@ -2621,9 +2612,13 @@ class PostTest < ActiveSupport::TestCase
       setup do
         PostArchive.sqs_service.stubs(:merge?).returns(false)
         @post = FactoryBot.create(:post, :rating => "q", :tag_string => "aaa", :source => "")
-        @post.update_attributes(:tag_string => "aaa bbb ccc ddd")
-        @post.update_attributes(:tag_string => "bbb xxx yyy", :source => "xyz")
-        @post.update_attributes(:tag_string => "bbb mmm yyy", :source => "abc")
+        @post.reload
+        @post.update(:tag_string => "aaa bbb ccc ddd")
+        @post.reload
+        @post.update(:tag_string => "bbb xxx yyy", :source => "xyz")
+        @post.reload
+        @post.update(:tag_string => "bbb mmm yyy", :source => "abc")
+        @post.reload
       end
 
       context "and then reverted to an early version" do
@@ -2656,9 +2651,9 @@ class PostTest < ActiveSupport::TestCase
     should "generate the correct urls for animated gifs" do
       @post = FactoryBot.build(:post, md5: "deadbeef", file_ext: "gif", tag_string: "animated_gif")
 
-      assert_equal("http://#{Socket.gethostname}/data/preview/deadbeef.jpg", @post.preview_file_url)
-      assert_equal("http://#{Socket.gethostname}/data/deadbeef.gif", @post.large_file_url)
-      assert_equal("http://#{Socket.gethostname}/data/deadbeef.gif", @post.file_url)
+      assert_equal("https://#{Socket.gethostname}/data/preview/deadbeef.jpg", @post.preview_file_url)
+      assert_equal("https://#{Socket.gethostname}/data/deadbeef.gif", @post.large_file_url)
+      assert_equal("https://#{Socket.gethostname}/data/deadbeef.gif", @post.file_url)
     end
   end
 
@@ -2684,6 +2679,21 @@ class PostTest < ActiveSupport::TestCase
       should "rescale notes" do
         note = @dst.notes.active.first
         assert_equal([20, 20, 20, 20], [note.x, note.y, note.width, note.height])
+      end
+    end
+  end
+
+  context "#replace!" do
+    subject { @post.replace!(tags: "something", replacement_url: "https://danbooru.donmai.us/data/preview/download.png") }
+
+    setup do
+      @post = FactoryBot.create(:post)
+      @post.stubs(:queue_delete_files)
+    end
+
+    should "update the post" do
+      assert_changes(-> { @post.md5 }) do
+        subject
       end
     end
   end

@@ -9,17 +9,17 @@ class Comment < ApplicationRecord
   belongs_to_updater
   has_many :votes, :class_name => "CommentVote", :dependent => :destroy
   after_create :update_last_commented_at_on_create
-  after_update(:if => lambda {|rec| (!rec.is_deleted? || !rec.saved_change_to_is_deleted?) && CurrentUser.id != rec.creator_id}) do |rec|
+  after_update(:if => ->(rec) {(!rec.is_deleted? || !rec.saved_change_to_is_deleted?) && CurrentUser.id != rec.creator_id}) do |rec|
     ModAction.log("comment ##{rec.id} updated by #{CurrentUser.name}",:comment_update)
   end
-  after_save :update_last_commented_at_on_destroy, :if => lambda {|rec| rec.is_deleted? && rec.saved_change_to_is_deleted?}
-  after_save(:if => lambda {|rec| rec.is_deleted? && rec.saved_change_to_is_deleted? && CurrentUser.id != rec.creator_id}) do |rec|
+  after_save :update_last_commented_at_on_destroy, :if => ->(rec) {rec.is_deleted? && rec.saved_change_to_is_deleted?}
+  after_save(:if => ->(rec) {rec.is_deleted? && rec.saved_change_to_is_deleted? && CurrentUser.id != rec.creator_id}) do |rec|
     ModAction.log("comment ##{rec.id} deleted by #{CurrentUser.name}",:comment_delete)
   end
   mentionable(
     :message_field => :body, 
-    :title => lambda {|user_name| "#{creator_name} mentioned you in a comment on post ##{post_id}"},
-    :body => lambda {|user_name| "@#{creator_name} mentioned you in a \"comment\":/posts/#{post_id}#comment-#{id} on post ##{post_id}:\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n"},
+    :title => ->(user_name) {"#{creator_name} mentioned you in a comment on post ##{post_id}"},
+    :body => ->(user_name) {"@#{creator_name} mentioned you in a \"comment\":/posts/#{post_id}#comment-#{id} on post ##{post_id}:\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n"},
   )
 
   module SearchMethods
@@ -59,22 +59,6 @@ class Comment < ApplicationRecord
       where("comments.is_deleted = false")
     end
 
-    def sticky
-      where("comments.is_sticky = true")
-    end
-
-    def unsticky
-      where("comments.is_sticky = false")
-    end
-
-    def bumping
-      where("comments.do_not_bump_post = false")
-    end
-
-    def nonbumping
-      where("comments.do_not_bump_post = true")
-    end
-
     def post_tags_match(query)
       PostQueryBuilder.new(query).build(self.joins(:post)).reorder("")
     end
@@ -110,14 +94,9 @@ class Comment < ApplicationRecord
         q = q.for_creator(params[:creator_id].to_i)
       end
 
-      q = q.deleted if params[:is_deleted] == "true"
-      q = q.undeleted if params[:is_deleted] == "false"
-
-      q = q.sticky if params[:is_sticky] == "true"
-      q = q.unsticky if params[:is_sticky] == "false"
-
-      q = q.nonbumping if params[:do_not_bump_post] == "true"
-      q = q.bumping if params[:do_not_bump_post] == "false"
+      q = q.attribute_matches(:is_deleted, params[:is_deleted])
+      q = q.attribute_matches(:is_sticky, params[:is_sticky])
+      q = q.attribute_matches(:do_not_bump_post, params[:do_not_bump_post])
 
       case params[:order]
       when "post_id", "post_id_desc"

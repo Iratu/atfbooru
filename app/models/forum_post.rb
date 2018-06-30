@@ -5,6 +5,10 @@ class ForumPost < ApplicationRecord
   belongs_to_creator
   belongs_to_updater
   belongs_to :topic, :class_name => "ForumTopic"
+  has_many :votes, class_name: "ForumPostVote"
+  has_one :tag_alias
+  has_one :tag_implication
+  has_one :bulk_update_request
   before_validation :initialize_is_deleted, :on => :create
   after_create :update_topic_updated_at_on_create
   after_update :update_topic_updated_at_on_update_for_original_posts
@@ -15,16 +19,16 @@ class ForumPost < ApplicationRecord
   validate :topic_is_not_restricted, :on => :create
   before_destroy :validate_topic_is_unlocked
   after_save :delete_topic_if_original_post
-  after_update(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
+  after_update(:if => ->(rec) {rec.updater_id != rec.creator_id}) do |rec|
     ModAction.log("#{CurrentUser.name} updated forum ##{rec.id}",:forum_post_update)
   end
-  after_destroy(:if => lambda {|rec| rec.updater_id != rec.creator_id}) do |rec|
+  after_destroy(:if => ->(rec) {rec.updater_id != rec.creator_id}) do |rec|
     ModAction.log("#{CurrentUser.name} deleted forum ##{rec.id}",:forum_post_delete)
   end
   mentionable(
     :message_field => :body, 
-    :title => lambda {|user_name| %{#{creator_name} mentioned you in topic ##{topic_id} (#{topic.title})}},
-    :body => lambda {|user_name| %{@#{creator_name} mentioned you in topic ##{topic_id} ("#{topic.title}":[/forum_topics/#{topic_id}?page=#{forum_topic_page}]):\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n}},
+    :title => ->(user_name) {%{#{creator_name} mentioned you in topic ##{topic_id} (#{topic.title})}},
+    :body => ->(user_name) {%{@#{creator_name} mentioned you in topic ##{topic_id} ("#{topic.title}":[/forum_topics/#{topic_id}?page=#{forum_topic_page}]):\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n}},
   )
 
   module SearchMethods
@@ -88,6 +92,8 @@ class ForumPost < ApplicationRecord
         q = q.joins(:topic).where("forum_topics.category_id = ?", params[:topic_category_id].to_i)
       end
 
+      q = q.attribute_matches(:is_deleted, params[:is_deleted])
+
       q.apply_default_order(params)
     end
   end
@@ -126,6 +132,18 @@ class ForumPost < ApplicationRecord
     else
       new
     end
+  end
+
+  def tag_change_request
+    bulk_update_request || tag_alias || tag_implication
+  end
+
+  def votable?
+    body.to_s.match?(/->/)
+  end
+
+  def voted?(user, score)
+    votes.where(creator_id: user.id, score: score).exists?
   end
 
   def validate_topic_is_unlocked
@@ -228,8 +246,12 @@ class ForumPost < ApplicationRecord
     ((ForumPost.where("topic_id = ? and created_at <= ?", topic_id, created_at).count) / Danbooru.config.posts_per_page.to_f).ceil
   end
 
-  def is_original_post?
-    ForumPost.exists?(["id = ? and id = (select _.id from forum_posts _ where _.topic_id = ? order by _.id asc limit 1)", id, topic_id])
+  def is_original_post?(original_post_id = nil)
+    if original_post_id
+      return id == original_post_id
+    else
+      ForumPost.exists?(["id = ? and id = (select _.id from forum_posts _ where _.topic_id = ? order by _.id asc limit 1)", id, topic_id])
+    end
   end
 
   def delete_topic_if_original_post

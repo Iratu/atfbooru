@@ -1,6 +1,6 @@
 class NoteVersion < ApplicationRecord
   belongs_to_updater :counter_cache => "note_update_count"
-  scope :for_user, lambda {|user_id| where("updater_id = ?", user_id)}
+  scope :for_user, ->(user_id) {where("updater_id = ?", user_id)}
 
   def self.search(params)
     q = super
@@ -16,6 +16,8 @@ class NoteVersion < ApplicationRecord
     if params[:note_id]
       q = q.where(note_id: params[:note_id].split(",").map(&:to_i))
     end
+
+    q = q.attribute_matches(:is_active, params[:is_active])
 
     q.apply_default_order(params)
   end

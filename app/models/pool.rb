@@ -38,7 +38,7 @@ class Pool < ApplicationRecord
     end
 
     def series_first
-      order("(case pools.category when 'series' then 0 else 1 end), pools.name")
+      order(Arel.sql("(case pools.category when 'series' then 0 else 1 end), pools.name"))
     end
 
     def name_matches(name)
@@ -70,23 +70,14 @@ class Pool < ApplicationRecord
         q = q.where(creator_id: params[:creator_id].split(",").map(&:to_i))
       end
 
-      if params[:is_active] == "true"
-        q = q.where("pools.is_active = true")
-      elsif params[:is_active] == "false"
-        q = q.where("pools.is_active = false")
-      end
-
       if params[:category] == "series"
         q = q.series
       elsif params[:category] == "collection"
         q = q.collection
       end
 
-      if params[:is_deleted] == "true"
-        q = q.deleted
-      else
-        q = q.undeleted
-      end
+      q = q.attribute_matches(:is_active, params[:is_active])
+      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       params[:order] ||= params.delete(:sort)
       case params[:order]

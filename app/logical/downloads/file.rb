@@ -42,10 +42,12 @@ module Downloads
     end
 
     def before_download(url, datums)
+      original_url = url
       headers = Danbooru.config.http_headers
 
       RewriteStrategies::Base.strategies.each do |strategy|
         url, headers, datums = strategy.new(url).rewrite(url, headers, datums)
+        url = original_url if url.nil?
       end
 
       return [url, headers, datums]
@@ -94,7 +96,7 @@ module Downloads
           else
             raise Error.new("HTTP error code: #{res.code} #{res.message}")
           end
-        rescue Errno::ECONNRESET, Errno::ETIMEDOUT, Errno::EIO, Errno::EHOSTUNREACH, Errno::ECONNREFUSED, IOError => x
+        rescue Errno::ECONNRESET, Errno::ETIMEDOUT, Errno::EIO, Errno::EHOSTUNREACH, Errno::ECONNREFUSED, Timeout::Error, IOError => x
           tries += 1
           if tries < 3
             retry

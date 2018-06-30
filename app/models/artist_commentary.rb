@@ -1,13 +1,13 @@
 class ArtistCommentary < ApplicationRecord
   class RevertError < Exception ; end
 
-  attr_accessor :remove_commentary_tag, :remove_commentary_request_tag, :remove_commentary_check_tag
-  attr_accessor :add_commentary_tag, :add_commentary_request_tag, :add_commentary_check_tag
+  attr_accessor :remove_commentary_tag, :remove_commentary_request_tag, :remove_commentary_check_tag, :remove_partial_commentary_tag
+  attr_accessor :add_commentary_tag, :add_commentary_request_tag, :add_commentary_check_tag, :add_partial_commentary_tag
   before_validation :trim_whitespace
   validates_uniqueness_of :post_id
   belongs_to :post, required: true
-  has_many :versions, lambda {order("artist_commentary_versions.id ASC")}, :class_name => "ArtistCommentaryVersion", :dependent => :destroy, :foreign_key => :post_id, :primary_key => :post_id
-  has_one :previous_version, lambda {order(id: :desc)}, :class_name => "ArtistCommentaryVersion", :foreign_key => :post_id, :primary_key => :post_id
+  has_many :versions, -> {order("artist_commentary_versions.id ASC")}, :class_name => "ArtistCommentaryVersion", :dependent => :destroy, :foreign_key => :post_id, :primary_key => :post_id
+  has_one :previous_version, -> {order(id: :desc)}, :class_name => "ArtistCommentaryVersion", :foreign_key => :post_id, :primary_key => :post_id
   after_save :create_version
   after_commit :tag_post
 
@@ -41,15 +41,15 @@ class ArtistCommentary < ApplicationRecord
         q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
       end
 
-      if params[:original_present] == "yes"
+      if params[:original_present].to_s.truthy?
         q = q.where("(original_title != '') or (original_description != '')")
-      elsif params[:original_present] == "no"
+      elsif params[:original_present].to_s.falsy?
         q = q.where("(original_title = '') and (original_description = '')")
       end
 
-      if params[:translated_present] == "yes"
+      if params[:translated_present].to_s.truthy?
         q = q.where("(translated_title != '') or (translated_description != '')")
-      elsif params[:translated_present] == "no"
+      elsif params[:translated_present].to_s.falsy?
         q = q.where("(translated_title = '') and (translated_description = '')")
       end
 
@@ -84,29 +84,17 @@ class ArtistCommentary < ApplicationRecord
   end
 
   def tag_post
-    if remove_commentary_tag == "1"
-      post.remove_tag("commentary")
-    end
+    post.remove_tag("commentary") if remove_commentary_tag.to_s.truthy?
+    post.add_tag("commentary") if add_commentary_tag.to_s.truthy?
 
-    if add_commentary_tag == "1"
-      post.add_tag("commentary")
-    end
+    post.remove_tag("commentary_request") if remove_commentary_request_tag.to_s.truthy?
+    post.add_tag("commentary_request") if add_commentary_request_tag.to_s.truthy?
 
-    if remove_commentary_request_tag == "1"
-      post.remove_tag("commentary_request")
-    end
+    post.remove_tag("check_commentary") if remove_commentary_check_tag.to_s.truthy?
+    post.add_tag("check_commentary") if add_commentary_check_tag.to_s.truthy?
 
-    if add_commentary_request_tag == "1"
-      post.add_tag("commentary_request")
-    end
-
-    if remove_commentary_check_tag == "1"
-      post.remove_tag("check_commentary")
-    end
-
-    if add_commentary_check_tag == "1"
-      post.add_tag("check_commentary")
-    end
+    post.remove_tag("partial_commentary") if remove_partial_commentary_tag.to_s.truthy?
+    post.add_tag("partial_commentary") if add_partial_commentary_tag.to_s.truthy?
 
     post.save if post.tag_string_changed?
   end

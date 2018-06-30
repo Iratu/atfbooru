@@ -1,6 +1,9 @@
 class TagRelationship < ApplicationRecord
   self.abstract_class = true
 
+  EXPIRY = 60
+  EXPIRY_WARNING = 55
+
   attr_accessor :skip_secondary_validations
 
   belongs_to_creator
@@ -10,13 +13,17 @@ class TagRelationship < ApplicationRecord
   has_one :antecedent_tag, :class_name => "Tag", :foreign_key => "name", :primary_key => "antecedent_name"
   has_one :consequent_tag, :class_name => "Tag", :foreign_key => "name", :primary_key => "consequent_name"
 
+  scope :expired, ->{where("created_at < ?", EXPIRY.days.ago)}
+  scope :old, ->{where("created_at >= ? and created_at < ?", EXPIRY.days.ago, EXPIRY_WARNING.days.ago)}
+  scope :pending, ->{where(status: "pending")}
+
   before_validation :initialize_creator, :on => :create
   before_validation :normalize_names
   validates_format_of :status, :with => /\A(active|deleted|pending|processing|queued|error: .*)\Z/
   validates_presence_of :creator_id, :antecedent_name, :consequent_name
-  validates :creator, presence: { message: "must exist" }, if: lambda { creator_id.present? }
-  validates :approver, presence: { message: "must exist" }, if: lambda { approver_id.present? }
-  validates :forum_topic, presence: { message: "must exist" }, if: lambda { forum_topic_id.present? }
+  validates :creator, presence: { message: "must exist" }, if: -> { creator_id.present? }
+  validates :approver, presence: { message: "must exist" }, if: -> { approver_id.present? }
+  validates :forum_topic, presence: { message: "must exist" }, if: -> { forum_topic_id.present? }
 
   def initialize_creator
     self.creator_id = CurrentUser.user.id
@@ -63,7 +70,7 @@ class TagRelationship < ApplicationRecord
     end
 
     def pending_first
-      order("(case status when 'pending' then 1 when 'queued' then 2 when 'active' then 3 else 0 end), antecedent_name, consequent_name")
+      order(Arel.sql("(case status when 'pending' then 1 when 'queued' then 2 when 'active' then 3 else 0 end), antecedent_name, consequent_name"))
     end
 
     def active

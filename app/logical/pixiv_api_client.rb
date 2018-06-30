@@ -1,3 +1,5 @@
+require 'resolv-replace'
+
 class PixivApiClient
   API_VERSION = "1"
   CLIENT_ID = "bYGKuGVw91e0NMfPGp44euvGt59s"

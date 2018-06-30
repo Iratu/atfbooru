@@ -1,9 +1,18 @@
 class ArtistUrl < ApplicationRecord
-  before_save :initialize_normalized_url, on: [ :create ]
-  before_save :normalize
-  validates_presence_of :url
+  before_validation :parse_prefix
+  before_validation :initialize_normalized_url, on: :create
+  before_validation :normalize
+  validates :url, presence: true, uniqueness: { scope: :artist_id }
   validate :validate_url_format
   belongs_to :artist, :touch => true
+
+  def self.strip_prefixes(url)
+    url.sub(/^[-]+/, "")
+  end
+
+  def self.is_active?(url)
+    url !~ /^-/
+  end
 
   def self.normalize(url)
     if url.nil?
@@ -21,7 +30,9 @@ class ArtistUrl < ApplicationRecord
 
       begin
         url = Sources::Site.new(url).normalize_for_artist_finder!
-      rescue PixivApiClient::Error, Sources::Site::NoStrategyError
+      rescue Net::OpenTimeout, PixivApiClient::Error
+        raise if Rails.env.test?
+      rescue Sources::Site::NoStrategyError
       end
       url = url.gsub(/\/+\Z/, "")
       url + "/"
@@ -56,6 +67,14 @@ class ArtistUrl < ApplicationRecord
     url = url.gsub(/^http:\/\/i\d+\.pixiv\.net\/img\d+/, "http://*.pixiv.net/img*")
   end
 
+  def parse_prefix
+    case url
+    when /^-/
+      self.url = url[1..-1]
+      self.is_active = false
+    end
+  end
+
   def priority
     if normalized_url =~ /pixiv\.net\/member\.php/
       10
@@ -64,7 +83,7 @@ class ArtistUrl < ApplicationRecord
       10
 
     elsif normalized_url =~ /twitter\.com/ && normalized_url !~ /status/
-      10
+      15
 
     elsif normalized_url =~ /tumblr|patreon|deviantart|artstation/
       20
@@ -87,7 +106,11 @@ class ArtistUrl < ApplicationRecord
   end
 
   def to_s
-    url
+    if is_active?
+      url
+    else
+      "-#{url}"
+    end
   end
 
   def validate_url_format

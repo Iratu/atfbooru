@@ -6,8 +6,20 @@ module Sources
       @site = Sources::Site.new(source)
       @site.get
       @site
+    rescue Net::OpenTimeout
+      skip "Remote connection to #{source} failed"
     end
 
+    def setup
+      super
+      load_pixiv_tokens!
+    end
+
+    def teardown
+      save_pixiv_tokens!
+      super
+    end
+    
     context "in all cases" do
       context "A touch page" do
         setup do
@@ -43,7 +55,12 @@ module Sources
         end
 
         should "capture the frame data" do
-          assert_equal([{"file"=>"000000.jpg", "delay"=>125}, {"file"=>"000001.jpg", "delay"=>125}], @site.ugoira_frame_data)
+          assert_equal(2, @site.ugoira_frame_data.size)
+          if @site.ugoira_frame_data[0]["file"]
+            assert_equal([{"file"=>"000000.jpg", "delay"=>125}, {"file"=>"000001.jpg", "delay"=>125}], @site.ugoira_frame_data)
+          else
+            assert_equal([{"delay_msec"=>125}, {"delay_msec"=>125}], @site.ugoira_frame_data)
+          end
         end
       end
 

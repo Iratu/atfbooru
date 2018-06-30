@@ -9,6 +9,7 @@ class ApplicationController < ActionController::Base
   before_action :set_started_at_session
   before_action :api_check
   before_action :set_safe_mode
+  before_action :set_variant
   # before_action :secure_cookies_check
   layout "default"
   helper_method :show_moderation_notice?
@@ -23,7 +24,7 @@ class ApplicationController < ActionController::Base
 
   # This is raised on requests to `/blah.js`. Rails has already rendered StaticController#not_found
   # here, so calling `rescue_exception` would cause a double render error.
-  rescue_from ActionController::InvalidCrossOriginRequest, :with => lambda {}
+  rescue_from ActionController::InvalidCrossOriginRequest, with: -> {}
 
   protected
 
@@ -110,13 +111,13 @@ class ApplicationController < ActionController::Base
     elsif exception.is_a?(NotImplementedError)
       flash[:notice] = "This feature isn't available: #{@exception.message}"
       respond_to do |fmt|
-        fmt.html { redirect_to :back }
-        fmt.js { render nothing: true, status: 501 }
+        fmt.html { redirect_back fallback_location: root_path }
+        fmt.js { head 501 }
         fmt.json { render template: "static/error", status: 501 }
         fmt.xml  { render template: "static/error", status: 501 }
       end
     else
-      render :template => "static/error", :status => 500
+      render :template => "static/error", :status => 500, :layout => "blank"
     end
   end
 
@@ -128,7 +129,7 @@ class ApplicationController < ActionController::Base
   def authentication_failed
     respond_to do |fmt|
       fmt.html do
-        render :text => "authentication failed", :status => 401
+        render :plain => "authentication failed", :status => 401
       end
 
       fmt.xml do
@@ -183,6 +184,10 @@ class ApplicationController < ActionController::Base
     if session[:started_at].blank?
       session[:started_at] = Time.now
     end
+  end
+
+  def set_variant
+    request.variant = params[:variant].try(:to_sym)
   end
 
   User::Roles.each do |role|
