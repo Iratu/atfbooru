@@ -14,6 +14,7 @@ div.related-tags {
   padding: 1em;
   background: #EEE;
   overflow: auto;
+  border-radius: 4px;
 
   div.tag-column {
     max-width: 15em;
@@ -26,6 +27,11 @@ div.related-tags {
       li {
         em {
           font-weight: bold;
+        }
+
+        svg {
+          margin-top: 2px;
+          cursor: pointer;
         }
 
         a {

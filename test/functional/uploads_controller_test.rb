@@ -23,12 +23,38 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
           assert_no_match(/59523577_ugoira0\.jpg/, response.body)
         end
       end
+
+      context "for a blank source" do
+        should "render" do
+          get_auth batch_uploads_path, @user
+          assert_response :success
+        end
+      end
+    end
+
+    context "preprocess action" do      
+      should "prefer the file over the source when preprocessing" do
+        file = Rack::Test::UploadedFile.new("#{Rails.root}/test/files/test.jpg", "image/jpeg")
+        post_auth preprocess_uploads_path, @user, params: {:url => "http://www.google.com/intl/en_ALL/images/logo.gif", :file => file}
+        assert_response :success
+        Delayed::Worker.new.work_off
+        assert_equal("ecef68c44edb8a0d6a3070b5f8e8ee76", Upload.last.md5)
+      end
     end
 
     context "new action" do
       should "render" do
         get_auth new_upload_path, @user
         assert_response :success
+      end
+
+      context "with a url" do
+        should "preprocess" do
+          assert_difference(-> { Upload.count }) do
+            get_auth new_upload_path, @user, params: {:url => "http://www.google.com/intl/en_ALL/images/logo.gif"}
+            assert_response :success
+          end
+        end
       end
 
       context "for a twitter post" do
@@ -42,13 +68,15 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
       context "for a post that has already been uploaded" do
         setup do
           as_user do
-            @post = create(:post, :source => "aaa")
+            @post = create(:post, :source => "http://google.com/aaa")
           end
         end
 
         should "initialize the post" do
-          get_auth new_upload_path, @user, params: {:url => "http://google.com/aaa"}
-          assert_response :success
+          assert_difference(-> { Upload.count }, 0) do
+            get_auth new_upload_path, @user, params: {:url => "http://google.com/aaa"}
+            assert_response :success
+          end
         end
       end
     end
@@ -56,18 +84,28 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
     context "index action" do
       setup do
         as_user do
-          @upload = create(:source_upload)
+          @upload = create(:source_upload, tag_string: "foo bar")
         end
       end
 
       should "render" do
-        get_auth uploads_path, @user
+        get uploads_path
         assert_response :success
       end
 
       context "with search parameters" do
         should "render" do
-          get_auth uploads_path, @user, params: {:search => {:source => @upload.source}}
+          search_params = {
+            uploader_name: @upload.uploader_name,
+            source_matches: @upload.source,
+            rating: @upload.rating,
+            has_post: "yes",
+            post_tags_match: @upload.tag_string,
+            status: @upload.status,
+            server: @upload.server,
+          }
+
+          get uploads_path, params: { search: search_params }
           assert_response :success
         end
       end

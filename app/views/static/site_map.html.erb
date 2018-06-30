@@ -6,12 +6,8 @@
         <li><h1>Posts</h1></li>
         <li><%= link_to("Help", wiki_pages_path(:title => "help:posts")) %></li>
         <li><%= link_to("Listing", posts_path) %></li>
-        <li><%= link_to("Changes", post_versions_path) %></li>
         <li><%= link_to("Upload", new_upload_path) %></li>
         <li><%= link_to("Upload Listing", uploads_path) %></li>
-        <li><%= link_to("Appeals", post_appeals_path) %></li>
-        <li><%= link_to("Flags", post_flags_path) %></li>
-        <li><%= link_to("Replacements", post_replacements_path) %></li>
         <li><%= link_to("Popular", popular_explore_posts_path) %></li>
         <li><%= link_to("Most Viewed", viewed_explore_posts_path) %></li>
         <% if CurrentUser.can_approve_posts? %>
@@ -20,6 +16,15 @@
         <% if CurrentUser.is_moderator? %>
           <li><%= link_to("Mass Edit", edit_moderator_tag_path) %></li>
         <% end %>
+        <li><%= link_to("Similar Images Search", iqdb_queries_path) %></li>
+      </ul>
+      <ul>
+        <li><h1>Post Events</h1></li>
+        <li><%= link_to("Changes", post_versions_path) %></li>
+        <li><%= link_to("Approvals", post_approvals_path) %></li>
+        <li><%= link_to("Appeals", post_appeals_path) %></li>
+        <li><%= link_to("Flags", post_flags_path) %></li>
+        <li><%= link_to("Replacements", post_replacements_path) %></li>
       </ul>
       <ul>
         <li><h1>Tools</h1></li>
@@ -29,7 +34,6 @@
         <li><%= link_to("Bookmarklet", bookmarklet_path) %></li>
         <li><%= link_to("User Scripts", wiki_pages_path(title: "about:userscripts")) %></li>
         <li><%= link_to("API Documentation", wiki_pages_path(:title => "help:api")) %></li>
-        <li><%= link_to("IQDB Queries", check_iqdb_queries_path) %></li>
       </ul>
       <ul>
         <li><h1>Artists</h1></li>
@@ -115,6 +119,7 @@
         <li><%= link_to("Signup", new_user_path) %></li>
         <li><%= link_to("Terms of Service", terms_of_service_path) %></li>
         <li><%= link_to("Upgrade Information", new_user_upgrade_path) %></li>
+        <li><%= link_to("Refresh counts", new_maintenance_user_count_fixes_path) %>
       </ul>
       <ul>
         <li><h1>Admin</h1></li>

@@ -4,8 +4,6 @@
   Danbooru.Post.pending_update_count = 0;
 
   Danbooru.Post.initialize_all = function() {
-    this.initialize_post_previews();
-
     if ($("#c-posts").length) {
       this.initialize_shortcuts();
       this.initialize_saved_searches();
@@ -56,7 +54,7 @@
     var hasPrev = $("#a-show").length || $(".paginator a[rel~=prev]").length;
     var hasNext = $("#a-index").length && $(".paginator a[rel~=next]").length;
 
-    $body.hammer({touchAction: 'pan-y', recognizers: [[Hammer.Swipe, { threshold: 20, velocity: 0.4, direction: Hammer.DIRECTION_HORIZONTAL }]]});
+    $body.hammer({touchAction: 'pan-y', recognizers: [[Hammer.Swipe, { threshold: 20, velocity: 0.4, direction: Hammer.DIRECTION_HORIZONTAL }]], inputClass: Hammer.TouchInput});
 
     if (hasPrev) {
       $body.hammer().on("swiperight", function(e) {
@@ -160,7 +158,7 @@
 
   Danbooru.Post.initialize_similar = function() {
     $("#similar-button").click(function(e) {
-      $.post("/iqdb_queries", {"url": $("#post_source").val()}).done(function(html) {$("#iqdb-similar").html(html).show()});
+      $.get("/iqdb_queries", {"url": $("#post_source").val()}).done(function(html) {$("#iqdb-similar").html(html).show()});
       e.preventDefault();
     });
   }
@@ -325,28 +323,6 @@
     });
   }
 
-  Danbooru.Post.initialize_post_previews = function() {
-    $(".post-preview").each(function(i, v) {
-      Danbooru.Post.initialize_title_for(v);
-    });
-  }
-
-  Danbooru.Post.initialize_title_for = function(post) {
-    var $post = $(post);
-    var $img = $post.find("img");
-    var score = null;
-    if ($post.data("views")) {
-      score = " views:" + $post.data("views");
-    } else {
-      score = " score:" + $post.data("score");
-    }
-    var uploader = " ";
-    if ($post.attr("data-uploader")) {
-      uploader += "user:" + $post.attr("data-uploader").replace(/_/g, " ");
-    }
-    $img.attr("title", $post.attr("data-tags") + uploader + " rating:" + $post.data("rating") + score);
-  }
-
   Danbooru.Post.expand_image = function(e) {
     if (Danbooru.test_max_width(660)) {
       // just do the default behavior
@@ -402,7 +378,8 @@
   Danbooru.Post.resize_image_to_window = function($img) {
     if (($img.data("scale-factor") === 1) || ($img.data("scale-factor") === undefined)) {
       if ($(window).width() > 660) {
-        var client_width = $(window).width() - $("#sidebar").width() - 75;
+        var sidebar_width = $("#sidebar").width() || 0;
+        var client_width = $(window).width() - sidebar_width - 75;
       } else {
         var client_width = $(window).width() - 2;
       }
@@ -522,7 +499,6 @@
     if (data.has_visible_children) {
       $post.addClass("post-status-has-children");
     }
-    Danbooru.Post.initialize_title_for($post);
   }
 
   Danbooru.Post.vote = function(score, id) {
@@ -586,7 +562,7 @@
 
   Danbooru.Post.favorite = function (e) {
     if ($("#add-to-favorites").is(":visible")) {
-      $("#add-to-favorites").click();
+      $("#add-to-favorites")[0].click();
     } else {
       if (Danbooru.meta("current-user-id") == "") {
         Danbooru.notice("You must be logged in to favorite posts");
@@ -603,9 +579,12 @@
   };
 
   Danbooru.Post.initialize_saved_searches = function() {
-    $("#saved_search_labels").autocomplete({
+    $("#new_saved_search #saved_search_label_string").autocomplete({
+      search: function() {
+        $(this).data("ui-autocomplete").menu.bindings = $();
+      },
       source: function(req, resp) {
-        Danbooru.SavedSearch.labels(req.term).success(function(labels) {
+        Danbooru.SavedSearch.labels(req.term).then(function(labels) {
           resp(labels.map(function(label) {
             return {
               label: label.replace(/_/g, " "),

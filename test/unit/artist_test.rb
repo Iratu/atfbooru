@@ -6,11 +6,15 @@ class ArtistTest < ActiveSupport::TestCase
 
     assert_equal(1, artists.size)
     assert_equal(expected_name, artists.first.name, "Testing URL: #{source_url}")
+  rescue Net::OpenTimeout, PixivApiClient::Error
+    skip "Remote connection failed for #{source_url}"
   end
 
   def assert_artist_not_found(source_url)
     artists = Artist.url_matches(source_url).to_a
     assert_equal(0, artists.size, "Testing URL: #{source_url}")
+  rescue Net::OpenTimeout
+    skip "Remote connection failed for #{source_url}"
   end
 
   context "An artist" do
@@ -23,6 +27,33 @@ class ArtistTest < ActiveSupport::TestCase
     teardown do
       CurrentUser.user = nil
       CurrentUser.ip_addr = nil
+    end
+
+    should "parse inactive urls" do
+      @artist = Artist.create(name: "blah", url_string: "-http://monet.com")
+      assert_equal(["-http://monet.com"], @artist.urls.map(&:to_s))
+      refute(@artist.urls[0].is_active?)
+    end
+
+    should "not allow duplicate active+inactive urls" do
+      @artist = Artist.create(name: "blah", url_string: "-http://monet.com\nhttp://monet.com")
+      assert_equal(1, @artist.urls.count)
+      assert_equal(["-http://monet.com"], @artist.urls.map(&:to_s))
+      refute(@artist.urls[0].is_active?)      
+    end
+
+    should "allow deactivating a url" do
+      @artist = Artist.create(name: "blah", url_string: "http://monet.com")
+      @artist.update(url_string: "-http://monet.com")
+      assert_equal(1, @artist.urls.count)
+      refute(@artist.urls[0].is_active?)
+    end
+
+    should "allow activating a url" do
+      @artist = Artist.create(name: "blah", url_string: "-http://monet.com")
+      @artist.update(url_string: "http://monet.com")
+      assert_equal(1, @artist.urls.count)
+      assert(@artist.urls[0].is_active?)
     end
 
     should "should have a valid name" do
@@ -157,8 +188,8 @@ class ArtistTest < ActiveSupport::TestCase
     end
 
     should "ignore pixiv.net/ and pixiv.net/img/ url matches" do
-      a1 = FactoryBot.create(:artist, :name => "yomosaka", :url_string => "http://i2.pixiv.net/img100/img/yomosaka/27618292.jpg")
-      a2 = FactoryBot.create(:artist, :name => "niwatazumi_bf", :url_string => "http://i2.pixiv.net/img16/img/niwatazumi_bf/35488864_big_p6.jpg")
+      a1 = FactoryBot.create(:artist, :name => "yomosaka", :url_string => "http://i2.pixiv.net/img18/img/evazion/14901720.png")
+      a2 = FactoryBot.create(:artist, :name => "niwatazumi_bf", :url_string => "http://i2.pixiv.net/img18/img/evazion/14901720_big_p0.png")
       assert_equal([], Artist.find_all_by_url("http://i2.pixiv.net/img28/img/kyang692/35563903.jpg"))
     end
 
@@ -191,7 +222,7 @@ class ArtistTest < ActiveSupport::TestCase
 
     context "when finding deviantart artists" do
       setup do
-        skip "deviant art is not configured" unless Danbooru.config.deviantart_client_id.present?
+        skip "DeviantArt API keys not set" unless Danbooru.config.deviantart_client_id.present?
         FactoryBot.create(:artist, :name => "artgerm", :url_string => "http://artgerm.deviantart.com/")
         FactoryBot.create(:artist, :name => "trixia",  :url_string => "http://trixdraws.deviantart.com/")
       end
@@ -261,7 +292,9 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       should "find nothing for bad IDs" do
-        assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
+        assert_raises(PixivApiClient::BadIDError) do
+          assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
+        end
       end
     end
 

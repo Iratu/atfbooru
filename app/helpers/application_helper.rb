@@ -83,9 +83,11 @@ module ApplicationHelper
     raw content_tag(:time, duration, datetime: datetime, title: title)
   end
 
-  def time_ago_in_words_tagged(time)
+  def time_ago_in_words_tagged(time, compact: false)
     if time.past?
-      raw time_tag(time_ago_in_words(time) + " ago", time)
+      text = time_ago_in_words(time) + " ago"
+      text = text.gsub(/almost|about|over/, "") if compact
+      raw time_tag(text, time)
     else
       raw time_tag("in " + distance_of_time_in_words(Time.now, time), time)
     end
@@ -111,6 +113,10 @@ module ApplicationHelper
 
   def link_to_ip(ip)
     link_to ip, moderator_ip_addrs_path(:search => {:ip_addr => ip})
+  end
+
+  def link_to_search(search)
+    link_to search, posts_path(tags: search)
   end
 
   def link_to_wiki(*wiki_titles, **options)

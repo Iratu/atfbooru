@@ -6,7 +6,7 @@ gem "sass-rails"
 gem "sprockets-rails", :require => "sprockets/railtie"
 gem "uglifier"
 gem "therubyracer", :platforms => :ruby
-gem "rails", "~> 5.1"
+gem "rails", "~> 5.2"
 gem "pg"
 gem "dalli", :platforms => :ruby
 gem "memcache-client", :platforms => [:mswin, :mingw, :x64_mingw]
@@ -49,6 +49,7 @@ gem 'rakismet'
 gem 'recaptcha', require: "recaptcha/rails"
 gem 'activemodel-serializers-xml'
 gem 'ptools'
+gem 'jquery-rails'
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"
@@ -81,4 +82,5 @@ group :test do
   gem "simplecov", :require => false
   gem "timecop"
   gem "webmock"
+  gem "minitest-ci"
 end

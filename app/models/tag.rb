@@ -5,15 +5,15 @@ class Tag < ApplicationRecord
   SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm|flagger|-flagger|appealer|-appealer"
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :artist, :foreign_key => "name", :primary_key => "name"
-  has_one :antecedent_alias, lambda {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
-  has_many :consequent_aliases, lambda {active}, :class_name => "TagAlias", :foreign_key => "consequent_name", :primary_key => "name"
-  has_many :antecedent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "antecedent_name", :primary_key => "name"
-  has_many :consequent_implications, lambda {active}, :class_name => "TagImplication", :foreign_key => "consequent_name", :primary_key => "name"
+  has_one :antecedent_alias, -> {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
+  has_many :consequent_aliases, -> {active}, :class_name => "TagAlias", :foreign_key => "consequent_name", :primary_key => "name"
+  has_many :antecedent_implications, -> {active}, :class_name => "TagImplication", :foreign_key => "antecedent_name", :primary_key => "name"
+  has_many :consequent_implications, -> {active}, :class_name => "TagImplication", :foreign_key => "consequent_name", :primary_key => "name"
 
   validates :name, uniqueness: true, tag_name: true, on: :create
   validates_inclusion_of :category, in: TagCategory.category_ids
 
-  after_save :update_category_cache_for_all, if: lambda {|rec| rec.saved_change_to_attribute?(:category)}
+  after_save :update_category_cache_for_all, if: ->(rec) { rec.saved_change_to_attribute?(:category)}
 
   module ApiMethods
     def to_legacy_json
@@ -887,21 +887,23 @@ class Tag < ApplicationRecord
         q = q.where("category = ?", params[:category])
       end
 
-      if params[:hide_empty].blank? || params[:hide_empty] != "no"
+      if params[:hide_empty].blank? || params[:hide_empty].to_s.truthy?
         q = q.where("post_count > 0")
       end
 
-      if params[:has_wiki] == "yes"
+      if params[:has_wiki].to_s.truthy?
         q = q.joins(:wiki_page).where("wiki_pages.is_deleted = false")
-      elsif params[:has_wiki] == "no"
+      elsif params[:has_wiki].to_s.falsy?
         q = q.joins("LEFT JOIN wiki_pages ON tags.name = wiki_pages.title").where("wiki_pages.title IS NULL OR wiki_pages.is_deleted = true")
       end
 
-      if params[:has_artist] == "yes"
+      if params[:has_artist].to_s.truthy?
         q = q.joins("INNER JOIN artists ON tags.name = artists.name").where("artists.is_active = true")
-      elsif params[:has_artist] == "no"
+      elsif params[:has_artist].to_s.falsy?
         q = q.joins("LEFT JOIN artists ON tags.name = artists.name").where("artists.name IS NULL OR artists.is_active = false")
       end
+
+      q = q.attribute_matches(:is_locked, params[:is_locked])
 
       params[:order] ||= params.delete(:sort)
       case params[:order]

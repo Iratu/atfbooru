@@ -4,6 +4,25 @@ class PostKeeperManagerTest < ActiveSupport::TestCase
   subject { PostKeeperManager }
 
   context "#check_and_update" do
+    context "when the connection is bad" do
+      setup do
+        @user = FactoryBot.create(:user)
+        as(@user) do
+          @post = FactoryBot.create(:post)
+        end
+        @post.stubs(:update_column).raises(ActiveRecord::StatementInvalid.new("can't get socket descriptor post_versions"))
+      end
+
+      should "retry" do
+        PostArchive.connection.expects(:reconnect!)
+        assert_raises(ActiveRecord::StatementInvalid) do
+          subject.check_and_update(@post)        
+        end
+      end
+    end
+  end
+
+  context "#check_and_assign" do
     setup do
       Timecop.travel(1.month.ago) do
         @alice = FactoryBot.create(:user)
@@ -17,19 +36,21 @@ class PostKeeperManagerTest < ActiveSupport::TestCase
       end
       CurrentUser.scoped(@bob) do
         Timecop.travel(2.hours.from_now) do
-          @post.update_attributes(tag_string: "aaa bbb ccc")
+          @post.reload
+          @post.update(tag_string: "aaa bbb ccc")
         end
       end
       CurrentUser.scoped(@carol) do
         Timecop.travel(4.hours.from_now) do
-          @post.update_attributes(tag_string: "ccc ddd eee fff ggg")
+          @post.reload
+          @post.update(tag_string: "ccc ddd eee fff ggg")
         end
       end
     end
 
     should "update the post" do
-      subject.check_and_update(@post.id)
-      @post.reload
+      assert_equal(3, @post.versions.count)
+      subject.check_and_assign(@post)
       assert_equal({"uid" => @carol.id}, @post.keeper_data)
     end
   end

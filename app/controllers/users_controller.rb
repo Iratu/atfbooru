@@ -27,6 +27,10 @@ class UsersController < ApplicationController
         format.xml do
           render :xml => @users.to_xml(:root => "users")
         end
+        format.json do
+          render json: @users.to_json
+          expires_in params[:expiry].to_i.days if params[:expiry]
+        end
       end
     end
   end
@@ -68,7 +72,9 @@ class UsersController < ApplicationController
     else
       flash[:notice] = "Settings updated"
     end
-    respond_with(@user, location: edit_user_path(@user))
+    respond_with(@user) do |format|
+      format.html { redirect_back fallback_location: edit_user_path(@user) }
+    end
   end
 
   private
@@ -89,7 +95,7 @@ class UsersController < ApplicationController
       enable_auto_complete show_deleted_children
       disable_categorized_saved_searches disable_tagged_filenames
       enable_recent_searches disable_cropped_thumbnails disable_mobile_gestures
-      enable_safe_mode disable_responsive_mode
+      enable_safe_mode disable_responsive_mode disable_post_tooltips
     ]
 
     permitted_params += [dmail_filter_attributes: %i[id words]]

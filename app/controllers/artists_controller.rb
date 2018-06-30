@@ -1,5 +1,5 @@
 class ArtistsController < ApplicationController
-  respond_to :html, :xml, :json
+  respond_to :html, :xml, :json, :js
   before_action :member_only, :except => [:index, :show, :show_or_new, :banned]
   before_action :builder_only, :only => [:destroy]
   before_action :admin_only, :only => [:ban, :unban]
@@ -44,6 +44,7 @@ class ArtistsController < ApplicationController
       end
       format.json do
         render :json => @artists.to_json(:include => [:urls])
+        expires_in params[:expiry].to_i.days if params[:expiry]
       end
     end
   end
@@ -73,14 +74,6 @@ class ArtistsController < ApplicationController
     redirect_to(artist_path(@artist), :notice => "Artist deleted")
   end
 
-  def undelete
-    if !@artist.deletable_by?(CurrentUser.user)
-      raise User::PrivilegeError
-    end
-    @artist.update_attribute(:is_active, true)
-    redirect_to(artist_path(@artist), :notice => "Artist undeleted")
-  end
-
   def revert
     @artist = Artist.find(params[:id])
     @version = @artist.versions.find(params[:version_id])
@@ -108,6 +101,7 @@ class ArtistsController < ApplicationController
       end
       format.json do
         render :json => @artists.to_json(:include => [:sorted_urls])
+        expires_in params[:expiry].to_i.days if params[:expiry]
       end
     end
   end

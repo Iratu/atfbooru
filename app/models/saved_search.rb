@@ -52,7 +52,7 @@ class SavedSearch < ApplicationRecord
   after_save {|rec| Cache.delete(SavedSearch.cache_key(rec.user_id))}
   after_destroy {|rec| Cache.delete(SavedSearch.cache_key(rec.user_id))}
   before_validation :normalize
-  scope :labeled, lambda {|label| where("labels @> string_to_array(?, '~~~~')", label)}
+  scope :labeled, ->(label) { where("labels @> string_to_array(?, '~~~~')", label)}
 
   def self.normalize_label(label)
     label.to_s.strip.downcase.gsub(/[[:space:]]/, "_")
@@ -73,7 +73,7 @@ class SavedSearch < ApplicationRecord
 
   def self.labels_for(user_id)
     Cache.get(cache_key(user_id)) do
-      SavedSearch.where(user_id: user_id).order("label").pluck("distinct unnest(labels) as label")
+      SavedSearch.where(user_id: user_id).order("label").pluck(Arel.sql("distinct unnest(labels) as label"))
     end
   end
 
@@ -130,10 +130,6 @@ class SavedSearch < ApplicationRecord
   end
 
   def disable_labels=(value)
-    CurrentUser.update(disable_categorized_saved_searches: true) if value == "1"
-  end
-
-  def disable_labels=(value)
-    CurrentUser.update(disable_categorized_saved_searches: true) if value == "1"
+    CurrentUser.update(disable_categorized_saved_searches: true) if value.to_s.truthy?
   end
 end

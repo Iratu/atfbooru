@@ -1,9 +1,6 @@
 require_relative 'boot'
 require 'rails/all'
 
-if defined?(Bundler)
-  Bundler.require(:default, Rails.env)
-end
 Bundler.require(*Rails.groups)
 
 require_relative "danbooru_default_config"
@@ -24,7 +21,7 @@ module Danbooru
     config.action_mailer.delivery_method = :smtp
     config.action_mailer.smtp_settings = {:enable_starttls_auto => false}
     config.action_mailer.perform_deliveries = true
-    config.log_tags = [lambda {|req| "PID:#{Process.pid}"}]
+    config.log_tags = [->(req) {"PID:#{Process.pid}"}]
     config.action_controller.action_on_unpermitted_parameters = :raise
     config.force_ssl = true
 

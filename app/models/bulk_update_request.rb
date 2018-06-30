@@ -8,7 +8,7 @@ class BulkUpdateRequest < ApplicationRecord
 
   validates_presence_of :user
   validates_presence_of :script
-  validates_presence_of :title, :if => lambda {|rec| rec.forum_topic_id.blank?}
+  validates_presence_of :title, if: ->(rec) {rec.forum_topic_id.blank?}
   validates_inclusion_of :status, :in => %w(pending approved rejected)
   validate :script_formatted_correctly
   validate :forum_topic_id_not_invalid
@@ -17,7 +17,10 @@ class BulkUpdateRequest < ApplicationRecord
   before_validation :normalize_text
   after_create :create_forum_topic
 
-  scope :pending_first, lambda { order("(case status when 'pending' then 0 when 'approved' then 1 else 2 end)") }
+  scope :pending_first, -> { order(Arel.sql("(case status when 'pending' then 0 when 'approved' then 1 else 2 end)")) }
+  scope :pending, -> {where(status: "pending")}
+  scope :expired, -> {where("created_at < ?", TagRelationship::EXPIRY.days.ago)}
+  scope :old, -> {where("created_at between ? and ?", TagRelationship::EXPIRY.days.ago, TagRelationship::EXPIRY_WARNING.days.ago)}
 
   module SearchMethods
     def default_order
@@ -115,13 +118,11 @@ class BulkUpdateRequest < ApplicationRecord
         update(forum_post_id: forum_post.id)
       else
         forum_topic = ForumTopic.create(title: title, category_id: 1, original_post_attributes: {body: reason_with_link})
-        puts forum_topic.errors.full_messages
-        puts forum_topic.original_post.errors.full_messages
         update(forum_topic_id: forum_topic.id, forum_post_id: forum_topic.posts.first.id)
       end
     end
 
-    def reject!(rejector)
+    def reject!(rejector = User.system)
       transaction do
         update(status: "rejected")
         forum_updater.update("The #{bulk_update_request_link} (forum ##{forum_post.id}) has been rejected by @#{rejector.name}.", "REJECTED")
@@ -202,10 +203,18 @@ class BulkUpdateRequest < ApplicationRecord
   end
 
   def skip_secondary_validations=(v)
-    if v == "1" or v == true
-      @skip_secondary_validations = true
-    else
-      @skip_secondary_validations = false
-    end
+    @skip_secondary_validations = v.to_s.truthy?
+  end
+
+  def is_pending?
+    status == "pending"
+  end
+
+  def is_approved?
+    status == "approved"
+  end
+
+  def is_rejected?
+    status == "rejected"
   end
 end

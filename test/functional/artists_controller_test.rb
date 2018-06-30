@@ -4,6 +4,10 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
   def assert_artist_found(expected_artist, source_url = nil)
     if source_url
       get_auth finder_artists_path(format: "json", url: source_url), @user
+      if response.body =~ /Net::OpenTimeout/
+        skip "Remote connection to #{source_url} failed"
+        return
+      end
     end
     assert_response :success
     json = JSON.parse(response.body)
@@ -12,7 +16,14 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
   end
 
   def assert_artist_not_found(source_url)
+    tries = 0
+
     get_auth finder_artists_path(format: "json", url: source_url), @user
+    if response.body =~ /Net::OpenTimeout/
+      skip "Remote connection to #{source_url} failed"
+      return
+    end
+
     assert_response :success
     json = JSON.parse(response.body)
     assert_equal(0, json.size, "Testing URL: #{source_url}")
@@ -122,7 +133,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
     context "with an artist that has notes" do
       setup do
         as(@admin) do
-          @artist = create(:artist, name: "aaa", notes: "testing")
+          @artist = create(:artist, name: "aaa", notes: "testing", url_string: "htttp://example.com")
         end
         @wiki_page = @artist.wiki_page
         @another_user = create(:user)
@@ -131,7 +142,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
       should "update an artist" do
         old_timestamp = @wiki_page.updated_at
         travel_to(1.minute.from_now) do
-          put_auth artist_path(@artist.id), @user, params: {artist: {notes: "rex"}}
+          put_auth artist_path(@artist.id), @user, params: {artist: {notes: "rex", url_string: "http://example.com\nhttp://monet.com"}}
         end
         @artist.reload
         @wiki_page = @artist.wiki_page
@@ -188,7 +199,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
 
     should "undelete an artist" do
       @builder = create(:builder_user)
-      post_auth undelete_artist_path(@artist.id), @builder
+      put_auth artist_path(@artist.id), @builder, params: {artist: {is_active: true}}
       assert_redirected_to(artist_path(@artist.id))
       assert_equal(true, @artist.reload.is_active)
     end

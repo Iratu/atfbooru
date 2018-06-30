@@ -42,7 +42,7 @@ class FavoriteGroup < ApplicationRecord
     end
 
     def default_order
-      order(updated_at: :desc)
+      order(name: :asc)
     end
 
     def search(params)
@@ -64,6 +64,8 @@ class FavoriteGroup < ApplicationRecord
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])
       end
+
+      q = q.attribute_matches(:is_public, params[:is_public])
 
       q.apply_default_order(params)
     end

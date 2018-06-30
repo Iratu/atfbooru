@@ -5,6 +5,8 @@ module DownloadTestHelper
     download = Downloads::File.new(source)
     tempfile = download.download!
     assert_equal(expected_filesize, tempfile.size, "Tested source URL: #{source}")
+  rescue Net::OpenTimeout
+    skip "Remote connection to #{source} failed"
   end
 
   def assert_rewritten(expected_source, test_source)

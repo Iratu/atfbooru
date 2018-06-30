@@ -58,6 +58,7 @@ class User < ApplicationRecord
     disable_mobile_gestures
     enable_safe_mode
     disable_responsive_mode
+    disable_post_tooltips
   )
 
   include Danbooru::HasBitFlags
@@ -67,15 +68,15 @@ class User < ApplicationRecord
 
   after_initialize :initialize_attributes, if: :new_record?
   validates :name, user_name: true, on: :create
-  validates_uniqueness_of :email, :case_sensitive => false, :if => lambda {|rec| rec.email.present? && rec.saved_change_to_email? }
-  validates_length_of :password, :minimum => 5, :if => lambda {|rec| rec.new_record? || rec.password.present?}
+  validates_uniqueness_of :email, :case_sensitive => false, :if => ->(rec) { rec.email.present? && rec.saved_change_to_email? }
+  validates_length_of :password, :minimum => 5, :if => ->(rec) { rec.new_record? || rec.password.present?}
   validates_inclusion_of :default_image_size, :in => %w(large original)
   validates_inclusion_of :per_page, :in => 1..100
   validates_confirmation_of :password
-  validates_presence_of :email, :if => lambda {|rec| rec.new_record? && Danbooru.config.enable_email_verification?}
+  validates_presence_of :email, :if => ->(rec) { rec.new_record? && Danbooru.config.enable_email_verification?}
   validates_presence_of :comment_threshold
   validate :validate_ip_addr_is_not_banned, :on => :create
-  validate :validate_sock_puppets, :on => :create, :if => lambda { Danbooru.config.enable_sock_puppet_validation? }
+  validate :validate_sock_puppets, :on => :create, :if => -> { Danbooru.config.enable_sock_puppet_validation? }
   before_validation :normalize_blacklisted_tags
   before_validation :set_per_page
   before_validation :normalize_email
@@ -91,18 +92,21 @@ class User < ApplicationRecord
   has_many :post_approvals, :dependent => :destroy
   has_many :post_disapprovals, :dependent => :destroy
   has_many :post_votes
-  has_many :bans, lambda {order("bans.id desc")}
-  has_one :recent_ban, lambda {order("bans.id desc")}, :class_name => "Ban"
+  has_many :post_archives
+  has_many :note_versions
+  has_many :bans, -> {order("bans.id desc")}
+  has_one :recent_ban, -> {order("bans.id desc")}, :class_name => "Ban"
 
   has_one :api_key
   has_one :dmail_filter
   has_one :super_voter
   has_one :token_bucket
   has_many :note_versions, :foreign_key => "updater_id"
-  has_many :dmails, lambda {order("dmails.id desc")}, :foreign_key => "owner_id"
+  has_many :dmails, -> {order("dmails.id desc")}, :foreign_key => "owner_id"
   has_many :saved_searches
-  has_many :forum_posts, lambda {order("forum_posts.created_at, forum_posts.id")}, :foreign_key => "creator_id"
-  has_many :user_name_change_requests, lambda {visible.order("user_name_change_requests.created_at desc")}
+  has_many :forum_posts, -> {order("forum_posts.created_at, forum_posts.id")}, :foreign_key => "creator_id"
+  has_many :user_name_change_requests, -> {visible.order("user_name_change_requests.created_at desc")}
+  has_many :favorite_groups, -> {order(name: :asc)}, foreign_key: :creator_id
   belongs_to :inviter, class_name: "User", optional: true
   after_update :create_mod_action
   accepts_nested_attributes_for :dmail_filter
@@ -303,10 +307,6 @@ class User < ApplicationRecord
 
     def remove_favorite!(post)
       Favorite.remove(post: post, user: self)
-    end
-
-    def favorite_groups
-      FavoriteGroup.for_creator(CurrentUser.user.id).order("updated_at desc")
     end
   end
 
@@ -752,7 +752,7 @@ end
     end
 
     def favorite_group_count
-      FavoriteGroup.for_creator(id).count
+      favorite_groups.count
     end
 
     def appeal_count
@@ -773,6 +773,16 @@ end
 
     def negative_feedback_count
       feedback.negative.count
+    end
+
+    def refresh_counts!
+      self.class.without_timeout do
+        User.where(id: id).update_all(
+          post_upload_count: Post.for_user(id).count,
+          post_update_count: PostArchive.for_user(id).count,
+          note_update_count: NoteVersion.where(updater_id: id).count
+        )
+      end
     end
   end
 
@@ -845,10 +855,10 @@ end
       [:can_approve_posts, :can_upload_free, :is_super_voter].each do |x|
         if params[x].present?
           attr_idx = BOOLEAN_ATTRIBUTES.index(x.to_s)
-          if params[x] == "true"
+          if params[x].to_s.truthy?
             bitprefs_include ||= "0"*bitprefs_length
             bitprefs_include[attr_idx] = '1'
-          elsif params[x] == "false"
+          elsif params[x].to_s.falsy?
             bitprefs_exclude ||= "0"*bitprefs_length
             bitprefs_exclude[attr_idx] = '1'
           end
@@ -867,7 +877,7 @@ end
                     {:len => bitprefs_length, :bits => bitprefs_exclude})
       end
 
-      if params[:current_user_first] == "true" && !CurrentUser.is_anonymous?
+      if params[:current_user_first].to_s.truthy? && !CurrentUser.is_anonymous?
         q = q.order("id = #{CurrentUser.user.id.to_i} desc")
       end
       
@@ -928,7 +938,7 @@ end
 
   def dmail_count
     if has_mail?
-      "(#{dmails.unread.count})"
+      "(#{unread_dmail_count})"
     else
       ""
     end
