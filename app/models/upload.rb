@@ -40,9 +40,9 @@ class Upload < ApplicationRecord
     end
 
     def validate_video_duration(record)
-	  if CurrentUser.can_approve_posts? && is_video? && video.duration > 3600
+	  if CurrentUser.can_approve_posts? && record.is_video? && record.video.duration > 3600
         raise "video must not be longer than 60 minutes"
-      elsif !CurrentUser.can_approve_posts? && is_video? && video.duration > 1800
+      elsif !CurrentUser.can_approve_posts? && record.is_video? && record.video.duration > 1800
         raise "video must not be longer than 30 minutes"
       end
     end
