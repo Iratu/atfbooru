@@ -3,7 +3,6 @@ source 'https://rubygems.org/'
 gem 'dotenv-rails', :require => "dotenv/rails-now"
 
 gem "sass-rails"
-gem "sprockets-rails", :require => "sprockets/railtie"
 gem "uglifier"
 gem "therubyracer", :platforms => :ruby
 gem "rails", "~> 5.2"
@@ -50,6 +49,7 @@ gem 'recaptcha', require: "recaptcha/rails"
 gem 'activemodel-serializers-xml'
 gem 'ptools'
 gem 'jquery-rails'
+gem 'webpacker', '>= 4.0.x'
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"
@@ -63,6 +63,10 @@ group :production do
   gem 'unicorn-worker-killer'
   gem 'newrelic_rpm'
   gem 'capistrano-deploytags', '~> 1.0.0', require: false
+end
+
+group :development do
+  gem 'sinatra'
 end
 
 group :development, :test do

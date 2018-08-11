@@ -115,6 +115,19 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         get post_path(@post), params: {:id => @post.id}
         assert_response :success
       end
+
+      context "when the recommend service is enabled" do
+        setup do
+          @post2 = create(:post)
+          RecommenderService.stubs(:enabled?).returns(true)
+          RecommenderService.stubs(:available_for_post?).returns(true)
+        end
+
+        should "not error out" do
+          get_auth post_path(@post), @user
+          assert_response :success
+        end
+      end
     end
 
     context "update action" do

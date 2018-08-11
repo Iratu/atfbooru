@@ -12,7 +12,7 @@ class UploadServiceTest < ActiveSupport::TestCase
       ],
       "content_type" => "image/jpeg"
     }
-  }.freeze
+  }
 
   context "::Utils" do
     subject { UploadService::Utils }
@@ -137,6 +137,13 @@ class UploadServiceTest < ActiveSupport::TestCase
       setup do
         @upload = FactoryBot.build(:jpg_upload)
         @file = @upload.file
+      end
+
+      context "with an original_post_id" do
+        should "run" do
+          subject.expects(:distribute_files).times(3)
+          subject.process_file(@upload, @file, original_post_id: 12345)
+        end
       end
 
       should "run" do
@@ -336,7 +343,7 @@ class UploadServiceTest < ActiveSupport::TestCase
           FactoryBot.create(:user)
         end
         CurrentUser.ip_addr = "127.0.0.1"
-        @jpeg = "https://upload.wikimedia.org/wikipedia/commons/c/c5/Moraine_Lake_17092005.jpg"
+        @jpeg = "https://raikou1.donmai.us/d3/4e/d34e4cf0a437a5d65f8e82b7bcd02606.jpg"
         @ugoira = "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364"
         @video = "https://www.sample-videos.com/video/mp4/720/big_buck_bunny_720p_1mb.mp4"
       end
@@ -344,6 +351,40 @@ class UploadServiceTest < ActiveSupport::TestCase
       teardown do
         CurrentUser.user = nil
         CurrentUser.ip_addr = nil
+      end
+
+      context "for twitter" do
+        setup do
+          @source = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:large"
+          @norm_source = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"
+          @ref = "https://twitter.com/nounproject/status/540944400767922176"
+        end
+
+        should "record the correct source when a referer is given" do
+          @service = subject.new(source: @source, referer_url: @ref)
+          @upload = @service.start!
+          assert_equal(@ref, @upload.source)
+        end
+
+        should "save the twimg url in alt_source" do
+          @service = subject.new(source: @source, referer_url: @ref)
+          @upload = @service.start!
+          assert_equal(@norm_source, @upload.alt_source)
+        end
+      end
+
+      context "for pixiv" do
+        setup do
+          @source = "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981735"
+          @ref = "http://www.pixiv.net/member.php?id=696859"
+          @direct = "https://i.pximg.net/img-original/img/2017/11/21/05/12/37/65981735_p0.jpg"
+        end
+
+        should "record the correct source" do
+          @service = subject.new(source: @source, referer_url: @ref)
+          @upload = @service.start!
+          assert_equal(@direct, @upload.source)
+        end        
       end
 
       should "work for a jpeg" do
@@ -355,7 +396,8 @@ class UploadServiceTest < ActiveSupport::TestCase
         assert_operator(@upload.file_size, :>, 0)
         assert_not_nil(@upload.source)
         assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
-        assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :large)))
+        # this image is not large enough to generate a large file
+        #assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :large)))
         assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :preview)))
       end
 
@@ -395,6 +437,50 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
       end
 
+    end
+
+    context "#finish!" do
+      setup do
+        CurrentUser.user = travel_to(1.month.ago) do
+          FactoryBot.create(:user)
+        end
+        CurrentUser.ip_addr = "127.0.0.1"
+      end
+
+      context "for twitter" do
+        setup do
+          @source = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:large"
+          @norm_source = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"
+          @ref = "https://twitter.com/nounproject/status/540944400767922176"
+        end
+
+        should "record the correct source when a referer is given" do
+          @service = subject.new(source: @source, referer_url: @ref)
+          @upload = @service.start!
+          @service = subject.new(source: @source)
+          @service.finish!
+          @upload.reload
+
+          assert_equal(@ref, @upload.source)
+        end        
+      end
+
+      context "for pixiv" do
+        setup do
+          @source = "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981735"
+          @ref = "http://www.pixiv.net/member.php?id=696859"
+          @direct = "https://i.pximg.net/img-original/img/2017/11/21/05/12/37/65981735_p0.jpg"
+        end
+
+        should "record the correct source" do
+          @service = subject.new(source: @source, referer_url: @ref)
+          @upload = @service.start!
+          @service = subject.new(source: @source)
+          @service.finish!
+          @upload.reload
+          assert_equal(@direct, @upload.source)
+        end        
+      end
     end
   end
 
@@ -818,7 +904,7 @@ class UploadServiceTest < ActiveSupport::TestCase
     subject { UploadService }
 
     setup do
-      @source = "https://upload.wikimedia.org/wikipedia/commons/c/c5/Moraine_Lake_17092005.jpg"
+      @source = "https://raikou1.donmai.us/d3/4e/d34e4cf0a437a5d65f8e82b7bcd02606.jpg"
       CurrentUser.user = travel_to(1.month.ago) do
         FactoryBot.create(:user)
       end
@@ -888,7 +974,7 @@ class UploadServiceTest < ActiveSupport::TestCase
 
     context "with a preprocessed predecessor" do
       setup do
-        @predecessor = FactoryBot.create(:source_upload, status: "preprocessed", source: @source, image_height: 0, image_width: 0, file_size: 1, md5: 'blank', file_ext: "jpg")
+        @predecessor = FactoryBot.create(:source_upload, status: "preprocessed", source: @source, image_height: 0, image_width: 0, file_size: 1, md5: 'd34e4cf0a437a5d65f8e82b7bcd02606', file_ext: "jpg")
         @tags = 'hello world'
       end
 
@@ -899,6 +985,20 @@ class UploadServiceTest < ActiveSupport::TestCase
         assert_equal(@predecessor, predecessor)
         assert_equal(@tags, predecessor.tag_string.strip)
       end
+
+      context "when the file has already been uploaded" do
+        setup do
+          @post = create(:post, md5: "d34e4cf0a437a5d65f8e82b7bcd02606")
+          @service = subject.new(source: @source)
+        end
+
+        should "point to the dup post in the upload" do
+          @upload = subject.new(source: @source, tag_string: @tags).start!
+          @predecessor.reload
+          assert_equal("error: ActiveRecord::RecordInvalid - Validation failed: Md5 duplicate: #{@post.id}", @predecessor.status)
+        end
+      end
+
     end
 
     context "with no predecessor" do
