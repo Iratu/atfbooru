@@ -69,10 +69,23 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
       end
 
       context "for a twitter post" do
+        setup do
+          @source = "https://twitter.com/frappuccino/status/566030116182949888"
+        end
+
         should "render" do
           skip "Twitter keys are not set" unless Danbooru.config.twitter_api_key
-          get_auth new_upload_path, @user, params: {:url => "https://twitter.com/frappuccino/status/566030116182949888"}
+          get_auth new_upload_path, @user, params: {:url => @source}
           assert_response :success
+        end
+
+        should "set the correct source" do
+          skip "Twitter keys are not set" unless Danbooru.config.twitter_api_key
+          get_auth new_upload_path, @user, params: {:url => @source}
+          assert_response :success
+          Delayed::Worker.new.work_off
+          upload = Upload.last
+          assert_equal(@source, upload.source)
         end
       end
 

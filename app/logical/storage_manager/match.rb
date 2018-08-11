@@ -70,8 +70,11 @@ class StorageManager::Match < StorageManager
       end
 
       if match
-        yield manager if block_given?
-        return manager unless block_given?
+        if block_given?
+          return yield(manager)
+        else
+          return manager
+        end
       end
     end
   end
@@ -100,9 +103,9 @@ class StorageManager::Match < StorageManager
     end
   end
 
-  def file_path(post, type, **options)
+  def file_path(post, file_ext, type, **options)
     find(id: post.id, type: type) do |manager|
-      manager.file_path(post, type, **options)
+      manager.file_path(post, file_ext, type, **options)
     end
   end
 end

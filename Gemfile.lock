@@ -237,6 +237,7 @@ GEM
     multi_json (1.13.1)
     multi_xml (0.6.0)
     multipart-post (2.0.0)
+    mustermann (1.0.2)
     naught (1.1.0)
     net-http-digest_auth (1.4.1)
     net-http-persistent (2.9.4)
@@ -274,6 +275,10 @@ GEM
       win32-file (>= 0.7.0)
     public_suffix (3.0.2)
     rack (2.0.5)
+    rack-protection (2.0.3)
+      rack
+    rack-proxy (0.6.4)
+      rack
     rack-test (1.0.0)
       rack (>= 1.0, < 3)
     radix62 (1.0.1)
@@ -354,6 +359,11 @@ GEM
       json (>= 1.8, < 3)
       simplecov-html (~> 0.10.0)
     simplecov-html (0.10.2)
+    sinatra (2.0.3)
+      mustermann (~> 1.0)
+      rack (~> 2.0)
+      rack-protection (= 2.0.3)
+      tilt (~> 2.0)
     sprockets (3.7.1)
       concurrent-ruby (~> 1.0)
       rack (> 1, < 3)
@@ -411,6 +421,10 @@ GEM
       addressable (>= 2.3.6)
       crack (>= 0.3.2)
       hashdiff
+    webpacker (4.0.0.pre.pre.2)
+      activesupport (>= 4.2)
+      rack-proxy (>= 0.6.1)
+      railties (>= 4.2)
     webrobots (0.1.2)
     websocket-driver (0.7.0)
       websocket-extensions (>= 0.1.0)
@@ -485,7 +499,7 @@ DEPENDENCIES
   shoulda-matchers
   simple_form
   simplecov
-  sprockets-rails
+  sinatra
   statistics2
   streamio-ffmpeg
   stripe
@@ -498,6 +512,7 @@ DEPENDENCIES
   unicorn
   unicorn-worker-killer
   webmock
+  webpacker (>= 4.0.x)
   whenever
 
 BUNDLED WITH
