@@ -1,8 +1,10 @@
+import Utility from './utility'
+
 let SavedSearch = {};
 
 SavedSearch.initialize_all = function() {
   if ($("#c-saved-searches").length) {
-    $("#c-saved-searches table").stupidtable();
+    Utility.sorttable($("#c-saved-searches table"));
   }
 }
 

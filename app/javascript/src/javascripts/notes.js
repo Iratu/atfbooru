@@ -145,7 +145,7 @@ let Note = {
       Note.Body.show(note_id);
       $(".note-box-highlighted").removeClass("note-box-highlighted");
       $note_box.addClass("note-box-highlighted");
-      $note_box[0].scrollIntoView(false);
+      Utility.scroll_to($note_box);
     },
 
     resize_inner_border: function($note_box) {
@@ -806,7 +806,11 @@ let Note = {
   },
 
   initialize_shortcuts: function() {
-    $("#translate").click(Note.TranslationMode.toggle);
+    if ($("#note-locked-notice").length === 0) {
+      $("#translate").click(Note.TranslationMode.toggle);
+      Utility.keydown("n", "translation_mode", Note.TranslationMode.toggle);
+    }
+
     $("#image").click(Note.Box.toggle_all);
   },
 

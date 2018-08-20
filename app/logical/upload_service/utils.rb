@@ -185,9 +185,8 @@ class UploadService
     end
 
     def is_video_with_audio?(upload, file)
-      return false if !upload.is_video? # avoid ffprobe'ing the file if it's not a video (issue #3826)
       video = FFMPEG::Movie.new(file.path)
-      video.audio_channels.present?
+      upload.is_video? && video.audio_channels.present?
     end
 
     def automatic_tags(upload, file)

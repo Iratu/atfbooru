@@ -1,6 +1,6 @@
 class FavoritesController < ApplicationController
   before_action :member_only, except: [:index]
-  respond_to :html, :xml, :json, :js
+  respond_to :html, :xml, :json
   skip_before_action :api_check
 
   def index
@@ -24,11 +24,23 @@ class FavoritesController < ApplicationController
   end
 
   def create
-    @post = Post.find(params[:post_id])
-    @post.add_favorite!(CurrentUser.user)
-    flash.now[:notice] = "You have favorited this post"
+    if CurrentUser.favorite_limit.nil? || CurrentUser.favorite_count < CurrentUser.favorite_limit
+      @post = Post.find(params[:post_id])
+      @post.add_favorite!(CurrentUser.user)
+    else
+      @error_msg = "You can only keep up to #{CurrentUser.favorite_limit} favorites. Upgrade your account to save more."
+    end
 
-    respond_with(@post)
+    respond_with(@post) do |format|
+      format.js
+      format.json do
+        if @post
+          render :json => {:success => true}.to_json
+        else
+          render :json => {:success => false, :reason => @error_msg}.to_json, :status => 422
+        end
+      end
+    end
   end
 
   def destroy
@@ -40,7 +52,11 @@ class FavoritesController < ApplicationController
       Favorite.remove(post_id: params[:id], user: CurrentUser.user)
     end
 
-    flash.now[:notice] = "You have unfavorited this post"
-    respond_with(@post)
+    respond_with(@post) do |format|
+      format.js
+      format.json do
+        render :json => {:success => true}.to_json
+      end
+    end
   end
 end

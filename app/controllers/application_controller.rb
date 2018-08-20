@@ -177,7 +177,7 @@ class ApplicationController < ActionController::Base
   def reset_current_user
     CurrentUser.user = nil
     CurrentUser.ip_addr = nil
-    CurrentUser.root_url = root_url.chomp("/")
+    CurrentUser.root_url = root_url
   end
 
   def set_started_at_session

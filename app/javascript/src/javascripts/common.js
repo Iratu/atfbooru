@@ -2,6 +2,10 @@ import Cookie from './cookie'
 import Utility from './utility'
 
 $(function() {
+  // Table striping
+  $(".striped tbody tr:even").addClass("even");
+  $(".striped tbody tr:odd").addClass("odd");
+
   // Account notices
   $("#hide-sign-up-notice").click(function(e) {
     $("#sign-up-notice").hide();

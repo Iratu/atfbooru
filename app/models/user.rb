@@ -108,7 +108,6 @@ class User < ApplicationRecord
   has_many :forum_posts, -> {order("forum_posts.created_at, forum_posts.id")}, :foreign_key => "creator_id"
   has_many :user_name_change_requests, -> {visible.order("user_name_change_requests.created_at desc")}
   has_many :favorite_groups, -> {order(name: :asc)}, foreign_key: :creator_id
-  has_many :favorites, ->(rec) {where("user_id % 100 = #{rec.id % 100} and user_id = #{rec.id}").order("id desc")}
   belongs_to :inviter, class_name: "User", optional: true
   after_update :create_mod_action
   accepts_nested_attributes_for :dmail_filter
@@ -295,6 +294,20 @@ class User < ApplicationRecord
       def sha1(pass)
         Digest::SHA1.hexdigest("#{Danbooru.config.password_salt}--#{pass}--")
       end
+    end
+  end
+
+  module FavoriteMethods
+    def favorites
+      Favorite.where("user_id % 100 = #{id % 100} and user_id = #{id}").order("id desc")
+    end
+
+    def add_favorite!(post)
+      Favorite.add(post: post, user: self)
+    end
+
+    def remove_favorite!(post)
+      Favorite.remove(post: post, user: self)
     end
   end
 
@@ -605,7 +618,7 @@ end
 
     def favorite_limit
       if is_platinum?
-        Float::INFINITY
+        nil
       elsif is_gold?
         20_000
       else
@@ -904,6 +917,7 @@ end
   include NameMethods
   include PasswordMethods
   include AuthenticationMethods
+  include FavoriteMethods
   include LevelMethods
   include EmailMethods
   include BlacklistMethods
