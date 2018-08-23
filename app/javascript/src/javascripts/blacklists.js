@@ -130,7 +130,7 @@ Blacklist.apply = function() {
 }
 
 Blacklist.posts = function() {
-  return $(".post-preview, #image-container, #c-comments .post");
+  return $(".post-preview, #image-container, #c-comments .post, .mod-queue-preview.post-preview");
 }
 
 Blacklist.post_match = function(post, entry) {
@@ -186,8 +186,6 @@ Blacklist.initialize_all = function() {
   if (Blacklist.apply() > 0) {
     Blacklist.update_sidebar();
     Blacklist.initialize_disable_all_blacklists();
-  } else {
-    $("#blacklist-box").hide();
   }
 }
 

@@ -436,8 +436,11 @@ class Post < ApplicationRecord
       when %r{\Ahttp://static[1-6]?\.minitokyo\.net/(?:downloads|view)/(?:\d{2}/){2}(\d+)}i
         "http://gallery.minitokyo.net/download/#{$1}"
 
-      when %r{\Ahttp://(?:(?:s?img|cdn|www)\d?\.)?gelbooru\.com/{1,2}(?:images|samples)/\d+/(?:sample_)?(?:[a-f0-9]{32}|[a-f0-9]{40})\.}i
-        "https://gelbooru.com/index.php?page=post&s=list&md5=#{md5}"
+      # https://gelbooru.com//images/ee/5c/ee5c9a69db9602c95debdb9b98fb3e3e.jpeg
+      # http://simg.gelbooru.com//images/2003/edd1d2b3881cf70c3acf540780507531.png
+      # https://simg3.gelbooru.com//samples/0b/3a/sample_0b3ae5e225072b8e391c827cb470d29c.jpg
+      when %r{\Ahttps?://(?:\w+\.)?gelbooru\.com//?(?:images|samples)/(?:\d+|\h\h/\h\h)/(?:sample_)?(?<md5>\h{32})\.}i
+        "https://gelbooru.com/index.php?page=post&s=list&md5=#{$~[:md5]}"
 
       when %r{\Ahttps?://(?:slot\d*\.)?im(?:g|ages)\d*\.wikia\.(?:nocookie\.net|com)/(?:_{2}cb\d{14}/)?([^/]+)(?:/[a-z]{2})?/images/(?:(?:thumb|archive)?/)?[a-f0-9]/[a-f0-9]{2}/(?:\d{14}(?:!|%21))?([^/]+)}i
         subdomain = $1
@@ -528,6 +531,13 @@ class Post < ApplicationRecord
       # http://kura3.photozou.jp/pub/794/1481794/photo/161537258_org.v1364829097.jpg
       when %r{\Ahttps?://\w+\.photozou\.jp/pub/\d+/(?<artist_id>\d+)/photo/(?<photo_id>\d+)_.*$}i
         "https://photozou.jp/photo/show/#{$~[:artist_id]}/#{$~[:photo_id]}"
+
+      # http://img.toranoana.jp/popup_img/04/0030/09/76/040030097695-2p.jpg
+      # http://img.toranoana.jp/popup_img18/04/0010/22/87/040010228714-1p.jpg
+      # http://img.toranoana.jp/popup_blimg/04/0030/08/30/040030083068-1p.jpg
+      # https://ecdnimg.toranoana.jp/ec/img/04/0030/65/34/040030653417-6p.jpg
+      when %r{\Ahttps?://(\w+\.)?toranoana\.jp/(?:popup_(?:bl)?img\d*|ec/img)/\d{2}/\d{4}/\d{2}/\d{2}/(?<work_id>\d+)}i
+        "https://ec.toranoana.jp/tora_r/ec/item/#{$~[:work_id]}/"
 
       else
         source
