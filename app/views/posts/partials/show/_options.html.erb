@@ -20,18 +20,13 @@
     <li><a href="http://iqdb.org/?url=<%= post.file_url %>" target="_blank">IQDB Find similar</a></li>
     <% if CurrentUser.user.api_key %>
         <li><a href="https://allthefallen.ninja/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= CurrentUser.user.api_key.key %>" target="_blank">Tag Autocopy</a></li>
-    <% end %>
+<% end %>
     <% if post.is_status_locked? %>
       <li><span id="status-locked-notice">Status locked</span></li>
     <% else %>
       <% if !post.is_deleted? && !post.is_pending? && !post.is_flagged? %>
         <li><%= link_to "Flag", new_post_flag_path(:post_id => post.id), :id => "flag" %></li>
-<<<<<<< HEAD
-      <% end %>
-      <% if post.is_flagged? || post.is_deleted? %>
-=======
       <% elsif post.is_flagged? || post.is_deleted? %>
->>>>>>> pr/58
         <li><%= link_to "Appeal", new_post_appeal_path(:post_id => post.id), :id => "appeal" %></li>
       <% end %>
 
@@ -56,7 +51,7 @@
           <li><%= link_to "Ban", confirm_ban_moderator_post_post_path(post) %></li>
         <% end %>
 
-        <% if CurrentUser.can_approve_posts? %>
+        <% if CurrentUser.is_moderator? %>
           <li><%= link_to "Expunge", expunge_moderator_post_post_path(:post_id => post.id), :remote => true, :method => :post, :id => "expunge", :data => {:confirm => "This will permanently delete this post (meaning the file will be deleted). Are you sure you want to delete this post?"} %></li>
         <% end %>
 
