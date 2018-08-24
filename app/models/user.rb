@@ -609,7 +609,7 @@ end
       elsif is_gold?
         20_000
       else
-        nil
+        10_000
       end
     end
 
