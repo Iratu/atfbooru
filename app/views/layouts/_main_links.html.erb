@@ -1,6 +1,6 @@
 <menu class="main">
   <% if CurrentUser.is_anonymous? %>
-    <%= nav_link_to("Sign in", new_session_path, :class => "login") %>
+    <%= nav_link_to("Sign in", new_session_path) %>
   <% else %>
     <%= nav_link_to("My Account #{CurrentUser.dmail_count}", user_path(CurrentUser.user)) %>
   <% end %>
@@ -19,5 +19,5 @@
   <% if CurrentUser.is_moderator? %>
     <%= nav_link_to("Dashboard", moderator_dashboard_path) %>
   <% end %>
-  <%= nav_link_to("More&nbsp;&raquo;".html_safe, site_map_path, :id => "site-map-link") %>
+  <%= nav_link_to("More »", site_map_path) %>
 </menu>

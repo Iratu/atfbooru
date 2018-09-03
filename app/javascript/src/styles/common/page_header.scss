@@ -26,6 +26,7 @@ header#top {
     li {
       margin: 0;
       padding: 0;
+      white-space: nowrap;
     }
 
     li a {
@@ -40,6 +41,15 @@ header#top {
     li.current a {
       background: $menu_color;
       font-weight: bold;
+    }
+
+    li#nav-sign-in a {
+      font-weight: bold;
+      color: #e00;
+    }
+
+    li.forum-updated a {
+      font-style: italic;
     }
   }
 }

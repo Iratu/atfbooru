@@ -7,14 +7,24 @@ module ApplicationHelper
     raw(wordbreaked_string)
   end
 
-  def nav_link_to(text, url, options = nil)
+  def nav_link_to(text, url, **options)
     if nav_link_match(params[:controller], url)
       klass = "current"
     else
       klass = nil
     end
 
-    content_tag("li", link_to(text, url, options), :class => klass)
+    li_link_to(text, url, id_prefix: "nav-", class: klass, **options)
+  end
+
+  def subnav_link_to(text, url, **options)
+    li_link_to(text, url, id_prefix: "subnav-", **options)
+  end
+
+  def li_link_to(text, url, id_prefix: "", **options)
+    klass = options.delete(:class)
+    id = id_prefix + text.downcase.gsub(/[^a-z ]/, "").parameterize
+    tag.li(link_to(text, url, options), id: id, class: klass)
   end
 
   def fast_link_to(text, link_params, options = {})
@@ -150,7 +160,7 @@ module ApplicationHelper
       html << " [" + link_to("+", new_user_feedback_path(:user_feedback => {:category => "positive", :user_id => user.id})) + "]"
 
       unless user.is_gold?
-        html << " [" + link_to("invite", new_moderator_invitation_path(:invitation => {:name => user.name, :can_upload_free => "1"})) + "]"
+        html << " [" + link_to("promote", edit_admin_user_path(user)) + "]"
       end
     else
       html << " [" + link_to("&ndash;".html_safe, new_user_feedback_path(:user_feedback => {:category => "negative", :user_id => user.id})) + "]"
@@ -191,12 +201,27 @@ module ApplicationHelper
     attributes = [:id, :name, :level, :level_string, :can_approve_posts?, :can_upload_free?]
     attributes += User::Roles.map { |role| :"is_#{role}?" }
 
+    controller_param = params[:controller].parameterize.dasherize
+    action_param = params[:action].parameterize.dasherize
+
+    {
+      lang: "en",
+      class: "c-#{controller_param} a-#{action_param}",
+      data: {
+        controller: controller_param,
+        action: action_param,
+        **data_attributes_for(user, "user", attributes)
+      }
+    }
+  end
+
+  def data_attributes_for(record, prefix, attributes)
     attributes.map do |attr|
       name = attr.to_s.dasherize.delete("?")
-      value = user.send(attr)
+      value = record.send(attr)
 
-      %{data-user-#{name}="#{h(value)}"}
-    end.join(" ").html_safe
+      [:"#{prefix}-#{name}", value]
+    end.to_h
   end
   
 protected
