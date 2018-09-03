@@ -289,7 +289,7 @@ class Post < ApplicationRecord
 
   module ApprovalMethods
     def is_approvable?(user = CurrentUser.user)
-      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && !approved_by?(user)
+      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && uploader != user && !approved_by?(user)
     end
 
     def flag!(reason, options = {})
@@ -390,7 +390,7 @@ class Post < ApplicationRecord
         artist = $~[:artist].dasherize
         title = $~[:title].titleize.strip.squeeze(" ").tr(" ", "-")
         id = $~[:id].to_i(36)
-        "https://#{artist}.deviantart.com/art/#{title}-#{id}"
+        "https://www.deviantart.com/#{artist}/art/#{title}-#{id}"
 
       # http://prnt00.deviantart.net/9b74/b/2016/101/4/468a9d89f52a835d4f6f1c8caca0dfb2-pnjfbh.jpg
       # http://fc00.deviantart.net/fs71/f/2013/234/d/8/d84e05f26f0695b1153e9dab3a962f16-d6j8jl9.jpg
@@ -1637,15 +1637,15 @@ class Post < ApplicationRecord
     end
 
     def pending
-      where("is_pending = ?", true)
+      where(is_pending: true)
     end
 
     def flagged
-      where("is_flagged = ?", true)
+      where(is_flagged: true)
     end
 
     def pending_or_flagged
-      where("(is_pending = ? or (is_flagged = ? and id in (select _.post_id from post_flags _ where _.created_at >= ?)))", true, true, 1.week.ago)
+      pending.or(flagged)
     end
 
     def undeleted
@@ -1664,7 +1664,9 @@ class Post < ApplicationRecord
       where("uploader_id = ?", user_id)
     end
 
-    def available_for_moderation(hidden, user = CurrentUser.user)
+    def available_for_moderation(hidden = false, user = CurrentUser.user)
+      return none if user.is_anonymous?
+
       approved_posts = user.post_approvals.select(:post_id)
       disapproved_posts = user.post_disapprovals.select(:post_id)
 
@@ -1699,7 +1701,11 @@ class Post < ApplicationRecord
   
   module PixivMethods
     def parse_pixiv_id
-      self.pixiv_id = Sources::Strategies::Pixiv.new(source).illust_id_from_url
+      self.pixiv_id = nil
+      
+      if Sources::Strategies::Pixiv.match?(source)
+        self.pixiv_id = Sources::Strategies::Pixiv.new(source).illust_id
+      end
     end
   end
 
@@ -1806,11 +1812,9 @@ class Post < ApplicationRecord
       return if source !~ %r!\Ahttps?://!
       return if has_tag?("artist_request") || has_tag?("official_art")
       return if tags.any? { |t| t.category == Tag.categories.artist }
+      return if Sources::Strategies.find(source).is_a?(Sources::Strategies::Null)
 
-      site = Sources::Site.new(source)
       self.warnings[:base] << "Artist tag is required. Create a new tag with [[artist:<artist_name>]]. Ask on the forum if you need naming help"
-    rescue Sources::Site::NoStrategyError => e
-      # unrecognized source; do nothing.
     end
 
     def has_copyright_tag

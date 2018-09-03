@@ -86,7 +86,7 @@
   </script>
 
 </head>
-<body lang="en" <%= body_attributes(CurrentUser.user) %>>
+<%= tag.body **body_attributes(CurrentUser.user) do %>
   <header id="top">
     <%= render "news_updates/listing" %>
 
@@ -101,8 +101,6 @@
       <%= render "layouts/main_links" %>
       <%= yield :secondary_links %>
     </nav>
-
-    <%= render "layouts/more_links" %>
   </header>
 
   <div id="page">
@@ -134,5 +132,5 @@
   </div>
 
   <%= render "static/footer" %>
-</body>
+<% end %>
 </html>

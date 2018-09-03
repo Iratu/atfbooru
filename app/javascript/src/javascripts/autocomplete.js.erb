@@ -128,6 +128,7 @@ Autocomplete.initialize_tag_autocomplete = function() {
       case "child":
       case "parent":
       case "filetype":
+      case "disapproval":
         Autocomplete.static_metatag_source(term, resp, metatag);
         return;
       case "user":
@@ -306,6 +307,11 @@ Autocomplete.insert_completion = function(input, completion) {
   var regexp = new RegExp("(" + Autocomplete.TAG_PREFIXES + ")?\\S+$", "g");
   before_caret_text = before_caret_text.replace(regexp, "$1") + completion + " ";
 
+  if (Utility.meta('current-user-id') === '1') {
+    // is this actually better?
+    after_caret_text = after_caret_text.replace(/^\S+/, "");
+  }
+
   input.value = before_caret_text + after_caret_text;
   input.selectionStart = input.selectionEnd = before_caret_text.length;
 };
@@ -398,7 +404,7 @@ Autocomplete.static_metatags = {
     "custom"
   ].concat(<%= TagCategory.short_name_list.map {|category| [category + "tags", category + "tags_asc"]}.flatten %>),
   status: [
-    "any", "deleted", "active", "pending", "flagged", "banned"
+    "any", "deleted", "active", "pending", "flagged", "banned", "modqueue", "unmoderated"
   ],
   rating: [
     "safe", "questionable", "explicit"
@@ -415,6 +421,9 @@ Autocomplete.static_metatags = {
   filetype: [
     "jpg", "png", "gif", "swf", "zip", "webm", "mp4"
   ],
+  disapproval: [
+    "any", "none", "disinterest", "poor_quality", "breaks_rules"
+  ]
 }
 
 Autocomplete.static_metatag_source = function(term, resp, metatag) {

@@ -1480,26 +1480,6 @@ class PostTest < ActiveSupport::TestCase
             assert_equal(18557054, @post.pixiv_id)
             @post.pixiv_id = nil
           end
-
-          context "but doesn't have a pixiv id" do
-            should "save the pixiv id" do
-              @post.pixiv_id = 1234
-              @post.update(source: "http://i1.pixiv.net/novel-cover-original/img/2016/11/03/20/10/58/7436075_f75af69f3eacd1656d3733c72aa959cf.jpg")
-              assert_nil(@post.pixiv_id)
-
-              @post.pixiv_id = 1234
-              @post.update(source: "http://i2.pixiv.net/background/img/2016/10/30/12/27/30/7059005_da9946b806c10d391a81ed1117cd33d6.jpg")
-              assert_nil(@post.pixiv_id)
-
-              @post.pixiv_id = 1234
-              @post.update(source: "http://i1.pixiv.net/img15/img/omega777/novel/2612734.jpg")
-              assert_nil(@post.pixiv_id)
-
-              @post.pixiv_id = 1234
-              @post.update(source: "http://img08.pixiv.net/profile/nice/1408837.jpg")
-              assert_nil(@post.pixiv_id)
-            end
-          end
         end
 
         should "normalize pixiv links" do
@@ -2130,6 +2110,7 @@ class PostTest < ActiveSupport::TestCase
       banned  = FactoryBot.create(:post, is_banned: true)
       all = [banned, deleted, flagged, pending]
 
+      assert_tag_match([flagged, pending], "status:modqueue")
       assert_tag_match([pending], "status:pending")
       assert_tag_match([flagged], "status:flagged")
       assert_tag_match([deleted], "status:deleted")
@@ -2138,11 +2119,23 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(all, "status:any")
       assert_tag_match(all, "status:all")
 
+      assert_tag_match(all - [flagged, pending], "-status:modqueue")
       assert_tag_match(all - [pending], "-status:pending")
       assert_tag_match(all - [flagged], "-status:flagged")
       assert_tag_match(all - [deleted], "-status:deleted")
       assert_tag_match(all - [banned],  "-status:banned")
       assert_tag_match(all, "-status:active")
+    end
+
+    should "return posts for the status:unmoderated metatag" do
+      flagged = FactoryBot.create(:post, is_flagged: true)
+      pending = FactoryBot.create(:post, is_pending: true)
+      disapproved = FactoryBot.create(:post, is_pending: true)
+
+      FactoryBot.create(:post_flag, post: flagged)
+      FactoryBot.create(:post_disapproval, post: disapproved, reason: "disinterest")
+
+      assert_tag_match([pending, flagged], "status:unmoderated")
     end
 
     should "respect the 'Deleted post filter' option when using the status:banned metatag" do
@@ -2305,6 +2298,24 @@ class PostTest < ActiveSupport::TestCase
 
         assert_tag_match([upvoted],   "upvote:#{CurrentUser.name}")
         assert_tag_match([downvoted], "downvote:#{CurrentUser.name}")
+      end
+    end
+
+    should "return posts for a disapproval:<type> metatag" do
+      CurrentUser.scoped(FactoryBot.create(:mod_user)) do
+        pending     = FactoryBot.create(:post, is_pending: true)
+        disapproved = FactoryBot.create(:post, is_pending: true)
+        disapproval = FactoryBot.create(:post_disapproval, post: disapproved, reason: "disinterest")
+
+        assert_tag_match([pending],     "disapproval:none")
+        assert_tag_match([disapproved], "disapproval:any")
+        assert_tag_match([disapproved], "disapproval:disinterest")
+        assert_tag_match([],            "disapproval:breaks_rules")
+
+        assert_tag_match([disapproved],          "-disapproval:none")
+        assert_tag_match([pending],              "-disapproval:any")
+        assert_tag_match([pending],              "-disapproval:disinterest")
+        assert_tag_match([disapproved, pending], "-disapproval:breaks_rules")
       end
     end
 
