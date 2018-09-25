@@ -48,21 +48,17 @@ class ArtistVersion < ApplicationRecord
   extend SearchMethods
 
   def url_array
-    url_string.to_s.scan(/\S+/)
+    url_string.to_s.split(/[[:space:]]+/)
   end
 
   def other_names_array
-    other_names.to_s.scan(/\S+/)
+    other_names.to_s.split(/[[:space:]]+/)
   end
 
   def urls_diff(version)
     latest_urls = artist.url_array || []
     new_urls = url_array
     old_urls = version.present? ? version.url_array : []
-
-    latest_urls  = latest_urls.map {|url| ArtistUrl.legacy_normalize(url)}
-    new_urls = new_urls.map {|url| ArtistUrl.legacy_normalize(url)}
-    old_urls = old_urls.map {|url| ArtistUrl.legacy_normalize(url)}
 
     added_urls = new_urls - old_urls
     removed_urls = old_urls - new_urls

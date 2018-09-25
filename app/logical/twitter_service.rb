@@ -1,8 +1,13 @@
 class TwitterService
+  class Error < Exception ; end
   extend Memoist
 
+  def enabled?
+    Danbooru.config.twitter_api_key.present? && Danbooru.config.twitter_api_secret.present?
+  end
+
   def client
-    raise "Twitter API keys not set" if Danbooru.config.twitter_api_key.nil?
+    raise Error, "Twitter API keys not set" if !enabled?
 
     rest_client = ::Twitter::REST::Client.new do |config|
       config.consumer_key = Danbooru.config.twitter_api_key
@@ -17,6 +22,12 @@ class TwitterService
     rest_client
   end
   memoize :client
+
+  def status(id, options = {})
+    Cache.get("twitterapi:#{id}", 60) do
+      client.status(id, options)      
+    end
+  end
 
   def extract_urls_for_status(tweet)
     tweet.media.map do |obj|

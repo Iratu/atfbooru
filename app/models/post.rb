@@ -7,6 +7,7 @@ class Post < ApplicationRecord
   class RevertError < Exception ; end
   class SearchError < Exception ; end
   class DeletionError < Exception ; end
+  class TimeoutError < Exception ; end
 
   # Tags to copy when copying notes.
   NOTE_COPY_TAGS = %w[translated partially_translated check_translation translation_request reverse_translation]
@@ -539,6 +540,17 @@ class Post < ApplicationRecord
       when %r{\Ahttps?://(\w+\.)?toranoana\.jp/(?:popup_(?:bl)?img\d*|ec/img)/\d{2}/\d{4}/\d{2}/\d{2}/(?<work_id>\d+)}i
         "https://ec.toranoana.jp/tora_r/ec/item/#{$~[:work_id]}/"
 
+      # https://a.hitomi.la/galleries/907838/1.png
+      # https://0a.hitomi.la/galleries/1169701/23.png
+      # https://aa.hitomi.la/galleries/990722/003_01_002.jpg
+      # https://la.hitomi.la/galleries/1054851/001_main_image.jpg
+      when %r{\Ahttps?://\w+\.hitomi\.la/galleries/(?<gallery_id>\d+)/(?<image_id>\d+)\w*\.[a-z]+\z}i
+        "https://hitomi.la/reader/#{$~[:gallery_id]}.html##{$~[:image_id].to_i}"
+
+      # https://aa.hitomi.la/galleries/883451/t_rena1g.png
+      when %r{\Ahttps?://\w+\.hitomi\.la/galleries/(?<gallery_id>\d+)/\w*\.[a-z]+\z}i
+        "https://hitomi.la/galleries/#{$~[:gallery_id]}.html"
+
       else
         source
       end
@@ -972,7 +984,7 @@ class Post < ApplicationRecord
     end
 
     def clean_fav_string!
-      array = fav_string.scan(/\S+/).uniq
+      array = fav_string.split.uniq
       self.fav_string = array.join(" ")
       self.fav_count = array.size
       update_column(:fav_string, fav_string)
@@ -1115,7 +1127,7 @@ class Post < ApplicationRecord
     end
 
     def set_pool_category_pseudo_tags
-      self.pool_string = (pool_string.scan(/\S+/) - ["pool:series", "pool:collection"]).join(" ")
+      self.pool_string = (pool_string.split - ["pool:series", "pool:collection"]).join(" ")
 
       pool_categories = pools.undeleted.pluck(:category)
       if pool_categories.include?("series")
@@ -1159,7 +1171,7 @@ class Post < ApplicationRecord
     def fast_count(tags = "", options = {})
       tags = tags.to_s
       tags += " rating:s" if CurrentUser.safe_mode?
-      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && tags !~ /(?:^|\s)(?:-)?status:.+/
+      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !Tag.has_metatag?(tags, "status", "-status")
       tags = Tag.normalize_query(tags)
 
       # optimize some cases. these are just estimates but at these
@@ -1205,6 +1217,10 @@ class Post < ApplicationRecord
 
       if count.nil?
         # give up
+        if options[:raise_on_timeout]
+          raise TimeoutError.new("timed out")
+        end
+
         count = Danbooru.config.blank_tag_search_fast_count
       else
         set_count_in_cache(tags, count)

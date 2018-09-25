@@ -1,3 +1,6 @@
+require("jquery-ui/ui/widgets/sortable");
+require("jquery-ui/themes/base/sortable.css");
+
 let Pool = {};
 
 Pool.initialize_all = function() {
@@ -13,12 +16,12 @@ Pool.initialize_all = function() {
 Pool.initialize_add_to_pool_link = function() {
   $("#add-to-pool-dialog").dialog({autoOpen: false});
 
-  $("#pool").click(function(e) {
+  $("#pool").on("click.danbooru", function(e) {
     e.preventDefault();
     $("#add-to-pool-dialog").dialog("open");
   });
 
-  $("#recent-pools li").click(function(e) {
+  $("#recent-pools li").on("click.danbooru", function(e) {
     e.preventDefault();
     $("#pool_name").val($(this).attr("data-value"));
   });

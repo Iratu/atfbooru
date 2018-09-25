@@ -70,6 +70,10 @@ module Sources
         return super
       end
 
+      def canonical_url
+        image_url
+      end
+
       def profile_url
         if url =~ PROFILE
           return url
@@ -123,7 +127,7 @@ module Sources
     public
 
       def api_client
-        NicoSeigaApiClient.new(illust_id)
+        NicoSeigaApiClient.new(illust_id: illust_id)
       end
       memoize :api_client
 

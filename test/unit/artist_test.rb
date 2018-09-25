@@ -2,7 +2,7 @@ require 'test_helper'
 
 class ArtistTest < ActiveSupport::TestCase
   def assert_artist_found(expected_name, source_url)
-    artists = Artist.url_matches(source_url).to_a
+    artists = Artist.find_artists(source_url).to_a
 
     assert_equal(1, artists.size)
     assert_equal(expected_name, artists.first.name, "Testing URL: #{source_url}")
@@ -11,7 +11,7 @@ class ArtistTest < ActiveSupport::TestCase
   end
 
   def assert_artist_not_found(source_url)
-    artists = Artist.url_matches(source_url).to_a
+    artists = Artist.find_artists(source_url).to_a
     assert_equal(0, artists.size, "Testing URL: #{source_url}")
   rescue Net::OpenTimeout
     skip "Remote connection failed for #{source_url}"
@@ -56,10 +56,12 @@ class ArtistTest < ActiveSupport::TestCase
       assert(@artist.urls[0].is_active?)
     end
 
-    should "should have a valid name" do
-      @artist = Artist.new(:name => "-blah")
-      @artist.save
-      assert_equal(["Name '-blah' cannot begin with a dash ('-')"], @artist.errors.full_messages)
+    context "with an invalid name" do
+      subject { FactoryBot.build(:artist) }
+
+      should_not allow_value("-blah").for(:name)
+      should_not allow_value("_").for(:name)
+      should_not allow_value("").for(:name)
     end
 
     context "with a matching tag alias" do
@@ -154,9 +156,7 @@ class ArtistTest < ActiveSupport::TestCase
     should "resolve ambiguous urls" do
       bobross = FactoryBot.create(:artist, :name => "bob_ross", :url_string => "http://artists.com/bobross/image.jpg")
       bob = FactoryBot.create(:artist, :name => "bob", :url_string => "http://artists.com/bob/image.jpg")
-      matches = Artist.find_all_by_url("http://artists.com/bob/test.jpg")
-      assert_equal(1, matches.size)
-      assert_equal("bob", matches.first.name)
+      assert_artist_found("bob", "http://artists.com/bob/test.jpg")
     end
 
     should "parse urls" do
@@ -190,7 +190,7 @@ class ArtistTest < ActiveSupport::TestCase
     should "ignore pixiv.net/ and pixiv.net/img/ url matches" do
       a1 = FactoryBot.create(:artist, :name => "yomosaka", :url_string => "http://i2.pixiv.net/img18/img/evazion/14901720.png")
       a2 = FactoryBot.create(:artist, :name => "niwatazumi_bf", :url_string => "http://i2.pixiv.net/img18/img/evazion/14901720_big_p0.png")
-      assert_equal([], Artist.find_all_by_url("http://i2.pixiv.net/img28/img/kyang692/35563903.jpg"))
+      assert_artist_not_found("http://i2.pixiv.net/img28/img/kyang692/35563903.jpg")
     end
 
     should "find matches by url" do
@@ -198,16 +198,21 @@ class ArtistTest < ActiveSupport::TestCase
       a2 = FactoryBot.create(:artist, :name => "subway", :url_string => "http://subway.com/x/test.jpg")
       a3 = FactoryBot.create(:artist, :name => "minko", :url_string => "https://minko.com/x/test.jpg")
 
-      assert_equal(["rembrandt"], Artist.find_all_by_url("http://rembrandt.com/x/test.jpg").map(&:name))
-      assert_equal(["rembrandt"], Artist.find_all_by_url("http://rembrandt.com/x/another.jpg").map(&:name))
-      assert_equal([], Artist.find_all_by_url("http://nonexistent.com/test.jpg").map(&:name))
-      assert_equal(["minko"], Artist.find_all_by_url("https://minko.com/x/test.jpg").map(&:name))
-      assert_equal(["minko"], Artist.find_all_by_url("http://minko.com/x/test.jpg").map(&:name))
+      assert_artist_found("rembrandt", "http://rembrandt.com/x/test.jpg")
+      assert_artist_found("rembrandt", "http://rembrandt.com/x/another.jpg")
+      assert_artist_not_found("http://nonexistent.com/test.jpg")
+      assert_artist_found("minko", "https://minko.com/x/test.jpg")
+      assert_artist_found("minko", "http://minko.com/x/test.jpg")
+    end
+
+    should "be case-insensitive to domains when finding matches by url" do
+      a1 = FactoryBot.create(:artist, name: "bkub", url_string: "http://BKUB.example.com")
+      assert_artist_found(a1.name, "http://bkub.example.com")
     end
 
     should "not find duplicates" do
       FactoryBot.create(:artist, :name => "warhol", :url_string => "http://warhol.com/x/a/image.jpg\nhttp://warhol.com/x/b/image.jpg")
-      assert_equal(["warhol"], Artist.find_all_by_url("http://warhol.com/x/test.jpg").map(&:name))
+      assert_artist_found("warhol", "http://warhol.com/x/test.jpg")
     end
 
     should "not include duplicate urls" do
@@ -217,7 +222,7 @@ class ArtistTest < ActiveSupport::TestCase
 
     should "hide deleted artists" do
       FactoryBot.create(:artist, :name => "warhol", :url_string => "http://warhol.com/a/image.jpg", :is_active => false)
-      assert_equal([], Artist.find_all_by_url("http://warhol.com/a/image.jpg").map(&:name))
+      assert_artist_not_found("http://warhol.com/a/image.jpg")
     end
 
     context "when finding deviantart artists" do
@@ -280,9 +285,7 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       should "find nothing for bad IDs" do
-        assert_raises(PixivApiClient::BadIDError) do
-          assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
-        end
+        assert_artist_not_found("http://www.pixiv.net/member_illust.php?mode=medium&illust_id=32049358")
       end
     end
 
@@ -396,32 +399,41 @@ class ArtistTest < ActiveSupport::TestCase
 
     should "search on its name should return results" do
       artist = FactoryBot.create(:artist, :name => "artist")
+
       assert_not_nil(Artist.search(:name => "artist").first)
-      assert_not_nil(Artist.search(:name_matches => "artist").first)
+      assert_not_nil(Artist.search(:name_like => "artist").first)
       assert_not_nil(Artist.search(:any_name_matches => "artist").first)
+      assert_not_nil(Artist.search(:any_name_matches => "/art/").first)
     end
 
     should "search on other names should return matches" do
       artist = FactoryBot.create(:artist, :name => "artist", :other_names_comma => "aaa, ccc ddd")
-      assert_nil(Artist.other_names_match("artist").first)
-      assert_not_nil(Artist.other_names_match("aaa").first)
-      assert_not_nil(Artist.other_names_match("ccc_ddd").first)
-      assert_not_nil(Artist.search(:name => "other:aaa").first)
-      assert_not_nil(Artist.search(:name => "aaa").first)
 
-      assert_not_nil(Artist.search(:other_names_match => "aaa").first)
+      assert_nil(Artist.search(other_names_like: "*artist*").first)
+      assert_not_nil(Artist.search(other_names_like: "*aaa*").first)
+      assert_not_nil(Artist.search(other_names_like: "*ccc_ddd*").first)
+      assert_not_nil(Artist.search(name: "artist").first)
       assert_not_nil(Artist.search(:any_name_matches => "aaa").first)
+      assert_not_nil(Artist.search(:any_name_matches => "/a/").first)
     end
 
     should "search on group name and return matches" do
       cat_or_fish = FactoryBot.create(:artist, :name => "cat_or_fish")
       yuu = FactoryBot.create(:artist, :name => "yuu", :group_name => "cat_or_fish")
-      cat_or_fish.reload
-      assert_equal("yuu", cat_or_fish.member_names)
-      assert_not_nil(Artist.search(:name => "group:cat_or_fish").first)
 
-      assert_not_nil(Artist.search(:group_name_matches => "cat_or_fish").first)
+      assert_equal("yuu", cat_or_fish.member_names)
+      assert_not_nil(Artist.search(:group_name => "cat_or_fish").first)
       assert_not_nil(Artist.search(:any_name_matches => "cat_or_fish").first)
+      assert_not_nil(Artist.search(:any_name_matches => "/cat/").first)
+    end
+
+    should "search on url and return matches" do
+      bkub = FactoryBot.create(:artist, name: "bkub", url_string: "http://bkub.com")
+
+      assert_equal([bkub.id], Artist.search(url_matches: "bkub").map(&:id))
+      assert_equal([bkub.id], Artist.search(url_matches: "*bkub*").map(&:id))
+      assert_equal([bkub.id], Artist.search(url_matches: "/rifyu|bkub/").map(&:id))
+      assert_equal([bkub.id], Artist.search(url_matches: "http://bkub.com/test.jpg").map(&:id))
     end
 
     should "search on has_tag and return matches" do

@@ -21,24 +21,12 @@ class WikiPage < ApplicationRecord
       where("title = ?", title.mb_chars.downcase.tr(" ", "_"))
     end
 
-    def title_in(titles)
-      where("title in (?)", titles.map{|x| x.mb_chars.downcase.tr(" ", "_")} )
-    end
-
     def active
       where("is_deleted = false")
     end
 
     def recent
       order("updated_at DESC").limit(25)
-    end
-
-    def body_matches(query)
-      if query =~ /\*/ && CurrentUser.user.is_builder?
-        where("body ILIKE ? ESCAPE E'\\\\'", query.to_escaped_for_sql_like)
-      else
-        where("body_index @@ plainto_tsquery(?)", query.to_escaped_for_tsquery_split)
-      end
     end
 
     def other_names_equal(name)
@@ -70,9 +58,7 @@ class WikiPage < ApplicationRecord
         q = q.where("creator_id = ?", params[:creator_id])
       end
 
-      if params[:body_matches].present?
-        q = q.body_matches(params[:body_matches])
-      end
+      q = q.attribute_matches(:body, params[:body_matches], index_column: :body_index, ts_config: "danbooru")
 
       if params[:other_names_match].present?
         q = q.other_names_match(params[:other_names_match])
@@ -121,10 +107,6 @@ class WikiPage < ApplicationRecord
 
   extend SearchMethods
   include ApiMethods
-
-  def self.find_title_and_id(title)
-    titled(title).select("title, id").first
-  end
 
   def validate_not_locked
     if is_locked? && !CurrentUser.is_builder?
@@ -244,6 +226,6 @@ class WikiPage < ApplicationRecord
   end
 
   def other_names_array
-    other_names.to_s.scan(/\S+/)
+    other_names.to_s.split(/[[:space:]]+/)
   end
 end

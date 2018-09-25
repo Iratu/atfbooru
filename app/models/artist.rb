@@ -8,9 +8,8 @@ class Artist < ApplicationRecord
   after_save :categorize_tag
   after_save :update_wiki
   after_save :save_urls
-  validates_uniqueness_of :name
   validates_associated :urls
-  validates :name, tag_name: true
+  validates :name, tag_name: true, uniqueness: true
   validate :validate_wiki, :on => :create
   after_validation :merge_validation_errors
   belongs_to_creator
@@ -148,7 +147,7 @@ class Artist < ApplicationRecord
         %r!\Ahttps?://(?:[a-zA-Z0-9_-]+\.)*#{domain}/\z!i
       end)
 
-      def find_all_by_url(url)
+      def find_artists(url)
         url = ArtistUrl.normalize(url)
         artists = []
 
@@ -163,7 +162,7 @@ class Artist < ApplicationRecord
           break if url =~ SITE_BLACKLIST_REGEXP
         end
 
-        artists.inject({}) {|h, x| h[x.name] = x; h}.values.slice(0, 20)
+        where(id: artists.uniq(&:name).take(20))
       end
     end
 
@@ -234,7 +233,7 @@ class Artist < ApplicationRecord
     end
 
     def other_names_array
-      other_names.try(:split, /\s/)
+      other_names.try(:split, /[[:space:]]+/)
     end
 
     def other_names_comma
@@ -456,109 +455,38 @@ class Artist < ApplicationRecord
   end
 
   module SearchMethods
-    def find_artists(url, referer_url = nil)
-      artists = url_matches(url).order("id desc").limit(10)
-
-      if artists.empty? && referer_url.present? && referer_url != url
-        artists = url_matches(referer_url).order("id desc").limit(20)
-      end
-
-      artists
-    rescue PixivApiClient::Error => e
-      []
-    end
-
-    def url_matches(string)
-      matches = find_all_by_url(string).map(&:id)
-
-      if matches.any?
-        where("id in (?)", matches)
-      elsif matches = search_for_profile(string)
-        where("id in (?)", matches)
-      else
-        where("false")
-      end
-    end
-
-    def search_for_profile(url)
-      source = Sources::Strategies.find(url)
-      find_all_by_url(source.profile_url)
-    rescue Net::OpenTimeout, PixivApiClient::Error
-      raise if Rails.env.test?
-      nil
-    rescue Exception
-      nil
-    end
-
-    def other_names_match(string)
-      if string =~ /\*/ && CurrentUser.is_builder?
-        where("artists.other_names ILIKE ? ESCAPE E'\\\\'", string.to_escaped_for_sql_like)
-      else
-        where("artists.other_names_index @@ to_tsquery('danbooru', E?)", Artist.normalize_name(string).to_escaped_for_tsquery)
-      end
-    end
-
-    def group_name_matches(name)
-      stripped_name = normalize_name(name).to_escaped_for_sql_like
-      where("artists.group_name LIKE ? ESCAPE E'\\\\'", stripped_name)
-    end
-
-    def name_matches(name)
-      stripped_name = normalize_name(name).to_escaped_for_sql_like
-      where("artists.name LIKE ? ESCAPE E'\\\\'", stripped_name)
-    end
-
     def named(name)
       where(name: normalize_name(name))
     end
 
-    def any_name_matches(name)
-      stripped_name = normalize_name(name).to_escaped_for_sql_like
-      if name =~ /\*/ && CurrentUser.is_builder?
-        where("(artists.name LIKE ? ESCAPE E'\\\\' OR artists.other_names LIKE ? ESCAPE E'\\\\')", stripped_name, stripped_name)
+    def any_name_matches(query)
+      if query =~ %r!\A/(.*)/\z!
+        where_regex(:name, $1).or(where_regex(:other_names, $1)).or(where_regex(:group_name, $1))
       else
-        name_for_tsquery = normalize_name(name).to_escaped_for_tsquery
-        where("(artists.name LIKE ? ESCAPE E'\\\\' OR artists.other_names_index @@ to_tsquery('danbooru', E?))", stripped_name, name_for_tsquery)
+        normalized_name = normalize_name(query)
+        normalized_name = "*#{normalized_name}*" unless normalized_name.include?("*")
+        where_like(:name, normalized_name).or(where_like(:other_names, normalized_name)).or(where_like(:group_name, normalized_name))
+      end
+    end
+
+    def url_matches(query)
+      if query =~ %r!\A/(.*)/\z!
+        where(id: ArtistUrl.where_regex(:url, $1).select(:artist_id))
+      elsif query.include?("*")
+        where(id: ArtistUrl.where_like(:url, query).select(:artist_id))
+      elsif query =~ %r!\Ahttps?://!i
+        find_artists(query)
+      else
+        where(id: ArtistUrl.where_like(:url, "*#{query}*").select(:artist_id))
       end
     end
 
     def search(params)
       q = super
 
-      case params[:name]
-      when /^http/
-        q = q.url_matches(params[:name])
-
-      when /name:(.+)/
-        q = q.name_matches($1)
-
-      when /other:(.+)/
-        q = q.other_names_match($1)
-
-      when /group:(.+)/
-        q = q.group_name_matches($1)
-
-      when /status:banned/
-        q = q.banned
-
-      when /status:active/
-        q = q.unbanned.active
-
-      when /./
-        q = q.any_name_matches(params[:name])
-      end
-
-      if params[:name_matches].present?
-        q = q.name_matches(params[:name_matches])
-      end
-
-      if params[:other_names_match].present?
-        q = q.other_names_match(params[:other_names_match])
-      end
-
-      if params[:group_name_matches].present?
-        q = q.group_name_matches(params[:group_name_matches])
-      end
+      q = q.search_text_attribute(:name, params)
+      q = q.search_text_attribute(:other_names, params)
+      q = q.search_text_attribute(:group_name, params)
 
       if params[:any_name_matches].present?
         q = q.any_name_matches(params[:any_name_matches])
@@ -577,11 +505,6 @@ class Artist < ApplicationRecord
 
       if params[:creator_id].present?
         q = q.where("artists.creator_id = ?", params[:creator_id].to_i)
-      end
-
-      # XXX deprecated, remove at some point.
-      if params[:empty_only].to_s.truthy?
-        params[:has_tag] = "false"
       end
 
       if params[:has_tag].to_s.truthy?
