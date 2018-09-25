@@ -8,7 +8,7 @@ Autocomplete.TAG_CATEGORIES = <%= TagCategory.mapping.to_json.html_safe %>;
 
 Autocomplete.TAG_PREFIXES = "-|~|" + Object.keys(Autocomplete.TAG_CATEGORIES).map(category => category + ":").join("|");
 Autocomplete.TAG_PREFIXES_REGEX = new RegExp("^(" + Autocomplete.TAG_PREFIXES + ")(.*)$", "i");
-Autocomplete.METATAGS_REGEX = new RegExp("^(" + Autocomplete.METATAGS + "):(.*)$", "i");
+Autocomplete.METATAGS_REGEX = new RegExp("^(" + Autocomplete.METATAGS.join("|") + "):(.*)$", "i");
 
 Autocomplete.initialize_all = function() {
   if (Utility.meta("enable-auto-complete") === "true") {
@@ -182,7 +182,7 @@ Autocomplete.initialize_artist_autocomplete = function($fields) {
       $.ajax({
         url: "/artists.json",
         data: {
-          "search[name]": req.term + "*",
+          "search[name_like]": req.term.trim().replace(/\s+/g, "_") + "*",
           "search[is_active]": true,
           "search[order]": "post_count",
           "limit": 10,
@@ -262,6 +262,8 @@ Autocomplete.normal_source = function(term, resp) {
           antecedent: tag.antecedent_name,
           value: tag.name,
           category: tag.category,
+          source: tag.source,
+          weight: tag.weight,
           post_count: tag.post_count
         };
       });
@@ -343,7 +345,7 @@ Autocomplete.render_item = function(list, item) {
   var $link = $("<a/>");
   $link.text(item.label);
   $link.attr("href", "/posts?tags=" + encodeURIComponent(item.value));
-  $link.click(function(e) {
+  $link.on("click.danbooru", function(e) {
     e.preventDefault();
   });
 
@@ -381,7 +383,14 @@ Autocomplete.render_item = function(list, item) {
   }
 
   var $menu_item = $("<div/>").append($link);
-  return $("<li/>").data("item.autocomplete", item).append($menu_item).appendTo(list);
+  var $list_item = $("<li/>").data("item.autocomplete", item).append($menu_item);
+
+  var data_attributes = ["type", "source", "antecedent", "value", "category", "post_count", "weight"];
+  data_attributes.forEach(attr => {
+    $list_item.attr(`data-autocomplete-${attr.replace(/_/g, "-")}`, item[attr]);
+  });
+
+  return $list_item.appendTo(list);
 };
 
 Autocomplete.static_metatags = {

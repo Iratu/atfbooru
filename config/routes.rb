@@ -79,10 +79,9 @@ Rails.application.routes.draw do
     collection do
       get :show_or_new
       get :banned
-      get :finder
     end
   end
-  resources :artist_urls, only: [:update]
+  resources :artist_urls, only: [:index, :update]
   resources :artist_versions, :only => [:index] do
     collection do
       get :search
@@ -377,7 +376,6 @@ Rails.application.routes.draw do
 
   get "/post/index.xml", :controller => "legacy", :action => "posts", :format => "xml"
   get "/post/index.json", :controller => "legacy", :action => "posts", :format => "json"
-  get "/post/create.xml", :controller => "legacy", :action => "create_post", :format => "xml"
   get "/post/piclens", :controller => "legacy", :action => "unavailable"
   get "/post/index" => redirect {|params, req| "/posts?tags=#{CGI::escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
   get "/post" => redirect {|params, req| "/posts?tags=#{CGI::escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
@@ -430,8 +428,6 @@ Rails.application.routes.draw do
   post "/static/accept_terms_of_service" => "static#accept_terms_of_service", :as => "accept_terms_of_service"
   get "/static/mrtg" => "static#mrtg", :as => "mrtg"
   get "/static/contact" => "static#contact", :as => "contact"
-  get "/static/benchmark" => "static#benchmark"
-  get "/static/name_change" => "static#name_change", :as => "name_change"
   get "/meta_searches/tags" => "meta_searches#tags", :as => "meta_searches_tags"
 
   get "/intro" => redirect("/explore/posts/intro")

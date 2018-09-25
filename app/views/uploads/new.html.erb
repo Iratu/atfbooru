@@ -12,8 +12,8 @@
       <% end %>
 
       <%= render "image" %>
-      <%= render "post", :post => @post %>
-      <%= render "sources/info", :source => @source %>
+      <%= render "related_posts", source: @source %>
+      <%= render "sources/info" %>
 
       <div id="client-errors" class="error-messages ui-state-error ui-corner-all" style="display:none"></div>
 
@@ -39,7 +39,6 @@
           <%= f.label :source %>
           <%= f.text_field :source, :size => 50, :value => params[:url] %>
           <%= button_tag "Similar", :id => "similar-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
-          <%= button_tag "Artist", :id => "find-artist-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
           <span class="hint">You can enter a URL to have <%= Danbooru.config.app_name %> automatically download and process it</span>
         </div>
 
@@ -87,16 +86,6 @@
           </div>
         </div>
 
-        <% if Danbooru.config.iqdbs_server %>
-          <% if params[:url] %>
-            <div class="input" id="iqdb-similar">
-              <p><em>Loading similar...</em></p>
-            </div>
-          <% else %>
-            <div class="input" id="iqdb-similar" style="display: none;"></div>
-          <% end %>
-        <% end %>
-
         <div class="input">
           <div>
             <%= f.label :tag_string, "Tags" %>
@@ -113,12 +102,6 @@
 
         <div class="input">
           <%= submit_tag "Submit", :id => "submit-button", :class => "large ui-button ui-widget ui-corner-all gradient", data: {disable_with: false} %>
-        </div>
-
-        <div id="artist-tags-container">
-          <h1>Artist</h1>
-          <div id="artist-tags" class="related-tags">
-          </div>
         </div>
 
         <div id="related-tags-container">

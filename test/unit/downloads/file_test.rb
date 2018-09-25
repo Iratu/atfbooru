@@ -2,47 +2,70 @@ require 'test_helper'
 
 module Downloads
   class FileTest < ActiveSupport::TestCase
-    context "A twitter video download" do
-      setup do
-        skip "Twitter is not configured" unless Danbooru.config.twitter_api_key
-        @source = "https://twitter.com/CincinnatiZoo/status/859073537713328129"
-        @download = Downloads::File.new(@source)
-      end
-
-      should "preserve the twitter source" do
-        @download.download!
-        assert_equal("https://twitter.com/CincinnatiZoo/status/859073537713328129", @download.source)
-      end
-    end
-
     context "A post download" do
       setup do
         @source = "http://www.google.com/intl/en_ALL/images/logo.gif"
         @download = Downloads::File.new(@source)
-        @tempfile = Tempfile.new("danbooru-test")
+      end
+
+      context "for a banned IP" do
+        should "not try to download the file" do
+          Resolv.expects(:getaddress).returns("127.0.0.1")
+          assert_raise(Downloads::File::Error) { Downloads::File.new("http://evil.com").download! }
+        end
+
+        should "not try to fetch the size" do
+          Resolv.expects(:getaddress).returns("127.0.0.1")
+          assert_raise(Downloads::File::Error) { Downloads::File.new("http://evil.com").size }
+        end
+
+        should "not follow redirects to banned IPs" do
+          url = "http://httpbin.org/redirect-to?url=http://127.0.0.1"
+          stub_request(:get, url).to_return(status: 301, headers: { "Location": "http://127.0.0.1" })
+
+          assert_raise(Downloads::File::Error) { Downloads::File.new(url).download! }
+        end
+
+        should "not follow redirects that resolve to a banned IP" do
+          url = "http://httpbin.org/redirect-to?url=http://127.0.0.1.nip.io"
+          stub_request(:get, url).to_return(status: 301, headers: { "Location": "http://127.0.0.1.xip.io" })
+          Resolv.expects(:getaddress).returns("127.0.0.1")
+
+          assert_raise(Downloads::File::Error) { Downloads::File.new(url).download! }
+        end
+
+        should "not send a HEAD request when checking for cloudflare" do
+          Resolv.expects(:getaddress).with("www.google.com").returns("127.0.0.1")
+          assert_raise(Downloads::File::Error) { @download.is_cloudflare? }
+        end
       end
 
       context "that fails" do
-        setup do
-          HTTParty.stubs(:get).raises(Errno::ETIMEDOUT)
+        should "retry three times before giving up" do
+          HTTParty.expects(:get).times(3).raises(Errno::ETIMEDOUT)
+          assert_raises(Errno::ETIMEDOUT) { @download.download! }
         end
 
-        should "retry three times" do
-          assert_raises(Errno::ETIMEDOUT) do
-            @download.http_get_streaming(@source, @tempfile)
-          end
+        should "return an uncorrupted file on the second try" do
+          bomb = stub("bomb")
+          bomb.expects(:size).raises(IOError)
+          resp = stub("resp", success?: true)
+
+          HTTParty.expects(:get).twice.multiple_yields("a", bomb, "b", "c").then.multiple_yields("a", "b", "c").returns(resp)
+          tempfile, _ = @download.download!
+
+          assert_equal("abc", tempfile.read)
         end
       end
 
       should "throw an exception when the file is larger than the maximum" do
         assert_raise(Downloads::File::Error) do
-          @download.http_get_streaming(@source, @tempfile, {}, max_size: 1)
+          @download.download!(max_size: 1)
         end
       end
 
       should "store the file in the tempfile path" do
         tempfile, strategy = @download.download!
-        assert_equal(@source, @download.source)
         assert_operator(tempfile.size, :>, 0, "should have data")
       end
     end

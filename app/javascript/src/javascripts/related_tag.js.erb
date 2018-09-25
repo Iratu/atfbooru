@@ -1,3 +1,4 @@
+import Upload from './uploads';
 import Utility from './utility';
 import Cookie from './cookie';
 
@@ -6,9 +7,8 @@ let RelatedTag = {};
 RelatedTag.initialize_all = function() {
   if ($("#c-posts #a-show").length || $("#c-uploads #a-new").length) {
     this.initialize_buttons();
-    $("#artist-tags-container").hide();
-    $("#upload_tag_string,#post_tag_string").keyup(RelatedTag.update_selected);
-    $("body").on("click", "#artist-related-tags-column a.del", RelatedTag.disable_artist_url)
+    $("#upload_tag_string,#post_tag_string").on("keyup.danbooru.relatedTags", RelatedTag.update_selected);
+    $("#related-tags-container").on("click.danbooru", "#artist-related-tags-column a.del", RelatedTag.disable_artist_url)
   }
 }
 
@@ -17,7 +17,6 @@ RelatedTag.initialize_buttons = function() {
   <% TagCategory.related_button_list.each do |category| %>
     RelatedTag.common_bind("#related-<%= category %>-button", "<%= category %>"); // eslint-disable-line indent
   <% end %>
-  $("#find-artist-button").click(RelatedTag.find_artist);
 }
 
 RelatedTag.tags_include = function(name) {
@@ -26,7 +25,7 @@ RelatedTag.tags_include = function(name) {
 }
 
 RelatedTag.common_bind = function(button_name, category) {
-  $(button_name).click(function(e) {
+  $(button_name).on("click.danbooru", function(e) {
     var $dest = $("#related-tags");
     $dest.empty();
     RelatedTag.build_recent_and_frequent($dest);
@@ -35,7 +34,6 @@ RelatedTag.common_bind = function(button_name, category) {
       "query": RelatedTag.current_tag(),
       "category": category
     }, RelatedTag.process_response);
-    $("#artist-tags-container").hide();
     e.preventDefault();
   });
 }
@@ -218,7 +216,7 @@ RelatedTag.build_html = function(query, related_tags, name, is_wide_column) {
       $link.text(tag[0].replace(/_/g, " "));
       $link.addClass("tag-type-" + tag[1]);
       $link.attr("href", "/posts?tags=" + encodeURIComponent(tag[0]));
-      $link.click(RelatedTag.toggle_tag);
+      $link.on("click.danbooru", RelatedTag.toggle_tag);
       if (RelatedTag.tags_include(tag[0])) {
         $link.addClass("selected");
       }
@@ -277,28 +275,10 @@ RelatedTag.toggle_tag = function(e) {
   $field.val($field.val().trim().replace(/ +/g, " ") + " ");
 
   RelatedTag.update_selected();
-  if (RelatedTag.recent_artist && $("#artist-tags-container").css("display") === "block") {
-    RelatedTag.process_artist(RelatedTag.recent_artist);
-  }
 
   // The timeout is needed on Chrome since it will clobber the field attribute otherwise
   setTimeout(function () { $field.prop('selectionStart', $field.val().length);}, 100);
   e.preventDefault();
-}
-
-RelatedTag.find_artist = function(e) {
-  $("#artist-tags").html("<em>Loading...</em>");
-  var url = $("#upload_source,#post_source");
-  var referer_url = $("#upload_referer_url");
-  $.get("/artists/finder.json", {"url": url.val(), "referer_url": referer_url.val()}, RelatedTag.process_artist);
-  if (e) {
-    e.preventDefault();
-  }
-}
-
-RelatedTag.process_artist = function(data) {
-  RelatedTag.recent_artists = data;
-  RelatedTag.build_all();
 }
 
 RelatedTag.toggle = function() {
@@ -337,7 +317,7 @@ RelatedTag.disable_artist_url = function(e) {
             is_active: false
           }
         }
-      }).done(RelatedTag.find_artist);
+      }).done(Upload.fetch_data_manual);
     }
   });
   return false;

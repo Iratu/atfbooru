@@ -4,6 +4,8 @@ class WikiPageVersion < ApplicationRecord
   belongs_to :artist, optional: true
   delegate :visible?, :to => :wiki_page
 
+  extend Memoist
+
   module SearchMethods
     def for_user(user_id)
       where("updater_id = ?", user_id)
@@ -20,6 +22,8 @@ class WikiPageVersion < ApplicationRecord
         q = q.where("wiki_page_id = ?", params[:wiki_page_id].to_i)
       end
 
+      q = q.attribute_matches(:title, params[:title])
+      q = q.attribute_matches(:body, params[:body])
       q = q.attribute_matches(:is_locked, params[:is_locked])
       q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
@@ -33,11 +37,16 @@ class WikiPageVersion < ApplicationRecord
     title.tr("_", " ")
   end
 
+  def previous
+    WikiPageVersion.where("wiki_page_id = ? and id < ?", wiki_page_id, id).order("id desc").first
+  end
+  memoize :previous
+
   def category_name
     Tag.category_for(title)
   end
 
   def other_names_array
-    other_names.to_s.scan(/\S+/)
+    other_names.to_s.split(/[[:space:]]+/)
   end
 end

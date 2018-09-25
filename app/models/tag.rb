@@ -1,8 +1,16 @@
 class Tag < ApplicationRecord
   COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 300
-  METATAGS = "-user|user|-approver|approver|commenter|comm|noter|noteupdater|artcomm|-pool|pool|ordpool|-favgroup|favgroup|-fav|fav|ordfav|md5|-rating|rating|-locked|locked|width|height|mpixels|ratio|score|favcount|filesize|source|-source|id|-id|date|age|order|limit|-status|status|tagcount|parent|-parent|child|pixiv_id|pixiv|search|upvote|downvote|filetype|-filetype|flagger|-flagger|appealer|-appealer|disapproval|-disapproval|" +
-    TagCategory.short_name_list.map {|x| "#{x}tags"}.join("|")
-  SUBQUERY_METATAGS = "commenter|comm|noter|noteupdater|artcomm|flagger|-flagger|appealer|-appealer"
+  METATAGS = %w[
+    -user user -approver approver commenter comm noter noteupdater artcomm
+    -pool pool ordpool -favgroup favgroup -fav fav ordfav md5 -rating rating
+    -locked locked width height mpixels ratio score favcount filesize source
+    -source id -id date age order limit -status status tagcount parent -parent
+    child pixiv_id pixiv search upvote downvote filetype -filetype flagger
+    -flagger appealer -appealer disapproval -disapproval
+  ] + TagCategory.short_name_list.map {|x| "#{x}tags"}
+
+  SUBQUERY_METATAGS = %w[commenter comm noter noteupdater artcomm flagger -flagger appealer -appealer]
+
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :artist, :foreign_key => "name", :primary_key => "name"
   has_one :antecedent_alias, -> {active}, :class_name => "TagAlias", :foreign_key => "antecedent_name", :primary_key => "name"
@@ -171,7 +179,7 @@ class Tag < ApplicationRecord
           while counts.empty? && n < 1000
             tag_strings = Post.select_values_sql("select tag_string from posts where created_at >= ?", n.hours.ago)
             tag_strings.each do |tag_string|
-              tag_string.scan(/\S+/).each do |tag|
+              tag_string.split.each do |tag|
                 counts[tag] ||= 0
                 counts[tag] += 1
               end
@@ -430,7 +438,7 @@ class Tag < ApplicationRecord
     end
 
     def is_metatag?(tag)
-      !!(tag =~ /\A(#{METATAGS}):(.+)\Z/i)
+      tag.match?(/\A(#{Regexp.union(METATAGS)}):(.+)\z/i)
     end
 
     def is_negated_tag?(tag)
@@ -443,6 +451,13 @@ class Tag < ApplicationRecord
 
     def is_wildcard_tag?(tag)
       tag.include?("*")
+    end
+
+    def has_metatag?(tags, *metatags)
+      return nil if tags.blank?
+
+      tags = scan_query(tags.to_str) if tags.respond_to?(:to_str)
+      tags.grep(/\A#{Regexp.union(metatags.map(&:to_s))}:(.+)\z/i) { $1 }.first
     end
 
     def parse_query(query, options = {})
@@ -459,7 +474,7 @@ class Tag < ApplicationRecord
       scan_query(query).each do |token|
         q[:tag_count] += 1 unless Danbooru.config.is_unlimited_tag?(token)
 
-        if token =~ /\A(#{METATAGS}):(.+)\Z/i
+        if token =~ /\A(#{Regexp.union(METATAGS)}):(.+)\z/i
           g1 = $1.downcase
           g2 = $2
           case g1
@@ -814,6 +829,7 @@ class Tag < ApplicationRecord
         self.related_tags = RelatedTagCalculator.calculate_from_sample_to_array(name).join(" ")
       end
       self.related_tags_updated_at = Time.now
+      fix_post_count if post_count > 20 && rand(post_count) <= 1
       save
     rescue ActiveRecord::StatementInvalid
     end

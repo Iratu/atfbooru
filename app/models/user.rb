@@ -6,6 +6,7 @@ class User < ApplicationRecord
   class PrivilegeError < Exception ; end
 
   module Levels
+    ANONYMOUS = 0
     BLOCKED = 10
     MEMBER = 20
     GOLD = 30
@@ -17,7 +18,6 @@ class User < ApplicationRecord
 
   # Used for `before_action :<role>_only`. Must have a corresponding `is_<role>?` method.
   Roles = Levels.constants.map(&:downcase) + [
-    :anonymous,
     :banned,
     :approver,
     :voter,
@@ -113,10 +113,6 @@ class User < ApplicationRecord
   accepts_nested_attributes_for :dmail_filter
 
   module BanMethods
-    def is_banned_or_ip_banned?
-      return is_banned? || IpBan.is_banned?(CurrentUser.ip_addr)
-    end
-
     def validate_ip_addr_is_not_banned
       if IpBan.is_banned?(CurrentUser.ip_addr)
         self.errors[:base] << "IP address is banned"
@@ -289,6 +285,12 @@ class User < ApplicationRecord
         User.find_by!(name: Danbooru.config.system_user)
       end
 
+      def anonymous
+        user = User.new(name: "Anonymous", created_at: Time.now)
+        user.freeze.readonly!
+        user
+      end
+
       def level_hash
         return {
           "Member" => Levels::MEMBER,
@@ -302,6 +304,9 @@ class User < ApplicationRecord
 
       def level_string(value)
         case value
+        when Levels::ANONYMOUS
+          "Anonymous"
+
         when Levels::BLOCKED
           "Banned"
 
@@ -363,11 +368,11 @@ class User < ApplicationRecord
     end
 
     def is_anonymous?
-      false
+      level == Levels::ANONYMOUS
     end
 
     def is_member?
-      true
+      level >= Levels::MEMBER
     end
 
     def is_blocked?
@@ -442,10 +447,6 @@ class User < ApplicationRecord
   end
 
   module BlacklistMethods
-    def blacklisted_tag_array
-      Tag.scan_query(blacklisted_tags)
-    end
-
     def normalize_blacklisted_tags
       self.blacklisted_tags = blacklisted_tags.downcase if blacklisted_tags.present?
     end
@@ -462,6 +463,8 @@ class User < ApplicationRecord
   end
 
   module LimitMethods
+    extend Memoist
+
     def max_saved_searches
       if is_platinum?
         1_000
@@ -527,7 +530,7 @@ end
     end
 
     def upload_limit
-      @upload_limit ||= [max_upload_limit - used_upload_slots, 0].max
+      [max_upload_limit - used_upload_slots, 0].max
     end
 
     def used_upload_slots
@@ -535,6 +538,7 @@ end
       uploaded_comic_count = Post.for_user(id).tag_match("comic").where("created_at >= ?", 23.hours.ago).count / 3
       uploaded_count - uploaded_comic_count
     end
+    memoize :used_upload_slots
 
     def max_upload_limit
       [(base_upload_limit * upload_limit_multiplier).ceil, 10].max
@@ -547,6 +551,7 @@ end
     def adjusted_deletion_confidence
       [deletion_confidence(60), 15].min
     end
+    memoize :adjusted_deletion_confidence
 
     def base_upload_limit
       if created_at >= 1.month.ago
@@ -913,6 +918,7 @@ end
     self.new_post_navigation_layout = true
     self.enable_sequential_post_navigation = true
     self.enable_auto_complete = true
+    self.always_resize_images = true
   end
 
   def presenter

@@ -103,10 +103,10 @@ class DmailTest < ActiveSupport::TestCase
       should "return results based on title contents" do
         dmail = FactoryBot.create(:dmail, :title => "xxx", :owner => @user)
 
-        matches = Dmail.search(title_matches: "x")
+        matches = Dmail.search(title_matches: "x*")
         assert_equal([dmail.id], matches.map(&:id))
 
-        matches = Dmail.search(title_matches: "X")
+        matches = Dmail.search(title_matches: "X*")
         assert_equal([dmail.id], matches.map(&:id))
 
         matches = Dmail.search(message_matches: "xxx")
@@ -118,9 +118,9 @@ class DmailTest < ActiveSupport::TestCase
 
       should "return results based on body contents" do
         dmail = FactoryBot.create(:dmail, :body => "xxx", :owner => @user)
-        matches = Dmail.search_message("xxx")
+        matches = Dmail.search(message_matches: "xxx")
         assert(matches.any?)
-        matches = Dmail.search_message("aaa")
+        matches = Dmail.search(message_matches: "aaa")
         assert(matches.empty?)
       end
     end
@@ -206,9 +206,19 @@ class DmailTest < ActiveSupport::TestCase
       should "fail gracefully if recipient doesn't exist" do
         assert_nothing_raised do
           dmail = Dmail.create_automated(to_name: "this_name_does_not_exist", title: "test", body: "test")
-          assert_equal(["can't be blank"], dmail.errors[:to_id])
+          assert_equal(["must exist"], dmail.errors[:to])
         end
       end
+    end
+
+    context "during validation" do
+      subject { FactoryBot.build(:dmail) }
+
+      should_not allow_value(" ").for(:title)
+      should_not allow_value(" ").for(:body)
+      should_not allow_value(nil).for(:to)
+      should_not allow_value(nil).for(:from)
+      should_not allow_value(nil).for(:owner)
     end
   end
 end

@@ -5,6 +5,7 @@ module Sources
     class Pixiv < Base
       MONIKER = %r!(?:[a-zA-Z0-9_-]+)!
       PROFILE = %r!\Ahttps?://www\.pixiv\.net/member\.php\?id=[0-9]+\z!
+      DATE =    %r!(?<date>\d{4}/\d{2}/\d{2}/\d{2}/\d{2}/\d{2})!i
       EXT =     %r!(?:jpg|jpeg|png|gif)!i
 
       WEB =     %r!(?:\A(?:https?://)?www\.pixiv\.net)!
@@ -12,13 +13,16 @@ module Sources
       IMG =     %r!(?:\A(?:https?://)?img[0-9]*\.pixiv\.net)!
       PXIMG =   %r!(?:\A(?:https?://)?i\.pximg\.net)!
       TOUCH =   %r!(?:\A(?:https?://)?touch\.pixiv\.net)!
+      UGOIRA =  %r!#{PXIMG}/img-zip-ugoira/img/#{DATE}/(?<illust_id>\d+)_ugoira1920x1080\.zip\z!i
+      ORIG_IMAGE = %r!#{PXIMG}/img-original/img/#{DATE}/(?<illust_id>\d+)_p(?<page>\d+)\.#{EXT}\z!i
       STACC_PAGE = %r!\A#{WEB}/stacc/#{MONIKER}/?\z!i
       NOVEL_PAGE = %r!(?:\Ahttps?://www\.pixiv\.net/novel/show\.php\?id=(\d+))!
+      FANBOX_ACCOUNT = %r!(?:\Ahttps?://www\.pixiv\.net/fanbox/creator/\d+\z)!
       FANBOX_IMAGE = %r!(?:\Ahttps?://fanbox\.pixiv\.net/images/post/(\d+))!
       FANBOX_PAGE = %r!(?:\Ahttps?://www\.pixiv\.net/fanbox/creator/\d+/post/(\d+))!
 
       def self.match?(*urls)
-        urls.compact.any? { |x| x.match?(/#{WEB}|#{IMG}|#{I12}|#{TOUCH}|#{PXIMG}|#{FANBOX_IMAGE}/i) }
+        urls.compact.any? { |x| x.match?(/#{WEB}|#{IMG}|#{I12}|#{TOUCH}|#{PXIMG}|#{FANBOX_IMAGE}|#{FANBOX_ACCOUNT}/i) }
       end
 
       def self.to_dtext(text)
@@ -44,10 +48,22 @@ module Sources
       end
 
       def image_urls
-        image_urls_sub.
-          map {|x| rewrite_cdn(x)}
+        image_urls_sub
       rescue PixivApiClient::BadIDError
         [url]
+      end
+
+      def preview_urls
+        image_urls.map do |url|
+          case url
+          when ORIG_IMAGE
+            "https://i.pximg.net/c/240x240/img-master/img/#{$~[:date]}/#{$~[:illust_id]}_p#{$~[:page]}_master1200.jpg"
+          when UGOIRA
+            "https://i.pximg.net/c/240x240/img-master/img/#{$~[:date]}/#{$~[:illust_id]}_master1200.jpg"
+          else
+            url
+          end
+        end
       end
 
       def page_url
@@ -57,6 +73,10 @@ module Sources
 
         if fanbox_id.present?
           return "https://www.pixiv.net/fanbox/creator/#{metadata.user_id}/post/#{fanbox_id}"
+        end
+
+        if fanbox_account_id.present?
+          return "https://www.pixiv.net/fanbox/creator/#{fanbox_account_id}"
         end
 
         if illust_id.present?
@@ -122,7 +142,7 @@ module Sources
       end
 
       def normalizable_for_artist_finder?
-        illust_id.present? || novel_id.present? || fanbox_id.present?
+        illust_id.present? || novel_id.present? || fanbox_id.present? || fanbox_account_id.present?
       end
 
       def unique_id
@@ -149,6 +169,10 @@ module Sources
         translated_tags
       end
 
+      def related_posts_search_query
+        illust_id.present? ? "pixiv:#{illust_id}" : "source:#{canonical_url}"
+      end
+
     public
 
       def image_urls_sub
@@ -165,14 +189,6 @@ module Sources
         end
 
         return metadata.pages
-      end
-
-      def rewrite_cdn(x)
-        if x =~ %r{\Ahttps?:\/\/(?:\w+\.)?pixiv\.net\.edgesuite\.net}
-          return x.sub(".edgesuite.net", "")
-        end
-
-        return x
       end
 
       # in order to prevent recursive loops, this method should not make any
@@ -214,7 +230,7 @@ module Sources
           end
         end
 
-        raise Sources::Error.new("Couldn't get illust ID from URL (#{url}, #{referer_url})")
+        return nil
       end
       memoize :illust_id
 
@@ -244,24 +260,21 @@ module Sources
       end
       memoize :fanbox_id
 
+      def fanbox_account_id
+        [url, referer_url].each do |x|
+          if x =~ FANBOX_ACCOUNT
+            return x
+          end
+        end
+
+        return nil
+      end
+      memoize :fanbox_account_id
+
       def agent
         PixivWebAgent.build
       end
       memoize :agent
-
-      def page
-        agent.get(URI.parse(page_url))
-        
-        if page.search("body.not-logged-in").any?
-          # Session cache is invalid, clear it and log in normally.
-          Cache.delete("pixiv-phpsessid")
-          @agent = nil
-          page = agent.get(URI.parse(page_url))
-        end
-
-        page
-      end
-      memoize :page
 
       def metadata
         if novel_id.present?
@@ -293,10 +306,6 @@ module Sources
         return metadata.moniker
       end
       memoize :moniker
-
-      def page_count
-        metadata.page_count
-      end
 
       def data
         return {
@@ -331,10 +340,6 @@ module Sources
         raise Sources::Error.new("content type not found for (#{url}, #{referer_url})")
       end
       memoize :ugoira_content_type
-
-      def is_manga?
-        page_count > 1
-      end
 
       # Returns the current page number of the manga. This will not
       # make any api calls and only looks at (url, referer_url).

@@ -1,5 +1,8 @@
 class UploadService
   class Replacer
+    extend Memoist
+    class Error < Exception; end
+
     attr_reader :post, :replacement
 
     def initialize(post:, replacement:)
@@ -58,25 +61,42 @@ class UploadService
       undoer.process!
     end
 
+    def source_strategy(upload)
+      return Sources::Strategies.find(upload.source, upload.referer_url)
+    end
+
+    def find_replacement_url(repl, upload)
+      if repl.replacement_file.present?
+        return "file://#{repl.replacement_file.original_filename}"
+      end
+
+      if !upload.source.present?
+        raise "No source found in upload for replacement"
+      end
+
+      if source_strategy(upload).canonical_url.present?
+        return source_strategy(upload).canonical_url
+      end
+
+      return upload.source
+    end
+
     def process!
       preprocessor = Preprocessor.new(
         rating: post.rating,
         tag_string: replacement.tags,
         source: replacement.replacement_url,
         file: replacement.replacement_file,
+        replaced_post: post,
         original_post_id: post.id
       )
       upload = preprocessor.start!
-      return if upload.is_errored?
+      raise Error, upload.status if upload.is_errored?
       upload = preprocessor.finish!(upload)
-      return if upload.is_errored?
+      raise Error, upload.status if upload.is_errored?
       md5_changed = upload.md5 != post.md5
       
-      if replacement.replacement_file.present?
-        replacement.replacement_url = "file://#{replacement.replacement_file.original_filename}"
-      elsif upload.source.present?
-        replacement.replacement_url = Sources::Strategies.canonical(upload.source, upload.referer_url)
-      end
+      replacement.replacement_url = find_replacement_url(replacement, upload)
 
       if md5_changed
         post.queue_delete_files(PostReplacement::DELETION_GRACE_PERIOD)
@@ -93,7 +113,7 @@ class UploadService
       post.image_width = upload.image_width
       post.image_height = upload.image_height
       post.file_size = upload.file_size
-      post.source = Sources::Strategies.canonical(upload.source, upload.referer_url)
+      post.source = replacement.replacement_url
       post.tag_string = upload.tag_string
 
       update_ugoira_frame_data(post, upload)
@@ -110,6 +130,8 @@ class UploadService
 
       replacement.save!
       post.save!
+
+      post.update_iqdb_async
 
       rescale_notes(post)
     end

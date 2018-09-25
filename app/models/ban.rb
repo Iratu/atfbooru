@@ -44,9 +44,7 @@ class Ban < ApplicationRecord
       q = q.where("user_id = ?", params[:user_id].to_i)
     end
 
-    if params[:reason_matches].present?
-      q = q.reason_matches(params[:reason_matches])
-    end
+    q = q.attribute_matches(:reason, params[:reason_matches])
 
     q = q.expired if params[:expired].to_s.truthy?
     q = q.unexpired if params[:expired].to_s.falsy?
@@ -59,6 +57,12 @@ class Ban < ApplicationRecord
     end
 
     q
+  end
+
+  def self.prune!
+    expired.includes(:user).find_each do |ban|
+      ban.user.unban! if ban.user.ban_expired?
+    end
   end
 
   def initialize_banner_id

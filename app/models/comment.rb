@@ -3,7 +3,7 @@ class Comment < ApplicationRecord
 
   validate :validate_post_exists, :on => :create
   validate :validate_creator_is_not_limited, :on => :create
-  validates_format_of :body, :with => /\S/, :message => 'has no content'
+  validates_presence_of :body, :message => "has no content"
   belongs_to :post
   belongs_to_creator
   belongs_to_updater
@@ -25,14 +25,6 @@ class Comment < ApplicationRecord
   module SearchMethods
     def recent
       reorder("comments.id desc").limit(6)
-    end
-
-    def body_matches(query)
-      if query =~ /\*/ && CurrentUser.user.is_builder?
-        where("body ILIKE ? ESCAPE E'\\\\'", query.to_escaped_for_sql_like)
-      else
-        where("body_index @@ plainto_tsquery(?)", query.to_escaped_for_tsquery_split).order("comments.id DESC")
-      end
     end
 
     def hidden(user)
@@ -74,9 +66,7 @@ class Comment < ApplicationRecord
     def search(params)
       q = super
 
-      if params[:body_matches].present?
-        q = q.body_matches(params[:body_matches])
-      end
+      q = q.attribute_matches(:body, params[:body_matches], index_column: :body_index)
 
       if params[:post_id].present?
         q = q.where("post_id in (?)", params[:post_id].split(",").map(&:to_i))

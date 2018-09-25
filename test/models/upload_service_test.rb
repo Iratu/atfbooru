@@ -42,11 +42,15 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "work on an ugoira url" do
-          file = subject.download_for_upload(@upload)
+          begin
+            file = subject.download_for_upload(@upload)
 
-          assert_operator(File.size(file.path), :>, 0)
+            assert_operator(File.size(file.path), :>, 0)
 
-          file.close
+            file.close
+          rescue Net::OpenTimeout
+            skip "network problems"
+          end
         end
       end
 
@@ -60,12 +64,16 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "work on an ugoira url" do
-          file = subject.download_for_upload(@upload)
+          begin
+            file = subject.download_for_upload(@upload)
 
-          assert_not_nil(@upload.context["ugoira"])
-          assert_operator(File.size(file.path), :>, 0)
+            assert_not_nil(@upload.context["ugoira"])
+            assert_operator(File.size(file.path), :>, 0)
 
-          file.close
+            file.close
+          rescue Net::OpenTimeout
+            skip "network failure"
+          end
         end
       end
     end
@@ -100,9 +108,7 @@ class UploadServiceTest < ActiveSupport::TestCase
       context "for an ugoira" do
         setup do
           @file = File.open("test/files/valid_ugoira.zip", "rb")
-          @upload = mock()
-          @upload.stubs(:is_video?).returns(false)
-          @upload.stubs(:is_ugoira?).returns(true)
+          @upload = Upload.new(file_ext: "zip")
         end
 
         teardown do
@@ -121,8 +127,7 @@ class UploadServiceTest < ActiveSupport::TestCase
       context "for a video" do
         setup do
           @file = File.open("test/files/test-300x300.mp4", "rb")
-          @upload = mock()
-          @upload.stubs(:is_video?).returns(true)
+          @upload = Upload.new(file_ext: "mp4")
         end
 
         teardown do
@@ -140,9 +145,7 @@ class UploadServiceTest < ActiveSupport::TestCase
       context "for an image" do 
         setup do
           @file = File.open("test/files/test.jpg", "rb")
-          @upload = mock()
-          @upload.stubs(:is_video?).returns(false)
-          @upload.stubs(:is_ugoira?).returns(false)
+          @upload = Upload.new(file_ext: "jpg")
         end
 
         teardown do
@@ -400,8 +403,12 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "download the file" do
-          @service = subject.new(source: @source, referer_url: @ref)
-          @upload = @service.start!
+          begin
+            @service = subject.new(source: @source, referer_url: @ref)
+            @upload = @service.start!
+          rescue Net::OpenTimeout
+            skip "network failure"
+          end
           assert_equal("preprocessed", @upload.status)
           assert_equal(294591, @upload.file_size)
           assert_equal("jpg", @upload.file_ext)
@@ -418,7 +425,11 @@ class UploadServiceTest < ActiveSupport::TestCase
 
         should "download the file" do
           @service = subject.new(source: @source)
-          @upload = @service.start!
+          begin
+            @upload = @service.start!
+          rescue Net::OpenTimeout
+            skip "network problems"
+          end
           assert_equal("preprocessed", @upload.status)
           assert_equal(2804, @upload.file_size)
           assert_equal("zip", @upload.file_ext)
@@ -435,7 +446,11 @@ class UploadServiceTest < ActiveSupport::TestCase
 
         should "download the file" do
           @service = subject.new(source: @source)
-          @upload = @service.start!
+          begin
+            @upload = @service.start!
+          rescue Net::OpenTimeout
+            skip "network problems"
+          end
           assert_equal("preprocessed", @upload.status)
           assert_equal(181309, @upload.file_size)
           assert_equal("jpg", @upload.file_ext)
@@ -477,6 +492,12 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
       end
 
+      context "for an invalid content type" do
+        should "fail" do
+          upload = subject.new(source: "http://www.example.com").start!
+          assert_match(/\Aerror:.*File ext is invalid/, upload.status)
+        end
+      end
     end
 
     context "#finish!" do
@@ -592,6 +613,32 @@ class UploadServiceTest < ActiveSupport::TestCase
       end
     end
 
+    context "for a twitter source replacement" do
+      setup do
+        @new_url = "https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"
+
+        travel_to(1.month.ago) do
+          @user = FactoryBot.create(:user)
+        end
+
+        as_user do
+          @post = FactoryBot.create(:post, source: "http://blah", file_ext: "jpg", md5: "something", uploader_ip_addr: "127.0.0.2")
+          @post.stubs(:queue_delete_files)
+          @replacement = FactoryBot.create(:post_replacement, post: @post, replacement_url: @new_url)
+        end
+      end
+
+      subject { UploadService::Replacer.new(post: @post, replacement: @replacement) }
+
+      should "replace the post" do
+        as_user { subject.process! }
+
+        @post.reload
+
+        assert_equal(@new_url, @post.replacements.last.replacement_url)
+      end
+    end
+
     context "for a source replacement" do
       setup do
         @new_url = "https://raikou1.donmai.us/d3/4e/d34e4cf0a437a5d65f8e82b7bcd02606.jpg"
@@ -627,7 +674,7 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "throw an error" do
-          assert_raises(ActiveRecord::RecordNotUnique) do
+          assert_raises(UploadService::Replacer::Error) do
             as_user { @post2.replace!(replacement_url: @new_url) }
           end
         end
@@ -1049,8 +1096,12 @@ class UploadServiceTest < ActiveSupport::TestCase
       end
 
       should "record the canonical source" do
-        post = subject.new({}).create_post_from_upload(@upload)
-        assert_equal(@source, post.source)
+        begin
+          post = subject.new({}).create_post_from_upload(@upload)
+          assert_equal(@source, post.source)
+        rescue Net::OpenTimeout
+          skip "network failure"
+        end
       end
     end
 
@@ -1083,7 +1134,7 @@ class UploadServiceTest < ActiveSupport::TestCase
 
     context "for nijie" do
       should "record the canonical source" do
-        page_url = "https://nijie.info/view.php?id=213043"
+        page_url = "https://nijie.info/view.php?id=728995"
         image_url = "https://pic03.nijie.info/nijie_picture/728995_20170505014820_0.jpg"
         upload = FactoryBot.create(:jpg_upload, file_size: 1000, md5: "12345", file_ext: "jpg", image_width: 100, image_height: 100, source: image_url, referer_url: page_url)
 

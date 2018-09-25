@@ -6,6 +6,9 @@ class ArtistUrl < ApplicationRecord
   validate :validate_url_format
   belongs_to :artist, :touch => true
 
+  scope :url_matches, ->(url) { url_attribute_matches(:url, url) }
+  scope :normalized_url_matches, ->(url) { url_attribute_matches(:normalized_url, url) }
+
   def self.strip_prefixes(url)
     url.sub(/^[-]+/, "")
   end
@@ -19,14 +22,12 @@ class ArtistUrl < ApplicationRecord
       nil
     else
       url = url.sub(%r!^https://!, "http://")
+      url = url.sub(%r!^http://([^/]+)!i) { |domain| domain.downcase }
       url = url.sub(%r!^http://blog\d+\.fc2!, "http://blog.fc2")
       url = url.sub(%r!^http://blog-imgs-\d+\.fc2!, "http://blog.fc2")
       url = url.sub(%r!^http://blog-imgs-\d+-\w+\.fc2!, "http://blog.fc2")
       # url = url.sub(%r!^(http://seiga.nicovideo.jp/user/illust/\d+)\?.+!, '\1/')
       url = url.sub(%r!^http://pictures.hentai-foundry.com//!, "http://pictures.hentai-foundry.com/")
-      if url !~ %r{\Ahttps?://(?:fc|th|pre|orig|img|www)\.}
-        url = url.sub(%r{\Ahttps?://(.+?)\.deviantart\.com(.*)}, 'http://www.deviantart.com/\1\2')
-      end
 
       # the strategy won't always work for twitter because it looks for a status
       url = url.downcase if url =~ %r!^https?://(?:mobile\.)?twitter\.com!
@@ -47,36 +48,44 @@ class ArtistUrl < ApplicationRecord
     end
   end
 
-  def self.legacy_normalize(url)
-    if url.nil?
-      nil
+  def self.search(params = {})
+    q = super
+
+    q = q.attribute_matches(:artist_id, params[:artist_id])
+    q = q.attribute_matches(:is_active, params[:is_active])
+    q = q.search_text_attribute(:url, params)
+    q = q.search_text_attribute(:normalized_url, params)
+
+    q = q.artist_matches(params[:artist])
+    q = q.url_matches(params[:url_matches])
+    q = q.normalized_url_matches(params[:normalized_url_matches])
+
+    case params[:order]
+    when /\A(id|artist_id|url|normalized_url|is_active|created_at|updated_at)(?:_(asc|desc))?\z/i
+      dir = $2 || :desc
+      q = q.order($1 => dir).order(id: :desc)
     else
-      url = url.gsub(%r!^https://!, "http://")
-      url = url.gsub(%r!^http://blog\d+\.fc2!, "http://blog.fc2")
-      url = url.gsub(%r!^http://blog-imgs-\d+\.fc2!, "http://blog.fc2")
-      url = url.gsub(%r!^http://blog-imgs-\d+-\w+\.fc2!, "http://blog.fc2")
-      url = url.gsub(%r!^http://img\d+\.pixiv\.net!, "http://img.pixiv.net")
-      url = url.gsub(%r!^http://i\d+\.pixiv\.net/img\d+!, "http://img.pixiv.net")
-      url = url.gsub(%r!/+\Z!, "")
-      url + "/"
+      q = q.apply_default_order(params)
     end
+
+    q
   end
 
-  def self.normalize_for_search(url)
-    if url =~ /\.\w+\Z/ && url =~ /\w\/\w/
-      url = File.dirname(url)
-    end
+  def self.artist_matches(params = {})
+    return all if params.blank?
+    where(artist_id: Artist.search(params).reorder(nil))
+  end
 
-    url = url.gsub(%r!^https://!, "http://")
-    url = url.gsub(%r!^http://blog\d+\.fc2!, "http://blog*.fc2")
-    url = url.gsub(%r!^http://blog-imgs-\d+\.fc2!, "http://blog*.fc2")
-    url = url.gsub(%r!^http://blog-imgs-\d+-\w+\.fc2!, "http://blog*.fc2")
-    url = url.gsub(%r!^http://img\d+\.pixiv\.net!, "http://img*.pixiv.net")
-    url = url.gsub(%r!^http://i\d+\.pixiv\.net/img\d+!, "http://*.pixiv.net/img*")
-    if url !~ %r{\Ahttps?://(?:fc|th|pre|orig|img|www)\.}
-      url = url.sub(%r{\Ahttps?://(.+?)\.deviantart\.com(.*)}, "http://www.deviantart.com/#\1\2")
+  def self.url_attribute_matches(attr, url)
+    if url.blank?
+      all
+    elsif url =~ %r!\A/(.*)/\z!
+      where_regex(attr, $1)
+    elsif url.include?("*")
+      where_ilike(attr, url)
+    else
+      where(attr => normalize(url))
     end
-    url
   end
 
   def parse_prefix

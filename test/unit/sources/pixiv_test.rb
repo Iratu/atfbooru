@@ -56,6 +56,10 @@ module Sources
           assert_equal("https://i.pximg.net/img-zip-ugoira/img/2017/04/04/08/57/38/62247364_ugoira1920x1080.zip", @site.file_url)
         end
 
+        should "get the preview url" do
+          assert_equal("https://i.pximg.net/c/240x240/img-master/img/2017/04/04/08/57/38/62247364_master1200.jpg", @site.preview_url)
+        end
+
         should "capture the frame data" do
           assert_equal(2, @site.ugoira_frame_data.size)
           if @site.ugoira_frame_data[0]["file"]
@@ -100,6 +104,10 @@ module Sources
 
         should "get the full size image url" do
           assert_equal("https://i.pximg.net/img-original/img/2017/11/21/05/12/37/65981735_p0.jpg", @site.image_url)
+        end
+
+        should "get the preview size image url" do
+          assert_equal("https://i.pximg.net/c/240x240/img-master/img/2017/11/21/05/12/37/65981735_p0_master1200.jpg", @site.preview_url)
         end
 
         should "get the page count" do
@@ -161,11 +169,9 @@ module Sources
       end
 
       context "fetching source data for a deleted work" do
-        should "raise a bad id error" do
-          assert_raise(::PixivApiClient::BadIDError) do
-            get_source("https://i.pximg.net/img-original/img/2017/11/22/01/06/44/65991677_p0.png")
-            @site.image_urls
-          end
+        should "return the same url" do
+          get_source("https://i.pximg.net/img-original/img/2017/11/22/01/06/44/65991677_p0.png")
+          assert_equal(["https://i.pximg.net/img-original/img/2017/11/22/01/06/44/65991677_p0.png"], @site.image_urls)
         end
       end
 
