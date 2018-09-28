@@ -585,9 +585,9 @@ end
       if is_platinum?
         Float::INFINITY
       elsif is_gold?
-        20_000
+        Float::INFINITY
       else
-        10_000
+        Float::INFINITY
       end
     end
 
@@ -608,7 +608,7 @@ end
       elsif is_gold?
         2
       else
-        1
+        4
       end
     end
 
