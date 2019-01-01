@@ -16,15 +16,13 @@
       <div class="body prose">
         <%= format_text(comment.body) %>
 
-        <% if comment.updated_at - comment.created_at > 5.minutes %>
-          <p class="info">Updated by <%= link_to_user comment.updater %> <%= time_ago_in_words_tagged(comment.updated_at) %></p>
-        <% end %>
+        <%= render "update_notice", record: comment %>
       </div>
       
       <% if CurrentUser.is_member? %>
         <menu>
           <% if @post || @posts %>
-            <li><%= link_to "Reply", new_comment_path(:post_id => comment.post_id), :class => "reply-link", "data-comment-id" => comment.id %></li>
+            <li><%= link_to "Reply", new_comment_path(id: comment, comment: { post_id: comment.post_id }), class: "reply-link", remote: true %></li>
             <% if comment.editable_by?(CurrentUser.user) %>
               <% if comment.is_deleted? %>
                 <li><%= link_to "Undelete", undelete_comment_path(comment.id), :method => :post, :remote => true %></li>

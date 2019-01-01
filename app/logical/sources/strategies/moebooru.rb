@@ -36,8 +36,10 @@ module Sources
       URL_SLUG = %r!/(?:yande\.re%20|Konachan\.com%20-%20)(?<id>\d+).*!i
       IMAGE_URL = %r!#{BASE_URL}/(?<type>image|jpeg|sample)/(?<md5>\h{32})#{URL_SLUG}?\.(?<ext>jpg|jpeg|png|gif)\z!i
 
-      def self.match?(*urls)
-        urls.compact.any? { |x| x.match?(BASE_URL) }
+      delegate :artist_name, :profile_url, :tag_name, :artist_commentary_title, :artist_commentary_desc, :dtext_artist_commentary_title, :dtext_artist_commentary_desc, to: :sub_strategy, allow_nil: true
+
+      def domains
+        ["yande.re", "konachan.com"]
       end
 
       def site_name
@@ -59,6 +61,11 @@ module Sources
         [image_url]
       end
 
+      def preview_urls
+        return [] unless post_md5.present?
+        ["https://#{file_host}/data/preview/#{post_md5[0..1]}/#{post_md5[2..3]}/#{post_md5}.jpg"]
+      end
+
       def page_url
         return nil if post_id.blank?
         "https://#{site_name}/post/show/#{post_id}"
@@ -68,12 +75,19 @@ module Sources
         image_url
       end
 
-      def profile_url
-        nil
+      def tags
+        api_response[:tags].to_s.split.map do |tag|
+          [tag, "https://#{site_name}/post?tags=#{CGI.escape(tag)}"]
+        end
       end
 
-      def artist_name
-        nil
+      # XXX the base strategy excludes artist tags from the translated tags; we don't want that for moebooru.
+      def translated_tags
+        tags.map(&:first).flat_map(&method(:translate_tag)).uniq.sort
+      end
+
+      def headers
+        { "Referer" => "http://#{site_name}" }
       end
 
       # Moebooru returns an empty array when doing an md5:<hash> search for a
@@ -94,6 +108,10 @@ module Sources
       memoize :api_response
 
       concerning :HelperMethods do
+        def sub_strategy
+          @sub_strategy ||= Sources::Strategies.find(api_response[:source], default: nil)
+        end
+
         def file_host
           case site_name
           when "yande.re" then "files.yande.re"

@@ -63,10 +63,6 @@ article.post-preview {
   margin-top: 1em;
 }
 
-#open-edit-dialog {
-  padding: 0;
-}
-
 #edit-dialog textarea {
   margin-bottom: 0.25em;
 }
@@ -75,7 +71,6 @@ article.post-preview {
   img {
     border: 2px solid transparent;
   }
-
 
   &.post-status-has-children img {
     border-color: $preview_has_children_color;
@@ -176,12 +171,27 @@ body[data-user-can-approve-posts="true"] .post-preview {
 div#c-posts {
   .fav-buttons {
     font-size: 14pt;
-    text-align: center;
     margin: 0.5em 0;
 
-    input[type=submit] {
-      padding: 0.2em 0.75em;
+    i {
+      margin-right: 0.1em;
     }
+
+    button.ui-button {
+      padding: 0.25em 0.75em;
+    }
+  }
+
+  #remove-fav-button i {
+    color: deeppink;
+  }
+
+  .fav-buttons-true #add-fav-button {
+    display: none;
+  }
+
+  .fav-buttons-false #remove-fav-button {
+    display: none;
   }
 
   #ugoira-controls {
@@ -314,15 +324,11 @@ div#c-posts {
   }
 
   div#a-show {
-    .active {
+    .active, .pool-selected-true {
       font-weight: bold;
     }
 
     .recommended-posts {
-      margin-top: 1em;
-    }
-
-    #add-fav-button, #remove-fav-button {
       margin-top: 1em;
     }
 
@@ -357,6 +363,10 @@ div#c-posts {
 
     textarea {
       margin-bottom: 0.25em;
+    }
+
+    #edit textarea {
+      width: 100%;
     }
 
     #favlist {

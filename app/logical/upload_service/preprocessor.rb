@@ -33,24 +33,24 @@ class UploadService
     memoize :canonical_source
 
     def in_progress?
-      if Utils.is_downloadable?(source)
-        return Upload.where(status: "preprocessing", source: source).exists?
-      end
-
       if md5.present?
         return Upload.where(status: "preprocessing", md5: md5).exists?
+      end
+
+      if Utils.is_downloadable?(source)
+        return Upload.where(status: "preprocessing", source: source).exists?
       end
 
       false
     end
 
     def predecessor
-      if Utils.is_downloadable?(source)
-        return Upload.where(status: ["preprocessed", "preprocessing"], source: source).first
-      end
-
       if md5.present?
         return Upload.where(status: ["preprocessed", "preprocessing"], md5: md5).first
+      end
+
+      if Utils.is_downloadable?(source)
+        return Upload.where(status: ["preprocessed", "preprocessing"], source: source).first
       end
     end
 
@@ -91,12 +91,7 @@ class UploadService
       begin
         upload.update(status: "preprocessing")
 
-        if params[:file].present?
-          file = params[:file]
-        elsif Utils.is_downloadable?(source)
-          file = Utils.download_for_upload(upload)
-        end
-
+        file = Utils.get_file_for_upload(upload, file: params[:file])
         Utils.process_file(upload, file, original_post_id: original_post_id)
 
         upload.rating = params[:rating]

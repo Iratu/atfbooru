@@ -27,9 +27,14 @@ class PostTest < ActiveSupport::TestCase
   context "Deletion:" do
     context "Expunging a post" do
       setup do
+        Delayed::Worker.delay_jobs = true
         @upload = UploadService.new(FactoryBot.attributes_for(:jpg_upload)).start!
         @post = @upload.post
         Favorite.add(post: @post, user: @user)
+      end
+
+      teardown do
+        Delayed::Worker.delay_jobs = false
       end
 
       should "delete the files" do
@@ -110,11 +115,11 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "remove the post from all pools" do
-          assert_equal("", @pool.post_ids)
+          assert_equal([], @pool.post_ids)
         end
 
         should "remove the post from deleted pools" do
-          assert_equal("", @deleted_pool.post_ids)
+          assert_equal([], @deleted_pool.post_ids)
         end
 
         should "destroy the record" do
@@ -726,9 +731,9 @@ class PostTest < ActiveSupport::TestCase
           end
         end
 
-        context "for a cosplay tag" do
+        context "for a wildcard implication" do
           setup do
-            @post = FactoryBot.create(:post, tag_string: "char:someone_(cosplay)")
+            @post = FactoryBot.create(:post, tag_string: "char:someone_(cosplay) test_school_uniform")
             @tags = @post.tag_array
           end
 
@@ -736,10 +741,15 @@ class PostTest < ActiveSupport::TestCase
             assert(@tags.include?("cosplay"))
           end
 
+          should "add the school_uniform tag" do
+            assert(@tags.include?("school_uniform"))
+          end
+
           should "create the tag" do
             assert(Tag.where(name: "someone_(cosplay)").exists?, "expected 'someone_(cosplay)' tag to be created")
             assert(Tag.where(name: "someone_(cosplay)", category: 4).exists?, "expected 'someone_(cosplay)' tag to be created as character")
             assert(Tag.where(name: "someone", category: 4).exists?, "expected 'someone' tag to be created")
+            assert(Tag.where(name: "school_uniform", category: 0).exists?, "expected 'school_uniform' tag to be created")
           end
 
           should "apply aliases when the character tag is added" do
@@ -754,6 +764,8 @@ class PostTest < ActiveSupport::TestCase
           end
 
           should "apply implications after the character tag is added" do
+            FactoryBot.create(:tag, name: "jimmy", category: Tag.categories.character)
+            FactoryBot.create(:tag, name: "jim", category: Tag.categories.character)
             FactoryBot.create(:tag_implication, antecedent_name: "jimmy", consequent_name: "jim")
             @post.add_tag("jimmy_(cosplay)")
             @post.save
@@ -835,7 +847,7 @@ class PostTest < ActiveSupport::TestCase
             should "add the post to the pool" do
               @post.reload
               @pool.reload
-              assert_equal("#{@post.id}", @pool.post_ids)
+              assert_equal([@post.id], @pool.post_ids)
               assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
             end
           end
@@ -852,7 +864,7 @@ class PostTest < ActiveSupport::TestCase
             should "remove the post from the pool" do
               @post.reload
               @pool.reload
-              assert_equal("", @pool.post_ids)
+              assert_equal([], @pool.post_ids)
               assert_equal("", @post.pool_string)
             end
           end
@@ -866,7 +878,7 @@ class PostTest < ActiveSupport::TestCase
             should "add the post to the pool" do
               @post.reload
               @pool.reload
-              assert_equal("#{@post.id}", @pool.post_ids)
+              assert_equal([@post.id], @pool.post_ids)
               assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
             end
           end
@@ -881,7 +893,7 @@ class PostTest < ActiveSupport::TestCase
               should "add the post to the pool" do
                 @post.reload
                 @pool.reload
-                assert_equal("#{@post.id}", @pool.post_ids)
+                assert_equal([@post.id], @pool.post_ids)
                 assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
               end
             end
@@ -892,7 +904,7 @@ class PostTest < ActiveSupport::TestCase
                 @pool = Pool.find_by_name("abc")
                 @post.reload
                 assert_not_nil(@pool)
-                assert_equal("#{@post.id}", @pool.post_ids)
+                assert_equal([@post.id], @pool.post_ids)
                 assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
               end
             end
@@ -954,16 +966,26 @@ class PostTest < ActiveSupport::TestCase
         end
 
         context "for a child" do
-          setup do
-            @child = FactoryBot.create(:post)
-          end
+          should "add and remove children" do
+            @children = FactoryBot.create_list(:post, 3, parent_id: nil)
 
-          should "update the parent relationships for both posts" do
-            @post.update_attributes(:tag_string => "aaa child:#{@child.id}")
-            @post.reload
-            @child.reload
-            assert_equal(@post.id, @child.parent_id)
-            assert(@post.has_children?)
+            @post.update(tag_string: "aaa child:#{@children.first.id}..#{@children.last.id}")
+            assert_equal(true, @post.reload.has_children?)
+            assert_equal(@post.id, @children[0].reload.parent_id)
+            assert_equal(@post.id, @children[1].reload.parent_id)
+            assert_equal(@post.id, @children[2].reload.parent_id)
+
+            @post.update(tag_string: "aaa -child:#{@children.first.id}")
+            assert_equal(true, @post.reload.has_children?)
+            assert_nil(@children[0].reload.parent_id)
+            assert_equal(@post.id, @children[1].reload.parent_id)
+            assert_equal(@post.id, @children[2].reload.parent_id)
+
+            @post.update(tag_string: "aaa child:none")
+            assert_equal(false, @post.reload.has_children?)
+            assert_nil(@children[0].reload.parent_id)
+            assert_nil(@children[1].reload.parent_id)
+            assert_nil(@children[2].reload.parent_id)
           end
         end
 
@@ -1122,6 +1144,16 @@ class PostTest < ActiveSupport::TestCase
           @post.update(:tag_string => "aaa translation_request -/tr")
 
           assert_equal("aaa", @post.tag_string)
+        end
+      end
+
+      context "tagged with animated_gif or animated_png" do
+        should "remove the tag if not a gif or png" do
+          @post.update(tag_string: "tagme animated_gif")
+          assert_equal("tagme", @post.tag_string)
+
+          @post.update(tag_string: "tagme animated_png")
+          assert_equal("tagme", @post.tag_string)
         end
       end
 
@@ -1989,6 +2021,13 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(posts, "ordpool:test")
     end
 
+    should "return posts for the ordpool:<name> metatag for a series pool containing duplicate posts" do
+      posts = FactoryBot.create_list(:post, 2)
+      pool = FactoryBot.create(:pool, name: "test", category: "series", post_ids: [posts[0].id, posts[1].id, posts[1].id])
+
+      assert_tag_match([posts[0], posts[1], posts[1]], "ordpool:test")
+    end
+
     should "return posts for the parent:<N> metatag" do
       parent = FactoryBot.create(:post)
       child = FactoryBot.create(:post, tag_string: "parent:#{parent.id}")
@@ -2240,25 +2279,35 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([post], "pixiv_id:none")
     end
 
-    # should "return posts for a pixiv novel id search" do
-    #   url = "http://www.pixiv.net/novel/show.php?id=2156088"
-    #   post = FactoryBot.create(:post, :source => url)
-    #   assert_equal(1, Post.tag_match("pixiv_novel_id:2156088").count)
-    # end
+    context "saved searches" do
+      setup do
+        SavedSearch.stubs(:enabled?).returns(true)
+        @post1 = FactoryBot.create(:post, tag_string: "aaa")
+        @post2 = FactoryBot.create(:post, tag_string: "bbb")
+        FactoryBot.create(:saved_search, query: "aaa", labels: ["zzz"], user: CurrentUser.user)
+        FactoryBot.create(:saved_search, query: "bbb", user: CurrentUser.user)
+      end
 
-    should "return posts for a search:<category> metatag" do
-      post1 = FactoryBot.create(:post, tag_string: "aaa")
-      post2 = FactoryBot.create(:post, tag_string: "bbb")
-      FactoryBot.create(:saved_search, query: "aaa", labels: ["zzz"], user: CurrentUser.user)
-      FactoryBot.create(:saved_search, query: "bbb", user: CurrentUser.user)
+      context "labeled" do
+        should "work" do
+          SavedSearch.expects(:post_ids_for).with(CurrentUser.id, label: "zzz").returns([@post1.id])
+          assert_tag_match([@post1], "search:zzz")          
+        end
+      end
 
-      SavedSearch.expects(:post_ids).with(CurrentUser.id, "zzz").returns([post1.id])
-      SavedSearch.expects(:post_ids).with(CurrentUser.id, "uncategorized").returns([post2.id])
-      SavedSearch.expects(:post_ids).with(CurrentUser.id).returns([post1.id, post2.id])
+      context "missing" do
+        should "work" do
+          SavedSearch.expects(:post_ids_for).with(CurrentUser.id, label: "uncategorized").returns([@post2.id])
+          assert_tag_match([@post2], "search:uncategorized")
+        end
+      end
 
-      assert_tag_match([post1], "search:zzz")
-      assert_tag_match([post2], "search:uncategorized")
-      assert_tag_match([post2, post1], "search:all")
+      context "all" do
+        should "work" do
+          SavedSearch.expects(:post_ids_for).with(CurrentUser.id).returns([@post1.id, @post2.id])
+          assert_tag_match([@post2, @post1], "search:all")          
+        end
+      end
     end
 
     should "return posts for a rating:<s|q|e> metatag" do
@@ -2545,6 +2594,11 @@ class PostTest < ActiveSupport::TestCase
         should "return the true count, if not cached" do
           assert_equal(1, Post.fast_count("aaa score:42"))
         end
+
+        should "set the expiration time" do
+          Cache.expects(:put).with(Post.count_cache_key("aaa score:42"), 1, 180)
+          Post.fast_count("aaa score:42")
+        end
       end
 
       context "a blank search" do
@@ -2724,7 +2778,7 @@ class PostTest < ActiveSupport::TestCase
   end
 
   context "#replace!" do
-    subject { @post.replace!(tags: "something", replacement_url: "https://danbooru.donmai.us/data/preview/download.png") }
+    subject { @post.replace!(tags: "something", replacement_url: "https://danbooru.donmai.us/images/download-preview.png") }
 
     setup do
       @post = FactoryBot.create(:post)

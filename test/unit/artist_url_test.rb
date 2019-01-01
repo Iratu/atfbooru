@@ -17,10 +17,17 @@ class ArtistUrlTest < ActiveSupport::TestCase
     end
 
     should "allow urls to be marked as inactive" do
-      url = FactoryBot.create(:artist_url, :url => "-http://monet.com")
+      url = FactoryBot.create(:artist_url, url: "http://monet.com", is_active: false)
       assert_equal("http://monet.com", url.url)
       assert_equal("http://monet.com/", url.normalized_url)
-      refute(url.is_active?)
+      assert_equal("-http://monet.com", url.to_s)
+    end
+
+    should "disallow invalid urls" do
+      url = FactoryBot.build(:artist_url, url: "www.example.com")
+
+      assert_equal(false, url.valid?)
+      assert_match(/must begin with http/, url.errors.full_messages.join)
     end
 
     should "always add a trailing slash when normalized" do
@@ -58,7 +65,6 @@ class ArtistUrlTest < ActiveSupport::TestCase
       setup do
         @urls = [
           FactoryBot.create(:artist_url, url: "https://www.artstation.com/koyorin"),
-          FactoryBot.create(:artist_url, url: "https://www.artstation.com/artist/koyorin"),
           FactoryBot.create(:artist_url, url: "https://koyorin.artstation.com"),
           FactoryBot.create(:artist_url, url: "https://www.artstation.com/artwork/04XA4")
         ]
@@ -67,8 +73,7 @@ class ArtistUrlTest < ActiveSupport::TestCase
       should "normalize" do
         assert_equal("http://www.artstation.com/koyorin/", @urls[0].normalized_url)
         assert_equal("http://www.artstation.com/koyorin/", @urls[1].normalized_url)
-        assert_equal("http://www.artstation.com/koyorin/", @urls[2].normalized_url)
-        assert_equal("http://www.artstation.com/jeyrain/", @urls[3].normalized_url)
+        assert_equal("http://www.artstation.com/jeyrain/", @urls[2].normalized_url)
       end
     end
 

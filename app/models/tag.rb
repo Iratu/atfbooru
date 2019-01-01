@@ -21,7 +21,8 @@ class Tag < ApplicationRecord
   validates :name, uniqueness: true, tag_name: true, on: :create
   validates_inclusion_of :category, in: TagCategory.category_ids
 
-  after_save :update_category_cache_for_all, if: ->(rec) { rec.saved_change_to_attribute?(:category)}
+  before_save :update_category_cache, if: :category_changed?
+  before_save :update_category_post_counts, if: :category_changed?
 
   module ApiMethods
     def to_legacy_json
@@ -56,10 +57,6 @@ class Tag < ApplicationRecord
     extend ActiveSupport::Concern
 
     module ClassMethods
-      def counts_for(tag_names)
-        select_all_sql("SELECT name, post_count FROM tags WHERE name IN (?)", tag_names)
-      end
-
       def highest_post_count
         Cache.get("highest-post-count", 4.hours) do
           select("post_count").order("post_count DESC").first.post_count
@@ -139,14 +136,6 @@ class Tag < ApplicationRecord
 
     def category_name
       TagCategory.reverse_mapping[category].capitalize
-    end
-
-    def update_category_cache_for_all
-      update_category_cache
-      Danbooru.config.other_server_hosts.each do |host|
-        delay(:queue => host).update_category_cache
-      end
-      delay(:queue => "default", :priority => 10).update_category_post_counts
     end
 
     def update_category_post_counts
@@ -623,8 +612,8 @@ class Tag < ApplicationRecord
             elsif g2.downcase == "collection"
               q[:tags][:related] << "pool:collection"
             elsif g2.include?("*")
-              pools = Pool.name_matches(g2).select("id").limit(Danbooru.config.tag_query_limit).order("post_count DESC")
-              q[:tags][:include] += pools.map {|pool| "pool:#{pool.id}"}
+              pool_ids = Pool.search(name_matches: g2, order: "post_count").limit(Danbooru.config.tag_query_limit).pluck(:id)
+              q[:tags][:include] += pool_ids.map { |id| "pool:#{id}" }
             else
               q[:tags][:related] << "pool:#{Pool.name_to_id(g2)}"
             end

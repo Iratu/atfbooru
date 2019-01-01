@@ -309,11 +309,6 @@ Autocomplete.insert_completion = function(input, completion) {
   var regexp = new RegExp("(" + Autocomplete.TAG_PREFIXES + ")?\\S+$", "g");
   before_caret_text = before_caret_text.replace(regexp, "$1") + completion + " ";
 
-  if (Utility.meta('current-user-id') === '1') {
-    // is this actually better?
-    after_caret_text = after_caret_text.replace(/^\S+/, "");
-  }
-
   input.value = before_caret_text + after_caret_text;
   input.selectionStart = input.selectionEnd = before_caret_text.length;
 };
@@ -438,14 +433,10 @@ Autocomplete.static_metatags = {
 Autocomplete.static_metatag_source = function(term, resp, metatag) {
   var sub_metatags = this.static_metatags[metatag];
 
-  var regexp = new RegExp("^" + $.ui.autocomplete.escapeRegex(term), "i");
-  var matches = $.grep(sub_metatags, function (sub_metatag) {
-    return regexp.test(sub_metatag);
-  });
+  var matches = sub_metatags.filter(sub_metatag => sub_metatag.startsWith(term.toLowerCase()));
+  matches = matches.map(sub_metatag => `${metatag}:${sub_metatag}`).sort().slice(0, 10);
 
-  resp($.map(matches, function(sub_metatag) {
-    return metatag + ":" + sub_metatag;
-  }));
+  resp(matches);
 }
 
 Autocomplete.user_source = function(term, resp, metatag) {

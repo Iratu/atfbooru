@@ -97,13 +97,27 @@ module Sources
       end
     end
 
+    context "A tweet without any images" do
+      should "not fail" do
+        @site = Sources::Strategies.find("https://twitter.com/teruyo/status/1058452066060853248")
+
+        assert_nil(@site.image_url)
+        assert_nothing_raised { @site.to_h }
+      end
+    end
+
     context "The source site for twitter" do
       setup do
         @site = Sources::Strategies.find("https://mobile.twitter.com/nounproject/status/540944400767922176")
       end
 
-      should "get the profile" do
+      should "get the main profile url" do
         assert_equal("https://twitter.com/nounproject", @site.profile_url)
+      end
+
+      should "get the profile urls" do
+        assert_includes(@site.profile_urls, "https://twitter.com/nounproject")
+        assert_includes(@site.profile_urls, "https://twitter.com/intent/user?user_id=88996186")
       end
 
       should "get the artist name" do
@@ -227,6 +241,15 @@ module Sources
 
         assert_equal(desc1, site.artist_commentary_desc)
         assert_equal(desc2, site.dtext_artist_commentary_desc)
+      end
+    end
+
+    context "A twitter post with a pixiv referer" do
+      should "use the twitter strategy" do
+        site = Sources::Strategies.find("https://twitter.com/Mityubi/status/849630665603665920", "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=56735489")
+
+        assert_equal(site.site_name, "Twitter")
+        assert_equal("https://pbs.twimg.com/media/C8p-gPhVoAMZupS.png:orig", site.image_url)
       end
     end
   end

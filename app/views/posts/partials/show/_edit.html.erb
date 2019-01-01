@@ -7,7 +7,7 @@
 <%= render "sources/info" %>
 
 <%= form_for(post, :html => {:class => "simple_form", :id => "form"}) do |f| %>
-  <%= hidden_field_tag :tags_query, params[:tags] %>
+  <%= hidden_field_tag :tags_query, params[:q] %>
   <%= hidden_field_tag :pool_id, params[:pool_id] %>
   <%= hidden_field_tag :favgroup_id, params[:favgroup_id] %>
   <%= f.hidden_field :old_tag_string, :value => post.tag_string %>
@@ -75,27 +75,28 @@
     <div class="input" id="iqdb-similar" style="display: none;"></div>
   <% end %>
 
-  <div class="input">
-    <div>
+
+
+  <div class="input" id="tags-container">
+    <div class="header">
       <%= f.label :tag_string, "Tags" %>
-      <%= f.text_area :tag_string, :size => "50x5", :value => post.presenter.categorized_tag_string + " ", :data => { :autocomplete => "tag-edit" } %>
-      <span id="open-edit-dialog" class="ui-icon ui-icon-arrow-1-ne" title="detach" style="display: none;" data-shortcut="shift+e"/>
+
+      <span class="options">
+        <i id="face" class="fas"></i>
+        <span class="count"></span>
+        <a href="javascript:void(0)"><i id="open-edit-dialog" class="fas fa-arrows-alt" title="detach" data-shortcut="shift+e"></i></a>
+      </span>
     </div>
 
-    <%= button_tag "Related tags", :id => "related-tags-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
-
-    <% TagCategory.related_button_list.each do |category| %>
-      <%= button_tag "#{TagCategory.related_button_mapping[category]}", :id => "related-#{category}-button", :type => "button", :class => "ui-button ui-widget ui-corner-all sub gradient" %>
-    <% end %>
+    <div>
+      <%= f.text_area :tag_string, :size => "60x5", :spellcheck => false, :"data-autocomplete" => "tag-edit", :"data-shortcut" => "e", :value => post.presenter.split_tag_list_text + " " %>
+    </div>
+    <%= render "related_tags/buttons" %>
   </div>
-
+  
   <div class="input">
     <%= submit_tag "Submit", :class => "ui-button ui-widget ui-corner-all" %>
   </div>
 
-  <div id="related-tags-container">
-    <h1>Related Tags <a href="#" id="toggle-related-tags-link" style="display: none;">&laquo;</a></h1>
-    <div id="related-tags" class="related-tags">
-    </div>
-  </div>
+  <%= render "related_tags/container" %>
 <% end %>

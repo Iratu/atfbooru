@@ -21,11 +21,11 @@ module Sources
       FANBOX_IMAGE = %r!(?:\Ahttps?://fanbox\.pixiv\.net/images/post/(\d+))!
       FANBOX_PAGE = %r!(?:\Ahttps?://www\.pixiv\.net/fanbox/creator/\d+/post/(\d+))!
 
-      def self.match?(*urls)
-        urls.compact.any? { |x| x.match?(/#{WEB}|#{IMG}|#{I12}|#{TOUCH}|#{PXIMG}|#{FANBOX_IMAGE}|#{FANBOX_ACCOUNT}/i) }
-      end
-
       def self.to_dtext(text)
+        if text.nil?
+          return nil
+        end
+        
         text = text.gsub(%r!https?://www\.pixiv\.net/member_illust\.php\?mode=medium&illust_id=([0-9]+)!i) do |match|
           pixiv_id = $1
           %(pixiv ##{pixiv_id} "»":[/posts?tags=pixiv:#{pixiv_id}])
@@ -41,6 +41,10 @@ module Sources
 
         text = text.gsub(/\r\n|\r|\n/, "<br>")
         DText.from_html(text)
+      end
+
+      def domains
+        ["pixiv.net", "pximg.net"]
       end
 
       def site_name
@@ -105,10 +109,23 @@ module Sources
         nil
       end
 
+      def stacc_url
+        return nil if moniker.blank?
+        "https://www.pixiv.net/stacc/#{moniker}"
+      end
+
+      def profile_urls
+        [profile_url, stacc_url].compact
+      end
+
       def artist_name
         metadata.name
       rescue PixivApiClient::BadIDError
         nil
+      end
+
+      def other_names
+        [artist_name, moniker].compact.uniq
       end
 
       def artist_commentary_title
@@ -145,7 +162,7 @@ module Sources
         illust_id.present? || novel_id.present? || fanbox_id.present? || fanbox_account_id.present?
       end
 
-      def unique_id
+      def tag_name
         moniker
       end
 
@@ -156,14 +173,16 @@ module Sources
       rescue PixivApiClient::BadIDError
         []
       end
-      memoize :tags
+
+      def normalize_tag(tag)
+        tag.gsub(/\d+users入り\z/i, "")
+      end
 
       def translate_tag(tag)
-        normalized_tag = tag.gsub(/\d+users入り\z/i, "")
-        translated_tags = super(normalized_tag)
+        translated_tags = super(tag)
 
-        if translated_tags.empty? && normalized_tag.include?("/")
-          translated_tags = normalized_tag.split("/").flat_map { |tag| super(tag) }
+        if translated_tags.empty? && tag.include?("/")
+          translated_tags = tag.split("/").flat_map { |tag| super(tag) }
         end
 
         translated_tags
@@ -176,10 +195,13 @@ module Sources
     public
 
       def image_urls_sub
+        if url =~ FANBOX_IMAGE
+          return [url]
+        end
+
         # there's too much normalization bullshit we have to deal with
         # raw urls, so just fetch the canonical url from the api every
         # time.
-
         if manga_page.present?
           return [metadata.pages[manga_page]]
         end

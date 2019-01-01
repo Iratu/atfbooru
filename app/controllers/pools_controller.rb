@@ -30,8 +30,10 @@ class PoolsController < ApplicationController
   end
 
   def gallery
-    limit = params[:limit] || CurrentUser.user.per_page
-    @pools = Pool.series.search(search_params).reorder("updated_at desc").paginate(params[:page], :limit => limit, :search_count => params[:search])
+    params[:limit] ||= CurrentUser.user.per_page
+    search = search_params.presence || ActionController::Parameters.new(category: "series")
+
+    @pools = Pool.search(search).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     @post_set = PostSets::PoolGallery.new(@pools)
   end
 
@@ -94,7 +96,7 @@ class PoolsController < ApplicationController
   private
 
   def pool_params
-    permitted_params = %i[name description category is_active post_ids]
-    params.require(:pool).permit(*permitted_params, post_id_array: [])
+    permitted_params = %i[name description category is_active post_ids post_ids_string]
+    params.require(:pool).permit(*permitted_params, post_ids: [])
   end
 end

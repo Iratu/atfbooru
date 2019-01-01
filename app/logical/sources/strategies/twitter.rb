@@ -9,10 +9,6 @@ module Sources::Strategies
     # https://developer.twitter.com/en/docs/developer-utilities/configuration/api-reference/get-help-configuration
     RESERVED_USERNAMES = %w[home i intent search]
 
-    def self.match?(*urls)
-      urls.compact.any? { |x| x =~ PAGE || x =~ ASSET}
-    end
-
     def self.enabled?
       TwitterService.new.enabled?
     end
@@ -35,21 +31,21 @@ module Sources::Strategies
       end
     end
 
+    def domains
+      ["twitter.com", "twimg.com"]
+    end
+
     def site_name
       "Twitter"
     end
 
     def image_urls
       if url =~ /(#{ASSET}[^:]+)/
-        return [$1 + ":orig" ]
-      elsif api_response.blank?
-        return [url]
-      end
-
-      [url, referer_url].each do |x|
-        if x =~ PAGE
-          return service.image_urls(api_response)
-        end
+        [$1 + ":orig" ]
+      elsif api_response.present?
+        service.image_urls(api_response)
+      else
+        [url]
       end
     end
     memoize :image_urls
@@ -66,8 +62,19 @@ module Sources::Strategies
     end
 
     def profile_url
-      return "" if artist_name.blank?
+      return nil if artist_name.blank?
       "https://twitter.com/#{artist_name}"
+    end
+
+    def intent_url
+      return nil if api_response.blank?
+
+      user_id = api_response.attrs[:user][:id_str]
+      "https://twitter.com/intent/user?user_id=#{user_id}"
+    end
+
+    def profile_urls
+      [profile_url, intent_url].compact
     end
 
     def artist_name

@@ -40,13 +40,35 @@ class TagImplicationTest < ActiveSupport::TestCase
 
       should_not allow_value(nil).for(:creator_id)
       should_not allow_value(-1).for(:creator_id).with_message("must exist", against: :creator)
+
+      should "not allow duplicate active implications" do
+        ti1 = FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", status: "active")
+        ti2 = FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", status: "retired")
+        ti3 = FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", status: "deleted")
+        ti4 = FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", status: "deleted")
+        ti5 = FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", status: "pending")
+        [ti1, ti2, ti3, ti4, ti5].each { |ti| assert(ti.valid?) }
+
+        ti5.update(status: "active")
+        assert_includes(ti5.errors[:antecedent_name], "has already been taken")
+      end
+    end
+
+    context "on secondary validation" do
+      should "warn if either tag is missing a wiki" do
+        ti = FactoryBot.build(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: false)
+
+        assert(ti.invalid?)
+        assert_includes(ti.errors[:base], "The aaa tag needs a corresponding wiki page")
+        assert_includes(ti.errors[:base], "The bbb tag needs a corresponding wiki page")
+      end
     end
 
     should "ignore pending implications when building descendant names" do
       ti2 = FactoryBot.build(:tag_implication, :antecedent_name => "b", :consequent_name => "c", :status => "pending")
       ti2.save
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "a", :consequent_name => "b")
-      assert_equal("b", ti1.descendant_names)
+      assert_equal(%w[b], ti1.descendant_names)
     end
 
     should "populate the creator information" do
@@ -54,12 +76,29 @@ class TagImplicationTest < ActiveSupport::TestCase
       assert_equal(CurrentUser.user.id, ti.creator_id)
     end
 
+    should "ensure both tags exist" do
+      FactoryBot.create(:tag_implication, antecedent_name: "a", consequent_name: "b")
+
+      assert(Tag.exists?(name: "a"))
+      assert(Tag.exists?(name: "b"))
+    end
+
+    should "not validate when a tag directly implicates itself" do
+      ti = FactoryBot.build(:tag_implication, antecedent_name: "a", consequent_name: "a")
+
+      assert(ti.invalid?)
+      assert_includes(ti.errors[:base], "Cannot alias or implicate a tag to itself")
+    end
+
     should "not validate when a circular relation is created" do
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "bbb")
-      ti2 = FactoryBot.build(:tag_implication, :antecedent_name => "bbb", :consequent_name => "aaa")
-      ti2.save
-      assert(ti2.errors.any?, "Tag implication should not have validated.")
-      assert_equal("Tag implication can not create a circular relation with another tag implication", ti2.errors.full_messages.join(""))
+      ti2 = FactoryBot.create(:tag_implication, :antecedent_name => "bbb", :consequent_name => "ccc")
+      ti3 = FactoryBot.build(:tag_implication, :antecedent_name => "bbb", :consequent_name => "aaa")
+
+      assert(ti1.valid?)
+      assert(ti2.valid?)
+      refute(ti3.valid?)
+      assert_equal("Tag implication can not create a circular relation with another tag implication", ti3.errors.full_messages.join(""))
     end
 
     should "not validate when a transitive relation is created" do
@@ -79,24 +118,23 @@ class TagImplicationTest < ActiveSupport::TestCase
       assert_includes(ti2.errors.full_messages, "Antecedent name has already been taken")
     end
 
-    should "not validate if its consequent is aliased to another tag" do
-      ta = FactoryBot.create(:tag_alias, :antecedent_name => "bbb", :consequent_name => "ccc")
+    should "not validate if its antecedent or consequent are aliased to another tag" do
+      ta1 = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "a")
+      ta2 = FactoryBot.create(:tag_alias, :antecedent_name => "bbb", :consequent_name => "b")
       ti = FactoryBot.build(:tag_implication, :antecedent_name => "aaa", :consequent_name => "bbb")
-      ti.save
-      assert(ti.errors.any?, "Tag implication should not have validated.")
-      assert_equal("Consequent tag must not be aliased to another tag", ti.errors.full_messages.join(""))
+
+      assert(ti.invalid?)
+      assert_includes(ti.errors[:base], "Antecedent tag must not be aliased to another tag")
+      assert_includes(ti.errors[:base], "Consequent tag must not be aliased to another tag")
     end
 
     should "calculate all its descendants" do
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "bbb", :consequent_name => "ccc")
-      assert_equal("ccc", ti1.descendant_names)
-      assert_equal(["ccc"], ti1.descendant_names_array)
+      assert_equal(%w[ccc], ti1.descendant_names)
       ti2 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "bbb")
-      assert_equal("bbb ccc", ti2.descendant_names)
-      assert_equal(["bbb", "ccc"], ti2.descendant_names_array)
+      assert_equal(%w[bbb ccc], ti2.descendant_names)
       ti1.reload
-      assert_equal("ccc", ti1.descendant_names)
-      assert_equal(["ccc"], ti1.descendant_names_array)
+      assert_equal(%w[ccc], ti1.descendant_names)
     end
 
     should "update its descendants on save" do
@@ -109,8 +147,8 @@ class TagImplicationTest < ActiveSupport::TestCase
       )
       ti1.reload
       ti2.reload
-      assert_equal("bbb ddd", ti1.descendant_names)
-      assert_equal("ddd", ti2.descendant_names)
+      assert_equal(%w[bbb ddd], ti1.descendant_names)
+      assert_equal(%w[ddd], ti2.descendant_names)
     end
 
     should "update the descendants for all of its parents on destroy" do
@@ -122,49 +160,49 @@ class TagImplicationTest < ActiveSupport::TestCase
       ti2.reload
       ti3.reload
       ti4.reload
-      assert_equal("bbb ccc ddd", ti1.descendant_names)
-      assert_equal("bbb ccc ddd", ti2.descendant_names)
-      assert_equal("ccc ddd", ti3.descendant_names)
-      assert_equal("ddd", ti4.descendant_names)
+      assert_equal(%w[bbb ccc ddd], ti1.descendant_names)
+      assert_equal(%w[bbb ccc ddd], ti2.descendant_names)
+      assert_equal(%w[ccc ddd], ti3.descendant_names)
+      assert_equal(%w[ddd], ti4.descendant_names)
       ti3.destroy
       ti1.reload
       ti2.reload
       ti4.reload
-      assert_equal("bbb", ti1.descendant_names)
-      assert_equal("bbb", ti2.descendant_names)
-      assert_equal("ddd", ti4.descendant_names)
+      assert_equal(%w[bbb], ti1.descendant_names)
+      assert_equal(%w[bbb], ti2.descendant_names)
+      assert_equal(%w[ddd], ti4.descendant_names)
     end
 
     should "update the descendants for all of its parents on create" do
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "bbb")
       ti1.reload
       assert_equal("active", ti1.status)
-      assert_equal("bbb", ti1.descendant_names)
+      assert_equal(%w[bbb], ti1.descendant_names)
 
       ti2 = FactoryBot.create(:tag_implication, :antecedent_name => "bbb", :consequent_name => "ccc")
       ti1.reload
       ti2.reload
       assert_equal("active", ti1.status)
       assert_equal("active", ti2.status)
-      assert_equal("bbb ccc", ti1.descendant_names)
-      assert_equal("ccc", ti2.descendant_names)
+      assert_equal(%w[bbb ccc], ti1.descendant_names)
+      assert_equal(%w[ccc], ti2.descendant_names)
 
       ti3 = FactoryBot.create(:tag_implication, :antecedent_name => "ccc", :consequent_name => "ddd")
       ti1.reload
       ti2.reload
       ti3.reload
-      assert_equal("bbb ccc ddd", ti1.descendant_names)
-      assert_equal("ccc ddd", ti2.descendant_names)
+      assert_equal(%w[bbb ccc ddd], ti1.descendant_names)
+      assert_equal(%w[ccc ddd], ti2.descendant_names)
 
       ti4 = FactoryBot.create(:tag_implication, :antecedent_name => "ccc", :consequent_name => "eee")
       ti1.reload
       ti2.reload
       ti3.reload
       ti4.reload
-      assert_equal("bbb ccc ddd eee", ti1.descendant_names)
-      assert_equal("ccc ddd eee", ti2.descendant_names)
-      assert_equal("ddd", ti3.descendant_names)
-      assert_equal("eee", ti4.descendant_names)
+      assert_equal(%w[bbb ccc ddd eee], ti1.descendant_names)
+      assert_equal(%w[ccc ddd eee], ti2.descendant_names)
+      assert_equal(%w[ddd], ti3.descendant_names)
+      assert_equal(%w[eee], ti4.descendant_names)
 
       ti5 = FactoryBot.create(:tag_implication, :antecedent_name => "xxx", :consequent_name => "bbb")
       ti1.reload
@@ -172,19 +210,21 @@ class TagImplicationTest < ActiveSupport::TestCase
       ti3.reload
       ti4.reload
       ti5.reload
-      assert_equal("bbb ccc ddd eee", ti1.descendant_names)
-      assert_equal("ccc ddd eee", ti2.descendant_names)
-      assert_equal("ddd", ti3.descendant_names)
-      assert_equal("eee", ti4.descendant_names)
-      assert_equal("bbb ccc ddd eee", ti5.descendant_names)
+      assert_equal(%w[bbb ccc ddd eee], ti1.descendant_names)
+      assert_equal(%w[ccc ddd eee], ti2.descendant_names)
+      assert_equal(%w[ddd], ti3.descendant_names)
+      assert_equal(%w[eee], ti4.descendant_names)
+      assert_equal(%w[bbb ccc ddd eee], ti5.descendant_names)
     end
 
     should "update any affected post upon save" do
       p1 = FactoryBot.create(:post, :tag_string => "aaa bbb ccc")
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "xxx")
       ti2 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "yyy")
-      p1.reload
-      assert_equal("aaa bbb ccc xxx yyy", p1.tag_string)
+      ti1.approve!
+      ti2.approve!
+
+      assert_equal("aaa bbb ccc xxx yyy", p1.reload.tag_string)
     end
 
     context "with an associated forum topic" do

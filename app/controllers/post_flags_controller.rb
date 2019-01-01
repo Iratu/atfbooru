@@ -24,12 +24,14 @@ class PostFlagsController < ApplicationController
 
   def show
     @post_flag = PostFlag.find(params[:id])
-    respond_with(@post_flag)
+    respond_with(@post_flag) do |fmt|
+      fmt.html { redirect_to post_flags_path(search: { id: @post_flag.id }) }
+    end
   end
 
   private
 
   def post_flag_params
-    params.require(:post_flag).permit(%i[post_id reason])
+    params.fetch(:post_flag, {}).permit(%i[post_id reason])
   end
 end

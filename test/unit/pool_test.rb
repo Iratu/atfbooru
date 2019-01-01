@@ -55,11 +55,18 @@ class PoolTest < ActiveSupport::TestCase
   context "Creating a pool" do
     setup do
       @posts = FactoryBot.create_list(:post, 5)
-      @pool = FactoryBot.create(:pool, post_ids: @posts.map(&:id).join(" "))
+      @pool = FactoryBot.create(:pool, post_ids: @posts.map(&:id))
     end
 
     should "initialize the post count" do
       assert_equal(@posts.size, @pool.post_count)
+    end
+
+    should "synchronize the posts with the pool" do
+      assert_equal(@posts.map(&:id), @pool.post_ids)
+
+      @posts.each(&:reload)
+      assert_equal(["pool:#{@pool.id} pool:series"] * @posts.size, @posts.map(&:pool_string))
     end
   end
 
@@ -104,7 +111,7 @@ class PoolTest < ActiveSupport::TestCase
     end
 
     should "update its post_ids" do
-      assert_equal([@p1.id], @pool.post_id_array)
+      assert_equal([@p1.id], @pool.post_ids)
     end
 
     should "update any old posts that were removed" do
@@ -120,7 +127,7 @@ class PoolTest < ActiveSupport::TestCase
 
   context "Updating a pool" do
     setup do
-      @pool = FactoryBot.create(:pool)
+      @pool = FactoryBot.create(:pool, category: "series")
       @p1 = FactoryBot.create(:post)
       @p2 = FactoryBot.create(:post)
     end
@@ -132,7 +139,7 @@ class PoolTest < ActiveSupport::TestCase
 
       context "by #attributes=" do
         setup do
-          @pool.attributes = {post_ids: [@p1, @p2].map(&:id).join(" ")}
+          @pool.attributes = {post_ids: [@p1.id, @p2.id]}
           @pool.synchronize
           @pool.save
         end
@@ -143,7 +150,7 @@ class PoolTest < ActiveSupport::TestCase
       end
 
       should "add the post to the pool" do
-        assert_equal("#{@p1.id}", @pool.post_ids)
+        assert_equal([@p1.id], @pool.post_ids)
       end
 
       should "add the pool to the post" do
@@ -160,7 +167,7 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "not double add the post to the pool" do
-          assert_equal("#{@p1.id}", @pool.post_ids)
+          assert_equal([@p1.id], @pool.post_ids)
         end
 
         should "not double add the pool to the post" do
@@ -178,7 +185,7 @@ class PoolTest < ActiveSupport::TestCase
           CurrentUser.user = FactoryBot.create(:builder_user)
 
           @pool.update_attribute(:is_deleted, true)
-          @pool.post_ids = "#{@pool.post_ids} #{@p2.id}"
+          @pool.post_ids += [@p2.id]
           @pool.synchronize!
           @pool.save
           @pool.reload
@@ -186,7 +193,7 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "add the post to the pool" do
-          assert_equal("#{@p1.id} #{@p2.id}", @pool.post_ids)
+          assert_equal([@p1.id, @p2.id], @pool.post_ids)
         end
 
         should "add the pool to the post" do
@@ -210,7 +217,7 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "remove the post from the pool" do
-          assert_equal("", @pool.post_ids)
+          assert_equal([], @pool.post_ids)
         end
 
         should "remove the pool from the post" do
@@ -228,7 +235,7 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "not affect the pool" do
-          assert_equal("#{@p1.id}", @pool.post_ids)
+          assert_equal([@p1.id], @pool.post_ids)
         end
 
         should "not affect the post" do
@@ -241,25 +248,58 @@ class PoolTest < ActiveSupport::TestCase
       end
     end
 
+    context "by changing the category" do
+      setup do
+        Danbooru.config.stubs(:pool_category_change_limit).returns(1)
+        @pool.add!(@p1)
+        @pool.add!(@p2)
+      end
+
+      teardown do
+        Danbooru.config.unstub(:pool_category_change_limit)
+      end
+
+      should "not allow Members to change the category of large pools" do
+        @member = FactoryBot.create(:member_user)
+        as(@member) { @pool.update(category: "collection") }
+
+        assert_equal(["You cannot change the category of pools with greater than 1 posts"], @pool.errors[:base])
+      end
+
+      should "allow Builders to change the category of large pools" do
+        @builder = FactoryBot.create(:builder_user)
+        as(@builder) { @pool.update(category: "collection") }
+
+        assert_equal(true, @pool.valid?)
+        assert_equal("collection", @pool.category)
+        assert_equal("pool:#{@pool.id} pool:collection", @p1.reload.pool_string)
+        assert_equal("pool:#{@pool.id} pool:collection", @p2.reload.pool_string)
+      end
+    end
+
     should "create new versions for each distinct user" do
       assert_equal(1, @pool.versions.size)
       user2 = Timecop.travel(1.month.ago) {FactoryBot.create(:user)}
 
       CurrentUser.scoped(user2, "127.0.0.2") do
-        @pool.post_ids = "#{@p1.id}"
+        @pool.post_ids = [@p1.id]
         @pool.save
       end
 
       @pool.reload
       assert_equal(2, @pool.versions.size)
+      assert_equal(user2.id, @pool.versions.last.updater_id)
+      assert_equal("127.0.0.2", @pool.versions.last.updater_ip_addr.to_s)
 
       CurrentUser.scoped(user2, "127.0.0.3") do
-        @pool.post_ids = "#{@p1.id} #{@p2.id}"
+        @pool.post_ids = [@p1.id, @p2.id]
         @pool.save
       end
 
       @pool.reload
       assert_equal(3, @pool.versions.size)
+      assert_equal(user2.id, @pool.versions.last.updater_id)
+      assert_equal("127.0.0.3", @pool.versions.last.updater_ip_addr.to_s)
     end
 
     should "should create a version if the name changes" do
@@ -271,9 +311,8 @@ class PoolTest < ActiveSupport::TestCase
     end
 
     should "know what its post ids were previously" do
-      @pool.post_ids = "#{@p1.id}"
-      assert_equal("", @pool.post_ids_was)
-      assert_equal([], @pool.post_id_array_was)
+      @pool.post_ids = [@p1.id]
+      assert_equal([], @pool.post_ids_was)
     end
 
     should "normalize its name" do
@@ -285,16 +324,13 @@ class PoolTest < ActiveSupport::TestCase
     end
 
     should "normalize its post ids" do
-      @pool.update_attributes(:post_ids => " 1  2 ")
-      assert_equal("1 2", @pool.post_ids)
+      @pool.update(category: "collection", post_ids: [1, 2, 2, 3, 1])
+      assert_equal([1, 2, 3], @pool.post_ids)
     end
 
     context "when validating names" do
-      should "not be valid for bad names" do
-        ["foo,bar", "foo*bar", "123", "___", "   ", "any", "none", "series", "collection"].each do |bad_name|
-          pool = Pool.create(name: bad_name)
-          assert pool.invalid?
-        end
+      ["foo,bar", "foo*bar", "123", "___", "   ", "any", "none", "series", "collection"].each do |bad_name|
+        should_not allow_value(bad_name).for(:name)
       end
     end
   end
@@ -308,24 +344,19 @@ class PoolTest < ActiveSupport::TestCase
       @pool.add!(@p1)
       @pool.add!(@p2)
       @pool.add!(@p3)
-      @p1_neighbors = @pool.neighbors(@p1)
-      @pool.reload # clear cached neighbors
-      @p2_neighbors = @pool.neighbors(@p2)
-      @pool.reload # clear cached neighbors
-      @p3_neighbors = @pool.neighbors(@p3)
     end
 
     context "that is synchronized" do
       setup do
         @pool.reload
-        @pool.post_ids = "#{@p2.id}"
+        @pool.post_ids = [@p2.id]
         @pool.synchronize!
       end
 
       should "update the pool" do
         @pool.reload
         assert_equal(1, @pool.post_count)
-        assert_equal("#{@p2.id}", @pool.post_ids)
+        assert_equal([@p2.id], @pool.post_ids)
       end
 
       should "update the posts" do
@@ -339,18 +370,18 @@ class PoolTest < ActiveSupport::TestCase
     end
 
     should "find the neighbors for the first post" do
-      assert_nil(@p1_neighbors.previous)
-      assert_equal(@p2.id, @p1_neighbors.next)
+      assert_nil(@pool.previous_post_id(@p1.id))
+      assert_equal(@p2.id, @pool.next_post_id(@p1.id))
     end
 
     should "find the neighbors for the middle post" do
-      assert_equal(@p1.id, @p2_neighbors.previous)
-      assert_equal(@p3.id, @p2_neighbors.next)
+      assert_equal(@p1.id, @pool.previous_post_id(@p2.id))
+      assert_equal(@p3.id, @pool.next_post_id(@p2.id))
     end
 
     should "find the neighbors for the last post" do
-      assert_equal(@p2.id, @p3_neighbors.previous)
-      assert_nil(@p3_neighbors.next)
+      assert_equal(@p2.id, @pool.previous_post_id(@p3.id))
+      assert_nil(@pool.next_post_id(@p3.id))
     end
   end
 end

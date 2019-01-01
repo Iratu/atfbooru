@@ -1,10 +1,19 @@
 require 'dtext'
 
 module ApplicationHelper
+  def diff_list_html(new, old, latest)
+    diff = SetDiff.new(new, old, latest)
+    render "diff_list", diff: diff
+  end
+
   def wordbreakify(string)
     lines = string.scan(/.{1,10}/)
     wordbreaked_string = lines.map{|str| h(str)}.join("<wbr>")
     raw(wordbreaked_string)
+  end
+
+  def pro_fontawesome_enabled?
+    request.domain =~ /donmai\.us/
   end
 
   def nav_link_to(text, url, **options)
@@ -107,15 +116,13 @@ module ApplicationHelper
     time_tag(time.strftime("%Y-%m-%d %H:%M"), time)
   end
 
-  def external_link_to(url, options = {})
-    if options[:truncate]
-      text = truncate(url, length: options[:truncate])
-    else
-      text = url
-    end
+  def external_link_to(url, truncate: nil, strip_scheme: false, link_options: {})
+    text = url
+    text = text.gsub(%r!\Ahttps?://!i, "") if strip_scheme
+    text = text.truncate(truncate) if truncate
 
     if url =~ %r!\Ahttps?://!i
-      link_to text, url, {rel: :nofollow}
+      link_to text, url, {rel: :nofollow}.merge(link_options)
     else
       url
     end
@@ -138,6 +145,8 @@ module ApplicationHelper
   end
 
   def link_to_user(user, options = {})
+    return "anonymous" if user.blank?
+
     user_class = user.level_class
     user_class = user_class + " user-post-approver" if user.can_approve_posts?
     user_class = user_class + " user-post-uploader" if user.can_upload_free?

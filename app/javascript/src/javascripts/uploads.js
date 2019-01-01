@@ -5,6 +5,7 @@ let Upload = {};
 Upload.initialize_all = function() {
   if ($("#c-uploads,#c-posts").length) {
     this.initialize_enter_on_tags();
+    $("#upload_source").on("change.danbooru", Upload.fetch_data_manual);
     $(document).on("click.danbooru", "#fetch-data-manual", Upload.fetch_data_manual);
   }
 
@@ -12,12 +13,15 @@ Upload.initialize_all = function() {
     if ($("#image").prop("complete")) {
       this.initialize_image();
     } else {
-      $("#image").on("load.danbooru error.danbooru", this.initialize_image);
+      $("#image").on("error.danbooru", (e) => {
+        $("#upload-image").hide();
+        $("#scale-link").hide();
+        $("#iqdb-similar").hide();
+      });
+      $("#image").on("load.danbooru", this.initialize_image);
     }
-    this.initialize_info_bookmarklet();
     this.initialize_similar();
     this.initialize_submit();
-    $(() => $("#related-tags-button").click()); // delay so we don't click until button is bound (#3895).
 
     $("#toggle-artist-commentary").on("click.danbooru", function(e) {
       Upload.toggle_commentary();
@@ -36,7 +40,7 @@ Upload.initialize_submit = function() {
 
 Upload.validate_upload = function (e) {
   var error_messages = [];
-  if (($("#upload_file").val() === "") && ($("#upload_source").val() === "") && $("#upload_md5_confirmation").val() === "") {
+  if (($("#upload_file").val() === "") && !/^https?:\/\//i.test($("#upload_source").val()) && $("#upload_md5_confirmation").val() === "") {
     error_messages.push("Must choose file or specify source");
   }
   if (!$("#upload_rating_s").prop("checked") && !$("#upload_rating_q").prop("checked") && !$("#upload_rating_e").prop("checked") &&
@@ -77,11 +81,6 @@ Upload.initialize_similar = function() {
   });
 }
 
-Upload.initialize_info_bookmarklet = function() {
-  $("#upload_source").on("change.danbooru", Upload.fetch_data_manual);
-  $("#fetch-data-manual").click();
-}
-
 Upload.update_scale = function() {
   var $image = $("#image");
   var ratio = $image.data("scale-factor");
@@ -112,10 +111,10 @@ Upload.initialize_image = function() {
   var width = $image.width();
   var height = $image.height();
   if (!width || !height) {
-    // try again later
-    $.timeout(100).done(function() {Upload.initialize_image()});
+    // we errored out
     return;
   }
+  $("#no-image-available").hide();
   $image.data("original-width", width);
   $image.data("original-height", height);
   Post.resize_image_to_window($image);

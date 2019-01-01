@@ -36,7 +36,6 @@ class Post < ApplicationRecord
   after_save :create_version
   after_save :update_parent_on_save
   after_save :apply_post_metatags
-  after_save :expire_essential_tag_string_cache
   after_commit :delete_files, :on => :destroy
   after_commit :remove_iqdb_async, :on => :destroy
   after_commit :update_iqdb_async, :on => :create
@@ -200,6 +199,14 @@ class Post < ApplicationRecord
 
     def is_image?
       file_ext =~ /jpg|jpeg|gif|png/i
+    end
+
+    def is_png?
+      file_ext =~ /png/i
+    end
+
+    def is_gif?
+      file_ext =~ /gif/i
     end
 
     def is_flash?
@@ -498,15 +505,21 @@ class Post < ApplicationRecord
       # https://yuno.yande.re/image/1764b95ae99e1562854791c232e3444b/yande.re%20281544%20cameltoe%20erect_nipples%20fundoshi%20horns%20loli%20miyama-zero%20sarashi%20sling_bikini%20swimsuits.jpg
       # https://files.yande.re/image/2a5d1d688f565cb08a69ecf4e35017ab/yande.re%20349790%20breast_hold%20kurashima_tomoyasu%20mahouka_koukou_no_rettousei%20naked%20nipples.jpg
       # https://files.yande.re/sample/0d79447ce2c89138146f64ba93633568/yande.re%20290757%20sample%20seifuku%20thighhighs%20tsukudani_norio.jpg
-      when %r{\Ahttps?://(?:ayase\.|yuno\.|files\.)?yande\.re/(?:sample|image)/[a-z0-9]{32}/yande\.re%20(?<post_id>[0-9]+)%20}i
+      when %r{\Ahttps?://(?:[^.]+\.)?yande\.re/(?:image|jpeg|sample)/\h{32}/yande\.re%20(?<post_id>\d+)}i
         "https://yande.re/post/show/#{$~[:post_id]}"
 
       # https://yande.re/jpeg/0c9ec0ffcaa40470093cb44c3fd40056/yande.re%2064649%20animal_ears%20cameltoe%20fixme%20nekomimi%20nipples%20ryohka%20school_swimsuit%20see_through%20shiraishi_nagomi%20suzuya%20swimsuits%20tail%20thighhighs.jpg
       # https://yande.re/jpeg/22577d2344fe694cf47f80563031b3cd.jpg
       # https://yande.re/image/b4b1d11facd1700544554e4805d47bb6/.png
       # https://yande.re/sample/ceb6a12e87945413a95b90fada406f91/.jpg
-      when %r{\Ahttps?://(?:ayase\.|yuno\.|files\.)?yande\.re/(?:image|jpeg|sample)/(?<md5>[a-z0-9]{32})(?:/yande\.re.*|/?\.(?:jpg|png))\Z}i
+      when %r{\Ahttps?://(?:[^.]+\.)?yande\.re/(?:image|jpeg|sample)/(?<md5>\h{32})(?:/yande\.re.*|/?\.(?:jpg|png))\z}i
         "https://yande.re/post?tags=md5:#{$~[:md5]}"
+
+      when %r{\Ahttps?://(?:[^.]+\.)?konachan\.com/(?:image|jpeg|sample)/\h{32}/Konachan\.com%20-%20(?<post_id>\d+)}i
+        "https://konachan.com/post/show/#{$~[:post_id]}"
+
+      when %r{\Ahttps?://(?:[^.]+\.)?konachan\.com/(?:image|jpeg|sample)/(?<md5>\h{32})(?:/Konachan\.com%20-%20.*|/?\.(?:jpg|png))\z}i
+        "https://konachan.com/post?tags=md5:#{$~[:md5]}"
 
       # https://gfee_li.artstation.com/projects/XPGOD
       # https://gfee_li.artstation.com/projects/asuka-7
@@ -772,6 +785,14 @@ class Post < ApplicationRecord
         tags << "ugoira"
       end
 
+      if !is_gif?
+        tags -= ["animated_gif"]
+      end
+
+      if !is_png?
+        tags -= ["animated_png"]
+      end
+
       return tags
     end
 
@@ -803,7 +824,7 @@ class Post < ApplicationRecord
     def filter_metatags(tags)
       @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|-?locked):/i}
       tags = apply_categorization_metatags(tags)
-      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-favgroup|favgroup|upvote|downvote):/i}
+      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-child|-favgroup|favgroup|upvote|downvote):/i}
       apply_pre_metatags
       return tags
     end
@@ -853,10 +874,20 @@ class Post < ApplicationRecord
         when /^(up|down)vote:(.+)$/i
           vote!($1)
 
+        when /^child:none$/i
+          children.each do |post|
+            post.update!(parent_id: nil)
+          end
+
+        when /^-child:(.+)$/i
+          children.numeric_attribute_matches(:id, $1).each do |post|
+            post.update!(parent_id: nil)
+          end
+
         when /^child:(.+)$/i
-          child = Post.find($1)
-          child.parent_id = id
-          child.save
+          Post.numeric_attribute_matches(:id, $1).where.not(id: id).limit(10).each do |post|
+            post.update!(parent_id: id)
+          end
 
         when /^-favgroup:(\d+)$/i
           favgroup = FavoriteGroup.where("id = ?", $1.to_i).for_creator(CurrentUser.user.id).first
@@ -935,36 +966,6 @@ class Post < ApplicationRecord
         tag_array.select do |tag|
           tag_categories[tag] == TagCategory.mapping[name]
         end
-      end
-    end
-
-    def expire_essential_tag_string_cache
-      Cache.delete("hets-#{id}")
-    end
-
-    def humanized_essential_tag_string
-      @humanized_essential_tag_string ||= Cache.get("hets-#{id}", 1.hour.to_i) do
-        string = []
-
-        TagCategory.humanized_list.each do |category|
-          typetags = typed_tags(category) - TagCategory.humanized_mapping[category]["exclusion"]
-          if TagCategory.humanized_mapping[category]["slice"] > 0
-            typetags = typetags.slice(0,TagCategory.humanized_mapping[category]["slice"]) + (typetags.length > TagCategory.humanized_mapping[category]["slice"] ? ["others"] : [])
-          end
-          if TagCategory.humanized_mapping[category]["regexmap"] != //
-            typetags = typetags.map do |tag|
-              tag.match(TagCategory.humanized_mapping[category]["regexmap"])[1]
-            end
-          end
-          if typetags.any?
-            if category != "copyright" || typed_tags("character").any?
-              string << TagCategory.humanized_mapping[category]["formatstr"] % typetags.to_sentence
-            else
-              string << typetags.to_sentence
-            end
-          end
-        end
-        string.empty? ? "##{id}" : string.join(" ").tr("_", " ")
       end
     end
 
@@ -1168,7 +1169,7 @@ class Post < ApplicationRecord
   end
 
   module CountMethods
-    def fast_count(tags = "", options = {})
+    def fast_count(tags = "", timeout: 1_000, raise_on_timeout: false, skip_cache: false)
       tags = tags.to_s
       tags += " rating:s" if CurrentUser.safe_mode?
       tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !Tag.has_metatag?(tags, "status", "-status")
@@ -1189,16 +1190,17 @@ class Post < ApplicationRecord
         elsif tags =~ /^rating:e(?:xplicit)?$/
           return (Post.maximum(:id) * (201650.0 / 2200402)).floor
 
-        elsif tags =~ /status:deleted.status:deleted/
-          # temp fix for degenerate crawlers
-          return 0
         end
       end
 
-      count = get_count_from_cache(tags)
+      count = nil
+
+      unless skip_cache
+        count = get_count_from_cache(tags)
+      end
 
       if count.nil?
-        count = fast_count_search(tags, options)
+        count = fast_count_search(tags, timeout: timeout, raise_on_timeout: raise_on_timeout)
       end
 
       count
@@ -1206,18 +1208,14 @@ class Post < ApplicationRecord
       0
     end
 
-    def fast_count_search(tags, options = {})
-      count = PostReadOnly.with_timeout(3_000, nil, {:tags => tags}) do
+    def fast_count_search(tags, timeout:, raise_on_timeout:)
+      count = PostReadOnly.with_timeout(timeout, nil, tags: tags) do
         PostReadOnly.tag_match(tags).count
       end
 
       if count.nil?
-        count = fast_count_search_batched(tags, options)
-      end
-
-      if count.nil?
         # give up
-        if options[:raise_on_timeout]
+        if raise_on_timeout
           raise TimeoutError.new("timed out")
         end
 
@@ -1227,26 +1225,6 @@ class Post < ApplicationRecord
       end
 
       count ? count.to_i : nil
-    rescue PG::ConnectionBad
-      return nil
-    end
-
-    def fast_count_search_batched(tags, options)
-      # this is slower but less likely to timeout
-      i = Post.maximum(:id)
-      sum = 0
-      while i > 0
-        count = PostReadOnly.with_timeout(1_000, nil, {:tags => tags}) do
-          sum += PostReadOnly.tag_match(tags).where("id <= ? and id > ?", i, i - 25_000).count
-          i -= 25_000
-        end
-
-        if count.nil?
-          return nil
-        end
-      end
-      sum
-
     rescue PG::ConnectionBad
       return nil
     end
@@ -1271,9 +1249,7 @@ class Post < ApplicationRecord
     end
 
     def set_count_in_cache(tags, count, expiry = nil)
-      if expiry.nil?
-        [count.seconds, 20.hours].min
-      end
+      expiry ||= count.seconds.clamp(3.minutes, 20.hours).to_i
 
       Cache.put(count_cache_key(tags), count, expiry)
     end
@@ -1718,9 +1694,10 @@ class Post < ApplicationRecord
   module PixivMethods
     def parse_pixiv_id
       self.pixiv_id = nil
-      
-      if Sources::Strategies::Pixiv.match?(source)
-        self.pixiv_id = Sources::Strategies::Pixiv.new(source).illust_id
+
+      site = Sources::Strategies::Pixiv.new(source)
+      if site.match?
+        self.pixiv_id = site.illust_id
       end
     end
   end
@@ -1830,7 +1807,7 @@ class Post < ApplicationRecord
       return if tags.any? { |t| t.category == Tag.categories.artist }
       return if Sources::Strategies.find(source).is_a?(Sources::Strategies::Null)
 
-      self.warnings[:base] << "Artist tag is required. Create a new tag with [[artist:<artist_name>]]. Ask on the forum if you need naming help"
+      self.warnings[:base] << "Artist tag is required. \"Create new artist tag\":[/artists/new?artist%5Bsource%5D=#{CGI::escape(source)}]. Ask on the forum if you need naming help"
     end
 
     def has_copyright_tag

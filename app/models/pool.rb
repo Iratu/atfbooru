@@ -1,24 +1,20 @@
-require 'ostruct'
-
 class Pool < ApplicationRecord
   class RevertError < Exception ; end
 
-  attribute :updater_id, :integer
-  validates_uniqueness_of :name, :case_sensitive => false, :if => :saved_change_to_name?
-  validate :validate_name, :if => :saved_change_to_name?
+  array_attribute :post_ids, parse: /\d+/, cast: :to_i
+  belongs_to_creator
+
+  validates_uniqueness_of :name, case_sensitive: false, if: :name_changed?
+  validate :validate_name, if: :name_changed?
   validates_inclusion_of :category, :in => %w(series collection)
   validate :updater_can_change_category
   validate :updater_can_remove_posts
   validate :updater_can_edit_deleted
-  belongs_to_creator
-  belongs_to_updater
   before_validation :normalize_post_ids
   before_validation :normalize_name
-  before_validation :initialize_is_active, :on => :create
   after_save :update_category_pseudo_tags_for_posts_async
   after_save :create_version
   after_create :synchronize!
-  before_destroy :create_mod_action_for_destroy
 
   module SearchMethods
     def deleted
@@ -39,6 +35,12 @@ class Pool < ApplicationRecord
 
     def series_first
       order(Arel.sql("(case pools.category when 'series' then 0 else 1 end), pools.name"))
+    end
+
+    def selected_first(current_pool_id)
+      return where("true") if current_pool_id.blank?
+      current_pool_id = current_pool_id.to_i
+      reorder(Arel.sql("(case pools.id when #{current_pool_id} then 0 else 1 end), pools.name"))
     end
 
     def name_matches(name)
@@ -84,7 +86,7 @@ class Pool < ApplicationRecord
       when "created_at"
         q = q.order("pools.created_at desc")
       when "post_count"
-        q = q.order("pools.post_count desc").default_order
+        q = q.order(Arel.sql("cardinality(post_ids) desc")).default_order
       else
         q = q.apply_default_order(params)
       end
@@ -109,14 +111,6 @@ class Pool < ApplicationRecord
 
   def self.normalize_name_for_search(name)
     normalize_name(name).mb_chars.downcase
-  end
-
-  def self.normalize_post_ids(post_ids, unique)
-    hoge = post_ids.scan(/\d+/)
-    if unique
-      hoge = hoge.uniq
-    end
-    hoge.join(" ")
   end
 
   def self.find_by_name(name)
@@ -145,11 +139,6 @@ class Pool < ApplicationRecord
     category == "collection"
   end
 
-  def initialize_is_active
-    self.is_deleted = false if is_deleted.nil?
-    self.is_active = true if is_active.nil?
-  end
-
   def normalize_name
     self.name = Pool.normalize_name(name)
   end
@@ -162,12 +151,8 @@ class Pool < ApplicationRecord
     category.titleize
   end
 
-  def creator_name
-    User.id_to_name(creator_id)
-  end
-
   def normalize_post_ids
-    self.post_ids = self.class.normalize_post_ids(post_ids, is_collection?)
+    self.post_ids = post_ids.uniq if is_collection?
   end
 
   def revert_to!(version)
@@ -175,18 +160,18 @@ class Pool < ApplicationRecord
       raise RevertError.new("You cannot revert to a previous version of another pool.")
     end
 
-    self.post_ids = version.post_ids.join(" ")
+    self.post_ids = version.post_ids
     self.name = version.name
     self.description = version.description
     synchronize!
   end
 
   def contains?(post_id)
-    post_ids =~ /(?:\A| )#{post_id}(?:\Z| )/
+    post_ids.include?(post_id)
   end
 
   def page_number(post_id)
-    post_id_array.find_index(post_id).to_i + 1
+    post_ids.find_index(post_id).to_i + 1
   end
 
   def deletable_by?(user)
@@ -196,9 +181,6 @@ class Pool < ApplicationRecord
   def updater_can_edit_deleted
     if is_deleted? && !deletable_by?(CurrentUser.user)
       errors[:base] << "You cannot update pools that are deleted"
-      false
-    else
-      true
     end
   end
 
@@ -215,9 +197,8 @@ class Pool < ApplicationRecord
     return if is_deleted?
 
     with_lock do
-      update_attributes(:post_ids => add_number_to_string(post.id, post_ids), :post_count => post_count + 1)
+      update(post_ids: post_ids + [post.id])
       post.add_pool!(self, true)
-      clear_post_id_array
     end
   end
 
@@ -227,24 +208,15 @@ class Pool < ApplicationRecord
 
     with_lock do
       reload
-      update_attributes(:post_ids => remove_number_from_string(post.id, post_ids), :post_count => post_count - 1)
+      update(post_ids: post_ids - [post.id])
       post.remove_pool!(self)
-      clear_post_id_array
     end
-  end
-
-  def add_number_to_string(number, string)
-    "#{string} #{number}"
-  end
-
-  def remove_number_from_string(number, string)
-    string.gsub(/(?:\A| )#{number}(?:\Z| )/, " ")
   end
 
   def posts(options = {})
     offset = options[:offset] || 0
     limit = options[:limit] || Danbooru.config.posts_per_page
-    slice = post_id_array.slice(offset, limit)
+    slice = post_ids.slice(offset, limit)
     if slice && slice.any?
       slice.map do |id|
         begin
@@ -259,8 +231,9 @@ class Pool < ApplicationRecord
   end
 
   def synchronize
-    added = post_id_array - post_id_array_was
-    removed = post_id_array_was - post_id_array
+    post_ids_before = post_ids_before_last_save || post_ids_was
+    added = post_ids - post_ids_before
+    removed = post_ids_before - post_ids
 
     added.each do |post_id|
       post = Post.find(post_id)
@@ -273,8 +246,6 @@ class Pool < ApplicationRecord
     end
 
     normalize_post_ids
-    clear_post_id_array
-    self.post_count = post_id_array.size
   end
 
   def synchronize!
@@ -282,50 +253,40 @@ class Pool < ApplicationRecord
     save if will_save_change_to_post_ids?
   end
 
-  def post_id_array
-    @post_id_array ||= post_ids.scan(/\d+/).map(&:to_i)
+  def post_count
+    post_ids.size
   end
 
-  def post_id_array=(array)
-    self.post_ids = array.join(" ")
-    clear_post_id_array
-    self
+  def first_post?(post_id)
+    post_id == post_ids.first
   end
 
-  def post_id_array_was
-    old_post_ids = post_ids_before_last_save || post_ids_was
-    @post_id_array_was ||= old_post_ids.to_s.scan(/\d+/).map(&:to_i)
+  def last_post?(post_id)
+    post_id == post_ids.last
   end
 
-  def clear_post_id_array
-    @post_id_array = nil
-    @post_id_array_was = nil
-    self
+  # XXX finds wrong post when the pool contains multiple copies of the same post (#2042).
+  def previous_post_id(post_id)
+    return nil if first_post?(post_id) || !contains?(post_id)
+
+    n = post_ids.index(post_id) - 1
+    post_ids[n]
   end
 
-  def neighbors(post)
-    @neighbor_posts ||= begin
-      post_ids =~ /\A#{post.id} (\d+)|(\d+) #{post.id} (\d+)|(\d+) #{post.id}\Z/
+  def next_post_id(post_id)
+    return nil if last_post?(post_id) || !contains?(post_id)
 
-      if $2 && $3
-        OpenStruct.new(:previous => $2.to_i, :next => $3.to_i)
-      elsif $1
-        OpenStruct.new(:next => $1.to_i)
-      elsif $4
-        OpenStruct.new(:previous => $4.to_i)
-      else
-        OpenStruct.new
-      end
-    end
+    n = post_ids.index(post_id) + 1
+    post_ids[n]
   end
 
   def cover_post_id
-    post_ids[/^(\d+)/, 1]
+    post_ids.first
   end
 
-  def create_version(force = false)
+  def create_version(updater: CurrentUser.user, updater_ip_addr: CurrentUser.ip_addr)
     if PoolArchive.enabled?
-      PoolArchive.queue(self)
+      PoolArchive.queue(self, updater, updater_ip_addr)
     else
       Rails.logger.warn("Archive service is not configured. Pool versions will not be saved.")
     end
@@ -335,15 +296,8 @@ class Pool < ApplicationRecord
     (post_count / CurrentUser.user.per_page.to_f).ceil
   end
 
-  def reload(options = {})
-    super
-    @neighbor_posts = nil
-    clear_post_id_array
-    self
-  end
-
   def method_attributes
-    super + [:creator_name]
+    super + [:creator_name, :post_count]
   end
 
   def update_category_pseudo_tags_for_posts_async
@@ -353,7 +307,7 @@ class Pool < ApplicationRecord
   end
 
   def update_category_pseudo_tags_for_posts
-    Post.where("id in (?)", post_id_array).find_each do |post|
+    Post.where(id: post_ids).find_each do |post|
       post.reload
       post.set_pool_category_pseudo_tags
       Post.where(:id => post.id).update_all(:pool_string => post.pool_string)
@@ -361,15 +315,12 @@ class Pool < ApplicationRecord
   end
 
   def category_changeable_by?(user)
-    user.is_builder? || (user.is_member? && post_count <= 100)
+    user.is_builder? || (user.is_member? && post_count <= Danbooru.config.pool_category_change_limit)
   end
 
   def updater_can_change_category
-    if saved_change_to_category? && !category_changeable_by?(CurrentUser.user)
-      errors[:base] << "You cannot change the category of pools with greater than 100 posts"
-      false
-    else
-      true
+    if category_changed? && !category_changeable_by?(CurrentUser.user)
+      errors[:base] << "You cannot change the category of pools with greater than #{Danbooru.config.pool_category_change_limit} posts"
     end
   end
 
@@ -389,12 +340,9 @@ class Pool < ApplicationRecord
   end
 
   def updater_can_remove_posts
-    removed = post_id_array_was - post_id_array
+    removed = post_ids_was - post_ids
     if removed.any? && !CurrentUser.user.can_remove_from_pools?
       errors[:base] << "You cannot removes posts from pools within the first week of sign up"
-      false
-    else
-      true
     end
   end
 end

@@ -117,11 +117,11 @@ class Upload < ApplicationRecord
     end
 
     def is_duplicate?
-      status =~ /duplicate: \d+/
+      status.match?(/duplicate: \d+/)
     end
 
     def is_errored?
-      status =~ /error:/
+      status.match?(/error:/)
     end
 
     def sanitized_status
@@ -134,6 +134,24 @@ class Upload < ApplicationRecord
 
     def duplicate_post_id
       @duplicate_post_id ||= status[/duplicate: (\d+)/, 1]
+    end
+  end
+
+  module SourceMethods
+    def source=(source)
+      source = source.unicode_normalize(:nfc)
+
+      # percent encode unicode characters in urls
+      if source =~ %r!\Ahttps?://!i
+        source = Addressable::URI.normalized_encode(source) rescue source
+      end
+
+      super(source)
+    end
+
+    def source_url
+      return nil unless source =~ %r!\Ahttps?://!i
+      Addressable::URI.heuristic_parse(source) rescue nil
     end
   end
 
@@ -235,6 +253,7 @@ class Upload < ApplicationRecord
   include VideoMethods
   extend SearchMethods
   include ApiMethods
+  include SourceMethods
 
   def uploader_is_not_limited
     if !uploader.can_upload?
@@ -247,7 +266,7 @@ class Upload < ApplicationRecord
 
   def assign_rating_from_tags
     if rating = Tag.has_metatag?(tag_string, :rating)
-      self.rating = rating.downcase
+      self.rating = rating.downcase.first
     end
   end
 

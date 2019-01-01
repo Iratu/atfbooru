@@ -71,9 +71,9 @@ class PostQueryBuilder
     if SavedSearch.enabled?
       saved_searches.each do |saved_search|
         if saved_search == "all"
-          post_ids = SavedSearch.post_ids(CurrentUser.id)
+          post_ids = SavedSearch.post_ids_for(CurrentUser.id)
         else
-          post_ids = SavedSearch.post_ids(CurrentUser.id, saved_search)
+          post_ids = SavedSearch.post_ids_for(CurrentUser.id, label: saved_search)
         end
 
         post_ids = [0] if post_ids.empty?
@@ -406,7 +406,9 @@ class PostQueryBuilder
 
     if q[:ordpool].present?
       pool_id = q[:ordpool].to_i
-      relation = relation.order(Arel.sql("position(' '||posts.id||' ' in ' '||(select post_ids from pools where id = #{pool_id})||' ')"))
+
+      pool_posts = Pool.joins("CROSS JOIN unnest(pools.post_ids) WITH ORDINALITY AS row(post_id, pool_index)").where(id: pool_id).select(:post_id, :pool_index)
+      relation = relation.joins("JOIN (#{pool_posts.to_sql}) pool_posts ON pool_posts.post_id = posts.id").order("pool_posts.pool_index ASC")
     end
 
     if q[:favgroups_neg].present?

@@ -12,15 +12,12 @@ module Sources
         Strategies::Nijie, 
         Strategies::Pawoo,
         Strategies::Moebooru,
-
-        Strategies::Null # MUST BE LAST!
       ]
     end
 
-    def self.find(url, referer=nil)
-      all
-        .detect { |strategy| strategy.match?(url, referer) }
-        .new(url, referer)
+    def self.find(url, referer=nil, default: Strategies::Null)
+      strategy = all.map { |strategy| strategy.new(url, referer) }.detect(&:match?)
+      strategy || default&.new(url, referer)
     end
 
     def self.canonical(url, referer)

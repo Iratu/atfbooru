@@ -9,7 +9,12 @@
 
       <section id="tag-box">
         <h1>Tags</h1>
-        <%= @post_set.presenter.tag_list_html(self) %>
+        <%= @post_set.presenter.tag_list_html(current_query: params[:tags], show_extra_links: CurrentUser.user.is_gold?) %>
+      </section>
+
+      <section id="tag-box">
+        <h1>Share</h1>
+        <%= render "posts/partials/index/share" %>
       </section>
 
       <%= render "posts/partials/index/options" %>
@@ -64,20 +69,13 @@
   <% end %>
 <% end %>
 
-<%= content_for(:html_header) do %>
-  <link href="<%= posts_path(:format => 'atom', :tags => params[:tags]) %>" rel="alternate" title="ATOM" type="application/atom+xml" />
-  <%#= tag.link rel: "prefetch", href: next_page_url, as: "html", crossorigin: "use-credentials" %>
+<% content_for(:html_header) do %>
+  <%= tag.link href: posts_path(format: "atom", tags: params[:tags]), rel: "alternate", title: "ATOM", type: "application/atom+xml" %>
+  <%= tag.link rel: "prefetch", href: next_page_url, as: "html", crossorigin: "use-credentials" %>
   <%= tag.link rel: "next", href: next_page_url %>
   <% if prev_page_url %>
     <%= tag.link rel: "prev", href: prev_page_url %>
   <% end %>
-  <% if @post_set.has_wiki? %>
-    <meta name="description" content="<%= strip_dtext(@post_set.wiki_page.presenter.excerpt) %>">
-  <% else %>
-    <meta name="description" content="<%= Danbooru.config.description %>">
-  <% end %>
   <%= missed_post_search_count_js %>
-  <% if @post_set.hide_from_crawler? %>
-    <meta name="robots" content="nofollow,noindex">
-  <% end %>
+  <%= render "posts/partials/index/seo_meta_tags" %>
 <% end %>

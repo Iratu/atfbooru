@@ -1,39 +1,50 @@
 module Sources::Strategies
   class Tumblr < Base
+    SIZES = %w[1280 640 540 500h 500 400 250 100]
+
+    BASE_URL = %r!\Ahttps?://(?:[^/]+\.)*tumblr\.com!i
     DOMAIN = %r{(data|(\d+\.)?media)\.tumblr\.com}
     MD5 = %r{(?<md5>[0-9a-f]{32})}i
     FILENAME = %r{(?<filename>(tumblr_(inline_)?)?[a-z0-9]+(_r[0-9]+)?)}i
-    SIZES = %r{(?:250|400|500|500h|540|1280|raw)}i
     EXT = %r{(?<ext>\w+)}
-    IMAGE = %r!\Ahttps?://#{DOMAIN}/(?<dir>#{MD5}/)?#{FILENAME}_#{SIZES}\.#{EXT}\z!i
+    IMAGE = %r!\Ahttps?://#{DOMAIN}/(?<dir>#{MD5}/)?#{FILENAME}_(?<size>\w+)\.#{EXT}\z!i
+    VIDEO = %r!\Ahttps?://(?:vtt|ve\.media)\.tumblr\.com/!i
     POST = %r!\Ahttps?://(?<blog_name>[^.]+)\.tumblr\.com/(?:post|image)/(?<post_id>\d+)!i
 
-    def self.match?(*urls)
-      urls.compact.any? do |url|
-        blog_name, post_id = parse_info_from_url(url)
-        url =~ IMAGE || blog_name.present? && post_id.present?
-      end
+    def self.enabled?
+      Danbooru.config.tumblr_consumer_key.present?
     end
 
-    def self.parse_info_from_url(url)
-      if url =~ POST
-        [$~[:blog_name], $~[:post_id]]
-      else
-        []
-      end
+    def domains
+      ["tumblr.com"]
     end
 
     def site_name
       "Tumblr"
     end
 
+    def image_url
+      return image_urls.first unless url.match?(IMAGE) || url.match?(VIDEO)
+      find_largest(url)
+    end
+
     def image_urls
-      image_urls_sub
-        .uniq
-        .map {|x| normalize_cdn(x)}
-        .map {|x| find_largest(x)}
-        .compact
-        .uniq
+      list = []
+
+      case post[:type]
+      when "photo"
+        list += post[:photos].map { |photo| photo[:original_size][:url] }
+
+      when "video"
+        list += [post[:video_url]]
+
+      # api response is blank (work is deleted or we were given a direct image with no referer url)
+      when nil
+        list += [url] if url.match?(IMAGE) || url.match?(VIDEO)
+      end
+
+      list += inline_images
+      list.map { |url| find_largest(url) }
     end
 
     def preview_urls
@@ -43,22 +54,21 @@ module Sources::Strategies
     end
 
     def page_url
-      [url, referer_url].each do |x|
-        if x =~ POST
-          blog_name, post_id = self.class.parse_info_from_url(x)
-          return "https://#{blog_name}.tumblr.com/post/#{post_id}"
-        end
-      end
+      return nil unless blog_name.present? && post_id.present?
+      "https://#{blog_name}.tumblr.com/post/#{post_id}"
+    end
 
-      return super
+    def canonical_url
+      page_url
     end
 
     def profile_url
-      "https://#{artist_name}.tumblr.com/"
+      return nil if artist_name.blank?
+      "https://#{artist_name}.tumblr.com"
     end
 
     def artist_name
-      post[:blog_name]
+      post[:blog_name] || blog_name
     end
 
     def artist_commentary_title
@@ -94,60 +104,21 @@ module Sources::Strategies
     end
 
     def tags
-      post[:tags].map do |tag|
-        # normalize tags: space, underscore, and hyphen are equivalent in tumblr tags.
-        etag = tag.gsub(/[ _-]/, "_")
-        [etag, "https://tumblr.com/tagged/#{CGI.escape(etag)}"]
+      post[:tags].to_a.map do |tag|
+        [tag, "https://tumblr.com/tagged/#{CGI.escape(tag)}"]
       end.uniq
     end
-    memoize :tags
+
+    def normalize_tag(tag)
+      tag = tag.tr("-", "_")
+      super(tag)
+    end
 
     def dtext_artist_commentary_desc
       DText.from_html(artist_commentary_desc).strip
     end
 
   public
-
-    def image_urls_sub
-      list = []
-
-      if url =~ IMAGE
-        list << url
-      end
-
-      if page_url !~ POST
-        return list
-      end
-
-      if post[:type] == "photo"
-        list += post[:photos].map do |photo|
-          photo[:original_size][:url]
-        end
-      end
-
-      if post[:type] == "video"
-        list << post[:video_url]
-      end
-
-      if inline_images.any?
-        list += inline_images.to_a
-      end
-
-      if list.any?
-        return list
-      end
-
-      raise "image url not found for (#{url}, #{referer_url})"
-    end
-
-    # Normalize cdn subdomains.
-    #
-    # https://gs1.wac.edgecastcdn.net/8019B6/data.tumblr.com/tumblr_m2dxb8aOJi1rop2v0o1_500.png
-    # => http://data.tumblr.com/tumblr_m2dxb8aOJi1rop2v0o1_500.png
-    def normalize_cdn(x)
-      # does this work?
-      x.sub(%r!\Ahttps?://gs1\.wac\.edgecastcdn\.net/8019B6/media\.tumblr\.com!i, "http://media.tumblr.com")
-    end
 
     # Look for the biggest available version on media.tumblr.com. A bigger
     # version may or may not exist.
@@ -166,45 +137,51 @@ module Sources::Strategies
     #
     # http://media.tumblr.com/tumblr_m24kbxqKAX1rszquso1_1280.jpg
     # => https://media.tumblr.com/tumblr_m24kbxqKAX1rszquso1_1280.jpg
-    def find_largest(x)
-      if x =~ IMAGE
-        sizes = [1280, 640, 540, "500h", 500, 400, 250]
-        candidates = sizes.map do |size|
-          "https://media.tumblr.com/#{$~[:dir]}#{$~[:filename]}_#{size}.#{$~[:ext]}"
-        end
+    def find_largest(url, sizes: SIZES)
+      return url unless url =~ IMAGE
 
-        return candidates.find do |candidate|
-          http_exists?(candidate, headers)
-        end
+      candidates = sizes.map do |size|
+        "https://media.tumblr.com/#{$~[:dir]}#{$~[:filename]}_#{size}.#{$~[:ext]}"
       end
 
-      return x
+      candidates.find do |candidate|
+        http_exists?(candidate, headers)
+      end
     end
 
     def inline_images
       html = Nokogiri::HTML.fragment(artist_commentary_desc)
       html.css("img").map { |node| node["src"] }
     end
-    memoize :inline_images
 
-    def client
-      raise NotImplementedError.new("Tumblr support is not available (API key not configured).") if Danbooru.config.tumblr_consumer_key.nil?
-
-      TumblrApiClient.new(Danbooru.config.tumblr_consumer_key)
+    def blog_name
+      urls.map { |url| url[POST, :blog_name] }.compact.first
     end
-    memoize :client
+
+    def post_id
+      urls.map { |url| url[POST, :post_id] }.compact.first
+    end
 
     def api_response
-      blog_name, post_id = self.class.parse_info_from_url(page_url)
+      return {} unless self.class.enabled?
+      return {} unless blog_name.present? && post_id.present?
 
-      raise "Page url not found for (#{url}, #{referer_url})" if blog_name.nil?
+      body, code = HttpartyCache.get("/#{blog_name}/posts",
+        params: { id: post_id, api_key: Danbooru.config.tumblr_consumer_key },
+        base_uri: "https://api.tumblr.com/v2/blog/"
+      )
 
-      client.posts(blog_name, post_id)
+      if code == 200
+        return JSON.parse(body, symbolize_names: true)
+      else
+        Rails.logger.debug("TumblrApiClient call failed (code=#{code}, body=#{body}, blog_name=#{blog_name}, post_id=#{post_id})")
+        return {}
+      end
     end
     memoize :api_response
 
     def post
-      api_response[:posts].first
+      api_response.dig(:response, :posts)&.first || {}
     end
   end
 end

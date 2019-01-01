@@ -166,9 +166,19 @@ class ArtistTest < ActiveSupport::TestCase
     end
 
     should "not allow invalid urls" do
-      artist = FactoryBot.create(:artist, :url_string => "blah")
+      artist = FactoryBot.build(:artist, :url_string => "blah")
       assert_equal(false, artist.valid?)
-      assert_equal([" blah must begin with http:// or https://"], artist.errors[:url])
+      assert_equal(["'blah' must begin with http:// or https:// "], artist.errors["urls.url"])
+    end
+
+    should "allow fixing invalid urls" do
+      artist = FactoryBot.build(:artist)
+      artist.urls << FactoryBot.build(:artist_url, url: "www.example.com", normalized_url: "www.example.com")
+      artist.save(validate: false)
+
+      artist.update(url_string: "http://www.example.com")
+      assert_equal(true, artist.valid?)
+      assert_equal("http://www.example.com", artist.urls.map(&:to_s).join)
     end
 
     should "make sure old urls are deleted" do
@@ -198,11 +208,15 @@ class ArtistTest < ActiveSupport::TestCase
       a2 = FactoryBot.create(:artist, :name => "subway", :url_string => "http://subway.com/x/test.jpg")
       a3 = FactoryBot.create(:artist, :name => "minko", :url_string => "https://minko.com/x/test.jpg")
 
-      assert_artist_found("rembrandt", "http://rembrandt.com/x/test.jpg")
-      assert_artist_found("rembrandt", "http://rembrandt.com/x/another.jpg")
-      assert_artist_not_found("http://nonexistent.com/test.jpg")
-      assert_artist_found("minko", "https://minko.com/x/test.jpg")
-      assert_artist_found("minko", "http://minko.com/x/test.jpg")
+      begin
+        assert_artist_found("rembrandt", "http://rembrandt.com/x/test.jpg")
+        assert_artist_found("rembrandt", "http://rembrandt.com/x/another.jpg")
+        assert_artist_not_found("http://nonexistent.com/test.jpg")
+        assert_artist_found("minko", "https://minko.com/x/test.jpg")
+        assert_artist_found("minko", "http://minko.com/x/test.jpg")
+      rescue Net::OpenTimeout
+        skip "network failure"
+      end
     end
 
     should "be case-insensitive to domains when finding matches by url" do
@@ -393,8 +407,8 @@ class ArtistTest < ActiveSupport::TestCase
     end
 
     should "normalize its other names" do
-      artist = FactoryBot.create(:artist, :name => "a1", :other_names_comma => "aaa, bbb, ccc ddd")
-      assert_equal("aaa, bbb, ccc_ddd", artist.other_names_comma)
+      artist = FactoryBot.create(:artist, name: "a1", other_names: "a1 aaa aaa AAA bbb ccc_ddd")
+      assert_equal("aaa bbb ccc_ddd", artist.other_names_string)
     end
 
     should "search on its name should return results" do
@@ -407,11 +421,11 @@ class ArtistTest < ActiveSupport::TestCase
     end
 
     should "search on other names should return matches" do
-      artist = FactoryBot.create(:artist, :name => "artist", :other_names_comma => "aaa, ccc ddd")
+      artist = FactoryBot.create(:artist, :name => "artist", :other_names_string => "aaa ccc_ddd")
 
-      assert_nil(Artist.search(other_names_like: "*artist*").first)
-      assert_not_nil(Artist.search(other_names_like: "*aaa*").first)
-      assert_not_nil(Artist.search(other_names_like: "*ccc_ddd*").first)
+      assert_nil(Artist.search(any_other_name_like: "*artist*").first)
+      assert_not_nil(Artist.search(any_other_name_like: "*aaa*").first)
+      assert_not_nil(Artist.search(any_other_name_like: "*ccc_ddd*").first)
       assert_not_nil(Artist.search(name: "artist").first)
       assert_not_nil(Artist.search(:any_name_matches => "aaa").first)
       assert_not_nil(Artist.search(:any_name_matches => "/a/").first)
@@ -461,10 +475,10 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       first_version = ArtistVersion.first
-      assert_equal("yyy", first_version.other_names)
+      assert_equal(%w[yyy], first_version.other_names)
       artist.revert_to!(first_version)
       artist.reload
-      assert_equal("yyy", artist.other_names)
+      assert_equal(%w[yyy], artist.other_names)
     end
 
     should "update the category of the tag when created" do
@@ -483,15 +497,44 @@ class ArtistTest < ActiveSupport::TestCase
       assert_equal(Tag.categories.artist, tag.category)
     end
 
-    context "when updated" do
+    context "when saving" do
       setup do
-        @artist = FactoryBot.create(:artist)
+        @artist = FactoryBot.create(:artist, url_string: "http://foo.com")
         @artist.stubs(:merge_version?).returns(false)
       end
 
-      should "create a new version" do
+      should "create a new version when an url is added" do
         assert_difference("ArtistVersion.count") do
-          @artist.update(:url_string => "http://foo.com")
+          @artist.update(:url_string => "http://foo.com http://bar.com")
+          assert_equal(%w[http://bar.com http://foo.com], @artist.versions.last.urls)
+        end
+      end
+
+      should "create a new version when an url is removed" do
+        assert_difference("ArtistVersion.count") do
+          @artist.update(:url_string => "")
+          assert_equal(%w[], @artist.versions.last.urls)
+        end
+      end
+
+      should "create a new version when an url is marked inactive" do
+        assert_difference("ArtistVersion.count") do
+          @artist.update(:url_string => "-http://foo.com")
+          assert_equal(%w[-http://foo.com], @artist.versions.last.urls)
+        end
+      end
+
+      should "not create a new version when nothing has changed" do
+        assert_no_difference("ArtistVersion.count") do
+          @artist.save
+          assert_equal(%w[http://foo.com], @artist.versions.last.urls)
+        end
+      end
+
+      should "not save invalid urls" do
+        assert_no_difference("ArtistVersion.count") do
+          @artist.update(:url_string => "http://foo.com www.example.com")
+          assert_equal(%w[http://foo.com], @artist.versions.last.urls)
         end
       end
     end
@@ -505,6 +548,29 @@ class ArtistTest < ActiveSupport::TestCase
 
       should "preserve the url string" do
         assert_equal(1, @artist.urls.count)
+      end
+    end
+
+    context "#new_with_defaults" do
+      should "fetch the defaults from the given source" do
+        source = "https://i.pximg.net/img-original/img/2018/01/28/23/56/50/67014762_p0.jpg"
+        artist = Artist.new_with_defaults(source: source)
+
+        assert_equal("niceandcool", artist.name)
+        assert_equal("nice_and_cool", artist.other_names_string)
+        assert_includes(artist.urls.map(&:url), "https://www.pixiv.net/member.php?id=906442")
+        assert_includes(artist.urls.map(&:url), "https://www.pixiv.net/stacc/niceandcool")
+      end
+
+      should "fetch the defaults from the given tag" do
+        source = "https://i.pximg.net/img-original/img/2018/01/28/23/56/50/67014762_p0.jpg"
+        FactoryBot.create(:post, source: source, tag_string: "test_artist")
+        artist = Artist.new_with_defaults(name: "test_artist")
+
+        assert_equal("test_artist", artist.name)
+        assert_equal("nice_and_cool niceandcool", artist.other_names_string)
+        assert_includes(artist.urls.map(&:url), "https://www.pixiv.net/member.php?id=906442")
+        assert_includes(artist.urls.map(&:url), "https://www.pixiv.net/stacc/niceandcool")
       end
     end
   end

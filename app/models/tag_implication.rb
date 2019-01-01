@@ -1,17 +1,18 @@
 class TagImplication < TagRelationship
   extend Memoist
 
+  array_attribute :descendant_names
+
   before_save :update_descendant_names
   after_save :update_descendant_names_for_parents
   after_destroy :update_descendant_names_for_parents
   after_save :create_mod_action
-  validates_uniqueness_of :antecedent_name, :scope => :consequent_name
+  validates_uniqueness_of :antecedent_name, scope: [:consequent_name, :status], conditions: -> { active }
   validate :absence_of_circular_relation
   validate :absence_of_transitive_relation
   validate :antecedent_is_not_aliased
   validate :consequent_is_not_aliased
-  validate :antecedent_and_consequent_are_different
-  validate :wiki_pages_present, :on => :create
+  validate :wiki_pages_present, on: :create, unless: :skip_secondary_validations
   scope :old, ->{where("created_at between ? and ?", 2.months.ago, 1.month.ago)}
   scope :pending, ->{where(status: "pending")}
 
@@ -22,12 +23,14 @@ class TagImplication < TagRelationship
     module ClassMethods
       # assumes names are normalized
       def with_descendants(names)
-        (names + active.where(antecedent_name: names).flat_map(&:descendant_names_array)).uniq
+        (names + active.where(antecedent_name: names).flat_map(&:descendant_names)).uniq
       end
 
       def automatic_tags_for(names)
-        tags = names.grep(/\A(.+)_\(cosplay\)\Z/) { "char:#{TagAlias.to_aliased([$1]).first}" }
-        tags << "cosplay" if tags.present?
+        tags = []
+        tags += names.grep(/\A(.+)_\(cosplay\)\z/i) { "char:#{TagAlias.to_aliased([$1]).first}" }
+        tags << "cosplay" if names.any?(/_\(cosplay\)\z/i)
+        tags << "school_uniform" if names.any?(/_school_uniform\z/i)
         tags.uniq
       end
     end
@@ -44,12 +47,8 @@ class TagImplication < TagRelationship
     end
     memoize :descendants
 
-    def descendant_names_array
-      descendant_names.split(/ /)
-    end
-
     def update_descendant_names
-      self.descendant_names = descendants.join(" ")
+      self.descendant_names = descendants
     end
 
     def update_descendant_names!
@@ -78,9 +77,8 @@ class TagImplication < TagRelationship
   module ValidationMethods
     def absence_of_circular_relation
       # We don't want a -> b && b -> a chains
-      if self.class.active.exists?(["antecedent_name = ? and consequent_name = ?", consequent_name, antecedent_name])
-        self.errors[:base] << "Tag implication can not create a circular relation with another tag implication"
-        false
+      if descendants.include?(antecedent_name)
+        errors[:base] << "Tag implication can not create a circular relation with another tag implication"
       end
     end
 
@@ -88,47 +86,33 @@ class TagImplication < TagRelationship
     def absence_of_transitive_relation
       # Find everything else the antecedent implies, not including the current implication.
       implications = TagImplication.active.where("antecedent_name = ? and consequent_name != ?", antecedent_name, consequent_name)
-      implied_tags = implications.flat_map(&:descendant_names_array)
+      implied_tags = implications.flat_map(&:descendant_names)
       if implied_tags.include?(consequent_name)
-        self.errors[:base] << "#{antecedent_name} already implies #{consequent_name} through another implication"
+        errors[:base] << "#{antecedent_name} already implies #{consequent_name} through another implication"
       end
     end
 
     def antecedent_is_not_aliased
       # We don't want to implicate a -> b if a is already aliased to c
       if TagAlias.active.exists?(["antecedent_name = ?", antecedent_name])
-        self.errors[:base] << "Antecedent tag must not be aliased to another tag"
-        false
+        errors[:base] << "Antecedent tag must not be aliased to another tag"
       end
     end
 
     def consequent_is_not_aliased
       # We don't want to implicate a -> b if b is already aliased to c
       if TagAlias.active.exists?(["antecedent_name = ?", consequent_name])
-        self.errors[:base] << "Consequent tag must not be aliased to another tag"
-        false
-      end
-    end
-
-    def antecedent_and_consequent_are_different
-      normalize_names
-      if antecedent_name == consequent_name
-        self.errors[:base] << "Cannot implicate a tag to itself"
-        false
+        errors[:base] << "Consequent tag must not be aliased to another tag"
       end
     end
 
     def wiki_pages_present
-      return if skip_secondary_validations
-
-      unless WikiPage.titled(consequent_name).exists?
-        self.errors[:base] << "The #{consequent_name} tag needs a corresponding wiki page"
-        return false
+      if consequent_wiki.blank?
+        errors[:base] << "The #{consequent_name} tag needs a corresponding wiki page"
       end
 
-      unless WikiPage.titled(antecedent_name).exists?
-        self.errors[:base] << "The #{antecedent_name} tag needs a corresponding wiki page"
-        return false
+      if antecedent_wiki.blank?
+        errors[:base] << "The #{antecedent_name} tag needs a corresponding wiki page"
       end
     end
   end
@@ -170,7 +154,7 @@ class TagImplication < TagRelationship
     def update_posts
       Post.without_timeout do
         Post.raw_tag_match(antecedent_name).where("true /* TagImplication#update_posts */").find_each do |post|
-          fixed_tags = "#{post.tag_string} #{descendant_names}".strip
+          fixed_tags = "#{post.tag_string} #{descendant_names_string}".strip
           CurrentUser.scoped(creator, creator_ip_addr) do
             post.update_attributes(
               :tag_string => fixed_tags
@@ -185,10 +169,9 @@ class TagImplication < TagRelationship
       delay(:queue => "default").process!(update_topic: update_topic)
     end
 
-    def reject!
+    def reject!(update_topic: true)
       update(status: "deleted")
-      forum_updater.update(reject_message(CurrentUser.user), "REJECTED")
-      destroy
+      forum_updater.update(reject_message(CurrentUser.user), "REJECTED") if update_topic
     end
 
     def create_mod_action

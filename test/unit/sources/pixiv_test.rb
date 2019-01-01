@@ -220,7 +220,7 @@ module Sources
 
           @site = get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981746")
           @tags = @site.tags.map(&:first)
-          @translated_tags = @site.translated_tags.map(&:first)
+          @translated_tags = @site.translated_tags.map(&:name)
         end
 
         should "get the original tags" do
@@ -275,7 +275,18 @@ module Sources
           tags = %w[Fate/GrandOrder グランブルーファンタジー 手袋 1000users入り]
 
           assert_equal(tags.sort, source.tags.map(&:first).sort)
-          assert_equal(["fate/grand_order"], source.translated_tags.map(&:first))
+          assert_equal(["fate/grand_order"], source.translated_tags.map(&:name))
+        end
+      end
+
+      context "fetching the artist data" do
+        should "get the artist names and profile urls" do
+          source = get_source("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=65981746")
+
+          assert_equal("uroobnad", source.tag_name)
+          assert_equal(["uroobnad"], source.other_names)
+          assert_includes(source.profile_urls, "https://www.pixiv.net/member.php?id=696859")
+          assert_includes(source.profile_urls, "https://www.pixiv.net/stacc/uroobnad")
         end
       end
     end

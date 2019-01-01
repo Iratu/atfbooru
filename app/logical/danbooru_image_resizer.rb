@@ -1,15 +1,17 @@
 module DanbooruImageResizer
+  extend self
+
   # Taken from ArgyllCMS 2.0.0 (see also: https://ninedegreesbelow.com/photography/srgb-profile-comparison.html)
   SRGB_PROFILE = "#{Rails.root}/config/sRGB.icm"
   # http://jcupitt.github.io/libvips/API/current/libvips-resample.html#vips-thumbnail
-  THUMBNAIL_OPTIONS = { size: :down, linear: false, auto_rotate: false, export_profile: SRGB_PROFILE }
+  THUMBNAIL_OPTIONS = { size: :down, linear: false, auto_rotate: false, export_profile: SRGB_PROFILE, import_profile: SRGB_PROFILE }
   # http://jcupitt.github.io/libvips/API/current/VipsForeignSave.html#vips-jpegsave
   JPEG_OPTIONS = { background: 255, strip: true, interlace: true, optimize_coding: true }
-  CROP_OPTIONS = { linear: false, auto_rotate: false, export_profile: SRGB_PROFILE, crop: :attention }
+  CROP_OPTIONS = { linear: false, auto_rotate: false, export_profile: SRGB_PROFILE, import_profile: SRGB_PROFILE, crop: :attention }
 
   # XXX libvips-8.4 on Debian doesn't support the `Vips::Image.thumbnail` method.
   # On 8.4 we have to shell out to vipsthumbnail instead. Remove when Debian supports 8.5.
-  def self.resize(file, width, height, quality = 90)
+  def resize(file, width, height, quality = 90)
     if Vips.at_least_libvips?(8, 5)
       resize_ruby(file, width, height, quality)
     else
@@ -17,17 +19,13 @@ module DanbooruImageResizer
     end
   end
 
-  def self.crop(file, width, height, quality = 90)
-    if Vips.at_least_libvips?(8, 5)
-      crop_ruby(file, width, height, quality)
-    else
-      crop_shell(file, width, height, quality)
-    end    
+  def crop(file, width, height, quality = 90)
+    crop_shell(file, width, height, quality)
   end
 
   # https://github.com/jcupitt/libvips/wiki/HOWTO----Image-shrinking
   # http://jcupitt.github.io/libvips/API/current/Using-vipsthumbnail.md.html
-  def self.resize_ruby(file, width, height, resize_quality)
+  def resize_ruby(file, width, height, resize_quality)
     output_file = Tempfile.new
     resized_image = Vips::Image.thumbnail(file.path, width, height: height, **THUMBNAIL_OPTIONS)
     resized_image.jpegsave(output_file.path, Q: resize_quality, **JPEG_OPTIONS)
@@ -35,7 +33,7 @@ module DanbooruImageResizer
     output_file
   end
 
-  def self.crop_ruby(file, width, height, resize_quality)
+  def crop_ruby(file, width, height, resize_quality)
     return nil unless Danbooru.config.enable_image_cropping
 
     output_file = Tempfile.new
@@ -45,7 +43,7 @@ module DanbooruImageResizer
     output_file
   end
 
-  def self.resize_shell(file, width, height, quality)
+  def resize_shell(file, width, height, quality)
     output_file = Tempfile.new(["resize", ".jpg"])
 
     # --size=WxH will upscale if the image is smaller than the target size.
@@ -57,6 +55,7 @@ module DanbooruImageResizer
     arguments = [
       file.path,
       "--eprofile=#{SRGB_PROFILE}",
+      "--iprofile=#{SRGB_PROFILE}",
       "--size=#{target_width}x#{target_height}",
       "--format=#{output_file.path}[Q=#{quality},background=255,strip,interlace,optimize_coding]"
     ]
@@ -67,7 +66,7 @@ module DanbooruImageResizer
     output_file
   end
 
-  def self.crop_shell(file, width, height, quality)
+  def crop_shell(file, width, height, quality)
     return nil unless Danbooru.config.enable_image_cropping
 
     output_file = Tempfile.new(["crop", ".jpg"])
@@ -79,6 +78,7 @@ module DanbooruImageResizer
     arguments = [
       file.path,
       "--eprofile=#{SRGB_PROFILE}",
+      "--iprofile=#{SRGB_PROFILE}",
       "--smartcrop=attention",
       "--size=#{width}x#{height}",
       "--format=#{output_file.path}[Q=#{quality},background=255,strip,interlace,optimize_coding]"
@@ -88,5 +88,21 @@ module DanbooruImageResizer
     raise RuntimeError, "vipsthumbnail failed (exit status: #{$?.exitstatus})" if !success
 
     output_file
+  end
+
+  def validate_shell(file)
+    temp = Tempfile.new("validate")
+    output, status = Open3.capture2e("vips stats #{file.path} #{temp.path}.v")
+
+    # png | jpeg | gif
+    if output =~ /Read Error|Premature end of JPEG file|Failed to read from given file/m
+      return false
+    end
+
+    return true
+
+  ensure
+    temp.close
+    temp.unlink
   end
 end

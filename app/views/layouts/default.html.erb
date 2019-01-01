@@ -1,5 +1,5 @@
 <!doctype html>
-<html xmlns:fb="http://ogp.me/ns/fb#">
+<html>
 <head>
   <title><%= yield :page_title %></title>
   <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
@@ -34,8 +34,6 @@
   <% if CurrentUser.user.custom_style.present? %>
     <%= stylesheet_link_tag custom_style_users_path, :media => "screen" %>
   <% end %>
-  <%= raw Danbooru.config.custom_html_header_content %>
-  <%= yield :html_header %>
   <% if Danbooru.config.twitter_site %>
     <script type="application/ld+json">
       {
@@ -70,7 +68,12 @@
     "url" : "<%= root_url %>"
   }
   </script>
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous">
+  <% if request.domain =~ /donmai\.us/ %>
+    <!-- this is only usable on danbooru.donmai.us -->
+    <link rel="stylesheet" href="https://pro.fontawesome.com/releases/v5.4.2/css/all.css" integrity="sha384-zhaLg9HKxTxDljOPXpWHGn91XMDH+sYAWRSgvzHes290/ISyrNicGrd6BInTnx3L" crossorigin="anonymous">
+  <% else %>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous">
+  <% end %>
   <script>
     if (typeof window.Danbooru !== "object") {
       window.Danbooru = {};
@@ -83,16 +86,32 @@
       console.warn("Danbooru.error will be deprecated. Use $(window).trigger('danbooru:error', msg) instead.")
       $(window).trigger("danbooru:error", msg);
     }
+    window._paq = window._paq || [];
+    <% if CurrentUser.is_member? && !CurrentUser.opt_out_mixpanel? %>
+      window._paq.push(["setUserId", '<%= CurrentUser.id %>']);
+    <% end %>
+    window._paq.push(["setDomains", "*.donmai.us"]);
+    <% if !CurrentUser.opt_out_mixpanel? %>
+      window._paq.push(["setCustomVariable", 1, "level", <%= CurrentUser.level %>, "visit"]);
+      window._paq.push(["setCustomVariable", 2, "age", <%= ((Time.now - CurrentUser.created_at) / 1.year).to_i %>, "visit"]);
+      window._paq.push(["setCustomVariable", 3, "postUpdateCount", <%= CurrentUser.post_update_count.to_i / 100 %>, "visit"]);
+      window._paq.push(["setCustomVariable", 4, "favoriteCount", <%= CurrentUser.favorite_count.to_i / 100 %>, "visit"]);
+    <% end %>
   </script>
-
+  <%= yield :html_header %>
+  <%= raw Danbooru.config.custom_html_header_content %>
 </head>
 <%= tag.body **body_attributes(CurrentUser.user) do %>
-  <header id="top">
-    <%= render "news_updates/listing" %>
+  <%= render "news_updates/listing" %>
 
+<<<<<<< HEAD
     <h1><a href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
     <a href="https://www.caramelthecalf.com/" target="_blank"><img src="/banners/CTC1.png" id="artistadv" style="height: 250px;float: right;"></a>
     </h1>
+=======
+  <header id="top">
+    <h1><%= link_to Danbooru.config.app_name, "/" %></h1>
+>>>>>>> pr/62
     
     <div id="maintoggle">
       <a href="#"><i id="maintoggle-on" class="fas fa-bars"></i></a>

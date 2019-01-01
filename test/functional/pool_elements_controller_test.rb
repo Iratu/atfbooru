@@ -21,26 +21,26 @@ class PoolElementsControllerTest < ActionDispatch::IntegrationTest
       should "add a post to a pool" do
         post_auth pool_element_path, @user, params: {:pool_id => @pool.id, :post_id => @post.id, :format => "json"}
         @pool.reload
-        assert_equal([@post.id], @pool.post_id_array)
+        assert_equal([@post.id], @pool.post_ids)
       end
 
       should "add a post to a pool once and only once" do
-        @pool.add!(@post)
+        as_user { @pool.add!(@post) }
         post_auth pool_element_path, @user, params: {:pool_id => @pool.id, :post_id => @post.id, :format => "json"}
         @pool.reload
-        assert_equal([@post.id], @pool.post_id_array)
+        assert_equal([@post.id], @pool.post_ids)
       end
     end
 
     context "destroy action" do
       setup do
-        @pool.add!(@post)
+        as_user { @pool.add!(@post) }
       end
 
       should "remove a post from a pool" do
         delete_auth pool_element_path, @user, params: {:pool_id => @pool.id, :post_id => @post.id, :format => "json"}
         @pool.reload
-        assert_equal([], @pool.post_id_array)
+        assert_equal([], @pool.post_ids)
       end
 
       should "do nothing if the post is not a member of the pool" do
@@ -50,7 +50,7 @@ class PoolElementsControllerTest < ActionDispatch::IntegrationTest
         end
         delete_auth pool_element_path, @user, params: {:pool_id => @pool.id, :post_id => @post.id, :format => "json"}
         @pool.reload
-        assert_equal([], @pool.post_id_array)
+        assert_equal([], @pool.post_ids)
       end
     end
   end

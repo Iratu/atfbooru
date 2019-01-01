@@ -19,15 +19,15 @@ module PostSetPresenters
       if post_set.is_pattern_search?
         pattern_tags
       elsif post_set.is_saved_search?
-        SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
+        ["search:all"] + SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
+      elsif post_set.is_empty_tag? || post_set.tag_string == "order:rank"
+        popular_tags
       elsif post_set.is_single_tag?
         related_tags_for_single(post_set.tag_string)
       elsif post_set.unordered_tag_array.size == 1
         related_tags_for_single(post_set.unordered_tag_array.first)
       elsif Tag.has_metatag?(post_set.tag_array, *Tag::SUBQUERY_METATAGS)
         calculate_related_tags_from_post_set
-      elsif post_set.is_empty_tag?
-        popular_tags
       else
         related_tags_for_group
       end
@@ -67,12 +67,8 @@ module PostSetPresenters
       SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
     end
 
-    def tag_list_html(template, options = {})
-      if post_set.is_saved_search?
-        options[:name_only] = true
-      end
-      
-      tag_set_presenter.tag_list_html(template, options)
+    def tag_list_html(**options)
+      tag_set_presenter.tag_list_html(name_only: post_set.is_saved_search?, **options)
     end
   end
 end

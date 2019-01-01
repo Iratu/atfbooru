@@ -718,9 +718,9 @@ CREATE TABLE public.artist_versions (
     updater_id integer NOT NULL,
     updater_ip_addr inet NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
-    other_names text,
-    group_name character varying,
-    url_string text,
+    other_names text[] DEFAULT '{}'::text[] NOT NULL,
+    group_name character varying DEFAULT ''::character varying NOT NULL,
+    urls text[] DEFAULT '{}'::text[] NOT NULL,
     is_banned boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone
@@ -756,9 +756,8 @@ CREATE TABLE public.artists (
     creator_id integer NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     is_banned boolean DEFAULT false NOT NULL,
-    other_names text,
-    other_names_index tsvector,
-    group_name character varying,
+    other_names text[] DEFAULT '{}'::text[] NOT NULL,
+    group_name character varying DEFAULT ''::character varying NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone
 );
@@ -2533,8 +2532,7 @@ CREATE TABLE public.pools (
     creator_id integer NOT NULL,
     description text,
     is_active boolean DEFAULT true NOT NULL,
-    post_ids text DEFAULT ''::text NOT NULL,
-    post_count integer DEFAULT 0 NOT NULL,
+    post_ids integer[] DEFAULT '{}'::integer[] NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
@@ -2972,7 +2970,7 @@ CREATE TABLE public.tag_implications (
     id integer NOT NULL,
     antecedent_name character varying NOT NULL,
     consequent_name character varying NOT NULL,
-    descendant_names text NOT NULL,
+    descendant_names text[] DEFAULT '{}'::text[] NOT NULL,
     creator_id integer NOT NULL,
     creator_ip_addr inet NOT NULL,
     forum_topic_id integer,
@@ -3151,7 +3149,8 @@ CREATE TABLE public.user_feedback (
     category character varying NOT NULL,
     body text NOT NULL,
     created_at timestamp without time zone,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    creator_ip_addr inet
 );
 
 
@@ -3315,7 +3314,7 @@ CREATE TABLE public.wiki_page_versions (
     is_locked boolean NOT NULL,
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
-    other_names text,
+    other_names text[] DEFAULT '{}'::text[] NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL
 );
 
@@ -3353,8 +3352,7 @@ CREATE TABLE public.wiki_pages (
     created_at timestamp without time zone,
     updated_at timestamp without time zone,
     updater_id integer,
-    other_names text,
-    other_names_index tsvector,
+    other_names text[] DEFAULT '{}'::text[] NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL
 );
 
@@ -5029,17 +5027,10 @@ CREATE INDEX index_artists_on_name_trgm ON public.artists USING gin (name public
 
 
 --
--- Name: index_artists_on_other_names_index; Type: INDEX; Schema: public; Owner: -
+-- Name: index_artists_on_other_names; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_artists_on_other_names_index ON public.artists USING gin (other_names_index);
-
-
---
--- Name: index_artists_on_other_names_trgm; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_artists_on_other_names_trgm ON public.artists USING gin (other_names public.gin_trgm_ops);
+CREATE INDEX index_artists_on_other_names ON public.artists USING gin (other_names);
 
 
 --
@@ -7125,7 +7116,7 @@ CREATE INDEX index_tags_on_name_pattern ON public.tags USING btree (name text_pa
 -- Name: index_tags_on_name_prefix; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_tags_on_name_prefix ON public.tags USING gin (regexp_replace((name)::text, '([a-z0-9])[a-z0-9'']*($|[^a-z0-9'']+)'::text, ''::text, 'g'::text) public.gin_trgm_ops) WHERE (post_count > 0);
+CREATE INDEX index_tags_on_name_prefix ON public.tags USING gin (regexp_replace((name)::text, '([a-z0-9])[a-z0-9'']*($|[^a-z0-9'']+)'::text, '\1'::text, 'g'::text) public.gin_trgm_ops);
 
 
 --
@@ -7182,6 +7173,13 @@ CREATE INDEX index_user_feedback_on_created_at ON public.user_feedback USING btr
 --
 
 CREATE INDEX index_user_feedback_on_creator_id ON public.user_feedback USING btree (creator_id);
+
+
+--
+-- Name: index_user_feedback_on_creator_ip_addr; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_user_feedback_on_creator_ip_addr ON public.user_feedback USING btree (creator_ip_addr);
 
 
 --
@@ -7262,10 +7260,10 @@ CREATE INDEX index_wiki_pages_on_body_index_index ON public.wiki_pages USING gin
 
 
 --
--- Name: index_wiki_pages_on_other_names_index; Type: INDEX; Schema: public; Owner: -
+-- Name: index_wiki_pages_on_other_names; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_wiki_pages_on_other_names_index ON public.wiki_pages USING gin (other_names_index);
+CREATE INDEX index_wiki_pages_on_other_names ON public.wiki_pages USING gin (other_names);
 
 
 --
@@ -7294,13 +7292,6 @@ CREATE INDEX index_wiki_pages_on_updated_at ON public.wiki_pages USING btree (up
 --
 
 CREATE TRIGGER insert_favorites_trigger BEFORE INSERT ON public.favorites FOR EACH ROW EXECUTE PROCEDURE public.favorites_insert_trigger();
-
-
---
--- Name: artists trigger_artists_on_update; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trigger_artists_on_update BEFORE INSERT OR UPDATE ON public.artists FOR EACH ROW EXECUTE PROCEDURE tsvector_update_trigger('other_names_index', 'public.danbooru', 'other_names');
 
 
 --
@@ -7350,13 +7341,6 @@ CREATE TRIGGER trigger_posts_on_tag_index_update BEFORE INSERT OR UPDATE ON publ
 --
 
 CREATE TRIGGER trigger_wiki_pages_on_update BEFORE INSERT OR UPDATE ON public.wiki_pages FOR EACH ROW EXECUTE PROCEDURE tsvector_update_trigger('body_index', 'public.danbooru', 'body', 'title');
-
-
---
--- Name: wiki_pages trigger_wiki_pages_on_update_for_other_names; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trigger_wiki_pages_on_update_for_other_names BEFORE INSERT OR UPDATE ON public.wiki_pages FOR EACH ROW EXECUTE PROCEDURE tsvector_update_trigger('other_names_index', 'public.danbooru', 'other_names');
 
 
 --
@@ -7527,6 +7511,14 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20180816230604'),
 ('20180912185624'),
 ('20180913184128'),
-('20180916002448');
+('20180916002448'),
+('20181108162204'),
+('20181108205842'),
+('20181113174914'),
+('20181114180205'),
+('20181114185032'),
+('20181114202744'),
+('20181130004740'),
+('20181202172145');
 
 

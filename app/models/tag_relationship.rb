@@ -10,10 +10,14 @@ class TagRelationship < ApplicationRecord
   belongs_to :approver, class_name: "User", optional: true
   belongs_to :forum_post, optional: true
   belongs_to :forum_topic, optional: true
-  has_one :antecedent_tag, :class_name => "Tag", :foreign_key => "name", :primary_key => "antecedent_name"
-  has_one :consequent_tag, :class_name => "Tag", :foreign_key => "name", :primary_key => "consequent_name"
+  belongs_to :antecedent_tag, class_name: "Tag", foreign_key: "antecedent_name", primary_key: "name", default: -> { Tag.find_or_create_by_name(antecedent_name) }
+  belongs_to :consequent_tag, class_name: "Tag", foreign_key: "consequent_name", primary_key: "name", default: -> { Tag.find_or_create_by_name(consequent_name) }
+  has_one :antecedent_wiki, through: :antecedent_tag, source: :wiki_page
+  has_one :consequent_wiki, through: :consequent_tag, source: :wiki_page
 
-  scope :active, ->{where(status: "active")}
+  scope :active, ->{approved}
+  scope :approved, ->{where(status: %w[active processing queued])}
+  scope :deleted, ->{where(status: "deleted")}
   scope :expired, ->{where("created_at < ?", EXPIRY.days.ago)}
   scope :old, ->{where("created_at >= ? and created_at < ?", EXPIRY.days.ago, EXPIRY_WARNING.days.ago)}
   scope :pending, ->{where(status: "pending")}
@@ -26,6 +30,7 @@ class TagRelationship < ApplicationRecord
   validates :creator, presence: { message: "must exist" }, if: -> { creator_id.present? }
   validates :approver, presence: { message: "must exist" }, if: -> { approver_id.present? }
   validates :forum_topic, presence: { message: "must exist" }, if: -> { forum_topic_id.present? }
+  validate :antecedent_and_consequent_are_different
 
   def initialize_creator
     self.creator_id = CurrentUser.user.id
@@ -75,12 +80,14 @@ class TagRelationship < ApplicationRecord
       end
     end
 
-    def pending_first
-      order(Arel.sql("(case status when 'pending' then 1 when 'queued' then 2 when 'active' then 3 else 0 end), antecedent_name, consequent_name"))
+    def tag_matches(field, params)
+      return all if params.blank?
+      where(field => Tag.search(params).reorder(nil).select(:name))
     end
 
-    def active
-      where(status: %w[active processing queued])
+    def pending_first
+      # unknown statuses return null and are sorted first
+      order(Arel.sql("array_position(array['queued', 'processing', 'pending', 'active', 'deleted', 'retired'], status) NULLS FIRST, antecedent_name, consequent_name"))
     end
 
     def default_order
@@ -105,6 +112,9 @@ class TagRelationship < ApplicationRecord
       if params[:status].present?
         q = q.status_matches(params[:status])
       end
+
+      q = q.tag_matches(:antecedent_name, params[:antecedent_tag])
+      q = q.tag_matches(:consequent_name, params[:consequent_tag])
 
       if params[:category].present?
         q = q.joins(:consequent_tag).where("tags.category": params[:category].split)
@@ -160,6 +170,12 @@ class TagRelationship < ApplicationRecord
 
     def forum_link
       "(forum ##{forum_post.id})" if forum_post.present?
+    end
+  end
+
+  def antecedent_and_consequent_are_different
+    if antecedent_name == consequent_name
+      errors[:base] << "Cannot alias or implicate a tag to itself"
     end
   end
 
