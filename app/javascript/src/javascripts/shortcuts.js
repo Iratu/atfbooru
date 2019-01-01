@@ -16,7 +16,11 @@ Shortcuts.initialize = function() {
 // shortcut apply only when the link is visible.
 Shortcuts.initialize_data_shortcuts = function() {
   $(document).off("keydown.danbooru.shortcut");
-
+	$(document).off(".random");
+	Utility.keydown("r","random",e=>{
+		let t = new URL(window.location);
+		window.location = t.origin+'/posts/random?tags='+t.searchParams.get('tags');
+	});
   $("[data-shortcut]").each((_i, element) => {
     const id = $(element).attr("id");
     const keys = $(element).attr("data-shortcut");
