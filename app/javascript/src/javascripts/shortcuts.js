@@ -21,7 +21,7 @@ Shortcuts.initialize_data_shortcuts = function() {
 		let t = new URL(window.location);
 		const taglist = t.searchParams.get('tags');
 		if (taglist == null) {
-			window.location = t.origin+'/posts/random;
+			window.location = t.origin+'/posts/random';
 		} else {
 			window.location = t.origin+'/posts/random?tags='+taglist;
 		}
