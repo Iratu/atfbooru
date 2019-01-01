@@ -103,15 +103,11 @@
 </head>
 <%= tag.body **body_attributes(CurrentUser.user) do %>
   <%= render "news_updates/listing" %>
-
-<<<<<<< HEAD
+  <header id="top">
     <h1><a href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
     <a href="https://www.caramelthecalf.com/" target="_blank"><img src="/banners/CTC1.png" id="artistadv" style="height: 250px;float: right;"></a>
     </h1>
-=======
-  <header id="top">
-    <h1><%= link_to Danbooru.config.app_name, "/" %></h1>
->>>>>>> pr/62
+
     
     <div id="maintoggle">
       <a href="#"><i id="maintoggle-on" class="fas fa-bars"></i></a>
