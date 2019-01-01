@@ -19,7 +19,12 @@ Shortcuts.initialize_data_shortcuts = function() {
 	$(document).off(".random");
 	Utility.keydown("r","random",e=>{
 		let t = new URL(window.location);
-		window.location = t.origin+'/posts/random?tags='+t.searchParams.get('tags');
+		const taglist = t.searchParams.get('tags');
+		if (taglist == null) {
+			window.location = t.origin+'/posts/random;
+		} else {
+			window.location = t.origin+'/posts/random?tags='+taglist;
+		}
 	});
   $("[data-shortcut]").each((_i, element) => {
     const id = $(element).attr("id");
