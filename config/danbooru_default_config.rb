@@ -57,7 +57,7 @@ module Danbooru
     end
 
     def source_code_url
-      "https://github.com/r888888888/danbooru"
+      "https://github.com/Iratu/atfbooru"
     end
 
     def commit_url(hash)
