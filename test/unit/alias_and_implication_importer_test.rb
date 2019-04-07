@@ -26,6 +26,50 @@ class AliasAndImplicationImporterTest < ActiveSupport::TestCase
       end
     end
 
+    context "#affected_tags" do
+      setup do
+        FactoryBot.create(:post, tag_string: "aaa")
+        FactoryBot.create(:post, tag_string: "bbb")
+        FactoryBot.create(:post, tag_string: "ccc")
+        FactoryBot.create(:post, tag_string: "ddd")
+        FactoryBot.create(:post, tag_string: "eee")
+
+        @script = "create alias aaa -> 000\n" +
+          "create implication bbb -> 111\n" +
+          "remove alias ccc -> 222\n" +
+          "remove implication ddd -> 333\n" +
+          "mass update eee -> 444\n"
+      end
+
+      subject { AliasAndImplicationImporter.new(@script, nil) }
+
+      should "return the correct tags" do
+        assert_equal(%w(aaa 000 bbb 111 ccc 222 ddd 333 eee 444), subject.affected_tags)
+      end
+    end
+
+    context "#estimate_update_count" do
+      setup do
+        FactoryBot.create(:post, tag_string: "aaa")
+        FactoryBot.create(:post, tag_string: "bbb")
+        FactoryBot.create(:post, tag_string: "ccc")
+        FactoryBot.create(:post, tag_string: "ddd")
+        FactoryBot.create(:post, tag_string: "eee")
+
+        @script = "create alias aaa -> 000\n" +
+          "create implication bbb -> 111\n" +
+          "remove alias ccc -> 222\n" +
+          "remove implication ddd -> 333\n" +
+          "mass update eee -> 444\n"
+      end
+
+      subject { AliasAndImplicationImporter.new(@script, nil) }
+
+      should "return the correct count" do
+        assert_equal(3, subject.estimate_update_count)
+      end
+    end
+
     context "given a valid list" do
       setup do
         @list = "create alias abc -> def\ncreate implication aaa -> bbb\n"
@@ -84,10 +128,10 @@ class AliasAndImplicationImporterTest < ActiveSupport::TestCase
           remove alias a -> b
           remove implication c -> d
         }
+        @importer = AliasAndImplicationImporter.new(@script, nil)
       end
 
       should "set aliases and implications as deleted" do
-        @importer = AliasAndImplicationImporter.new(@script, nil)
         @importer.process!
 
         assert_equal("deleted", @ta.reload.status)
@@ -95,11 +139,18 @@ class AliasAndImplicationImporterTest < ActiveSupport::TestCase
       end
 
       should "create modactions for each removal" do
-        @importer = AliasAndImplicationImporter.new(@script, nil)
-
         assert_difference(-> { ModAction.count }, 2) do
           @importer.process!
         end
+      end
+
+      should "only remove active aliases and implications" do
+        @ta2 = FactoryBot.create(:tag_alias, antecedent_name: "a", consequent_name: "b", status: "pending")
+        @ti2 = FactoryBot.create(:tag_implication, antecedent_name: "c", consequent_name: "d", status: "pending")
+
+        @importer.process!
+        assert_equal("pending", @ta2.reload.status)
+        assert_equal("pending", @ti2.reload.status)
       end
     end
   end

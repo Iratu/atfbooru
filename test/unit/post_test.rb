@@ -1438,78 +1438,8 @@ class PostTest < ActiveSupport::TestCase
 
         context "that is from pixiv" do
           should "save the pixiv id" do
-            @post.update(source: "https://img18.pixiv.net/img/evazion/14901720.png")
-            assert_equal(14901720, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://img18.pixiv.net/img/evazion/14901720.png")
-            assert_equal(14901720, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i2.pixiv.net/img18/img/evazion/14901720.png")
-            assert_equal(14901720, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i2.pixiv.net/img18/img/evazion/14901720_m.png")
-            assert_equal(14901720, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i2.pixiv.net/img18/img/evazion/14901720_s.png")
-            assert_equal(14901720, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/img07/img/pasirism/18557054_p1.png")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/img07/img/pasirism/18557054_big_p1.png")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/img-inf/img/2011/05/01/23/28/04/18557054_64x64.jpg")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/img-inf/img/2011/05/01/23/28/04/18557054_s.png")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/c/600x600/img-master/img/2014/10/02/13/51/23/46304396_p0_master1200.jpg")
-            assert_equal(46304396, @post.pixiv_id)
-            @post.pixiv_id = nil
-
             @post.update(source: "http://i1.pixiv.net/img-original/img/2014/10/02/13/51/23/46304396_p0.png")
             assert_equal(46304396, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://i1.pixiv.net/img-zip-ugoira/img/2014/10/03/17/29/16/46323924_ugoira1920x1080.zip")
-            assert_equal(46323924, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-
-
-            @post.update(source: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=18557054")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=18557054")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://www.pixiv.net/member_illust.php?mode=big&illust_id=18557054")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://www.pixiv.net/member_illust.php?mode=manga&illust_id=18557054")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://www.pixiv.net/member_illust.php?mode=manga_big&illust_id=18557054")
-            assert_equal(18557054, @post.pixiv_id)
-            @post.pixiv_id = nil
-
-            @post.update(source: "http://www.pixiv.net/i/18557054")
-            assert_equal(18557054, @post.pixiv_id)
             @post.pixiv_id = nil
           end
         end
@@ -2105,6 +2035,20 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([posts[1]], "noter:none")
     end
 
+    should "return posts for the note_count:<N> metatag" do
+      posts = FactoryBot.create_list(:post, 3)
+      FactoryBot.create(:note, post: posts[0], is_active: true)
+      FactoryBot.create(:note, post: posts[1], is_active: false)
+
+      assert_tag_match([posts[1], posts[0]], "note_count:1")
+      assert_tag_match([posts[0]], "active_note_count:1")
+      assert_tag_match([posts[1]], "deleted_note_count:1")
+
+      assert_tag_match([posts[1], posts[0]], "notes:1")
+      assert_tag_match([posts[0]], "active_notes:1")
+      assert_tag_match([posts[1]], "deleted_notes:1")
+    end
+
     should "return posts for the artcomm:<name> metatag" do
       users = FactoryBot.create_list(:user, 2)
       posts = FactoryBot.create_list(:post, 2)
@@ -2389,6 +2333,8 @@ class PostTest < ActiveSupport::TestCase
         p
       end
 
+      FactoryBot.create(:note, post: posts.second)
+
       assert_tag_match(posts.reverse, "order:id_desc")
       assert_tag_match(posts.reverse, "order:score")
       assert_tag_match(posts.reverse, "order:favcount")
@@ -2406,6 +2352,10 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(posts.reverse, "order:chartags")
       assert_tag_match(posts.reverse, "order:copytags")
       assert_tag_match(posts.reverse, "order:rank")
+      assert_tag_match(posts.reverse, "order:note_count")
+      assert_tag_match(posts.reverse, "order:note_count_desc")
+      assert_tag_match(posts.reverse, "order:notes")
+      assert_tag_match(posts.reverse, "order:notes_desc")
 
       assert_tag_match(posts, "order:id_asc")
       assert_tag_match(posts, "order:score_asc")
@@ -2423,6 +2373,8 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match(posts, "order:arttags_asc")
       assert_tag_match(posts, "order:chartags_asc")
       assert_tag_match(posts, "order:copytags_asc")
+      assert_tag_match(posts, "order:note_count_asc")
+      assert_tag_match(posts, "order:notes_asc")
     end
 
     should "return posts for order:comment_bumped" do

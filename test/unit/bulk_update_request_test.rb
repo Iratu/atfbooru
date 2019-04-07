@@ -13,6 +13,55 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
       CurrentUser.ip_addr = nil
     end
 
+    context "#estimate_update_count" do
+      setup do
+        FactoryBot.create(:post, tag_string: "aaa")
+        FactoryBot.create(:post, tag_string: "bbb")
+        FactoryBot.create(:post, tag_string: "ccc")
+        FactoryBot.create(:post, tag_string: "ddd")
+        FactoryBot.create(:post, tag_string: "eee")
+
+        @script = "create alias aaa -> 000\n" +
+          "create implication bbb -> 111\n" +
+          "remove alias ccc -> 222\n" +
+          "remove implication ddd -> 333\n" +
+          "mass update eee -> 444\n"
+      end
+
+      subject { BulkUpdateRequest.new(script: @script) }
+
+      should "return the correct count" do
+        assert_equal(3, subject.estimate_update_count)
+      end
+    end
+
+    context "#update_notice" do
+      setup do
+        @mock_redis = MockRedis.new
+        @forum_topic = FactoryBot.create(:forum_topic)
+        TagChangeNoticeService.stubs(:redis_client).returns(@mock_redis)
+      end
+
+      should "update redis" do
+        @script = "create alias aaa -> 000\n" +
+          "create implication bbb -> 111\n" +
+          "remove alias ccc -> 222\n" +
+          "remove implication ddd -> 333\n" +
+          "mass update eee -> 444\n"
+        FactoryBot.create(:bulk_update_request, script: @script, forum_topic: @forum_topic)
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:aaa"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:000"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:bbb"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:111"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:ccc"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:222"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:ddd"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:333"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:eee"))
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:444"))
+      end
+    end
+
     context "on approval" do
       setup do
         @script = %q(
