@@ -24,13 +24,8 @@
         <td><%= script_with_line_breaks(request.script) %></td>
         <td id="request-status-for-<%= request.id %>"><%= request.status %></td>
         <td>
-          <% if CurrentUser.is_admin? && request.status == "pending" %>
-            <%= link_to "Approve", approve_bulk_update_request_path(request), :remote => true, :method => :post %> |
-          <% end %>
-          <% if request.editable?(CurrentUser.user) %>
-            <%= link_to "Reject", bulk_update_request_path(request), :method => :delete, :remote => true, :data => {:confirm => "Are you sure you want to reject this bulk update request?"} %> |
-            <%= link_to "Edit", edit_bulk_update_request_path(request) %>
-          <% end %>
+          <%= link_to "Show", bulk_update_request_path(request) %> |
+          <%= render "bulk_update_requests/bur_edit_links", bur: request %>
         </td>
       </tr>
     <% end %>

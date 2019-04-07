@@ -78,6 +78,52 @@ class AliasAndImplicationImporter
     end
   end
 
+  def estimate_update_count
+    tokens = self.class.tokenize(text)
+    tokens.inject(0) do |sum, token|
+      case token[0]
+      when :create_alias
+        sum + TagAlias.new(antecedent_name: token[1], consequent_name: token[2]).estimate_update_count
+
+      when :create_implication
+        sum + TagImplication.new(antecedent_name: token[1], consequent_name: token[2]).estimate_update_count
+
+      when :mass_update
+        sum + Moderator::TagBatchChange.new(token[1], token[2]).estimate_update_count
+
+      when :change_category
+        sum + Tag.find_by_name(token[1]).try(:post_count) || 0
+
+      else
+        sum + 0
+      end
+    end
+  end
+
+  def affected_tags
+    tokens = self.class.tokenize(text)
+    tokens.inject([]) do |all, token|
+      case token[0]
+      when :create_alias, :remove_alias, :create_implication, :remove_implication
+        all << token[1]
+        all << token[2]
+        all
+
+      when :mass_update
+        all += Tag.scan_tags(token[1])
+        all += Tag.scan_tags(token[2])
+        all
+
+      when :change_category
+        all << token[1]
+        all
+
+      else
+        all
+      end
+    end
+  end
+
 private
 
   def parse(tokens, approver)
@@ -100,12 +146,12 @@ private
           tag_implication.approve!(approver: approver, update_topic: false)
 
         when :remove_alias
-          tag_alias = TagAlias.where("antecedent_name = ?", token[1]).first
+          tag_alias = TagAlias.active.find_by(antecedent_name: token[1], consequent_name: token[2])
           raise Error, "Alias for #{token[1]} not found" if tag_alias.nil?
           tag_alias.reject!(update_topic: false)
 
         when :remove_implication
-          tag_implication = TagImplication.where("antecedent_name = ? and consequent_name = ?", token[1], token[2]).first
+          tag_implication = TagImplication.active.find_by(antecedent_name: token[1], consequent_name: token[2])
           raise Error, "Implication for #{token[1]} not found" if tag_implication.nil?
           tag_implication.reject!(update_topic: false)
 

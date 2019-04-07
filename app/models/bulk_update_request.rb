@@ -16,6 +16,7 @@ class BulkUpdateRequest < ApplicationRecord
   before_validation :initialize_attributes, :on => :create
   before_validation :normalize_text
   after_create :create_forum_topic
+  after_save :update_notice
 
   scope :pending_first, -> { order(Arel.sql("(case status when 'pending' then 0 when 'approved' then 1 else 2 end)")) }
   scope :pending, -> {where(status: "pending")}
@@ -90,7 +91,8 @@ class BulkUpdateRequest < ApplicationRecord
         ForumUpdater.new(
           forum_topic, 
           forum_post: post, 
-          expected_title: title
+          expected_title: title,
+          skip_update: !TagRelationship::SUPPORT_HARD_CODED
         )
       end
     end
@@ -168,12 +170,28 @@ class BulkUpdateRequest < ApplicationRecord
   include ApprovalMethods
   include ValidationMethods
 
+  concerning :EmbeddedText do
+    class_methods do
+      def embedded_pattern
+        /\[bur:(?<id>\d+)\]/m
+      end
+    end
+  end
+
   def editable?(user)
     user_id == user.id || user.is_builder?
   end
 
+  def approvable?(user)
+    !is_approved? && user.is_admin?
+  end
+
+  def rejectable?(user)
+    is_pending? && editable?(user)
+  end
+
   def reason_with_link
-    "#{script_with_links}\n\n\"Link to request\":/bulk_update_requests?search[id]=#{id}\n\n#{reason}"
+    "[bur:#{id}]\n\nReason: #{reason}"
   end
 
   def script_with_links
@@ -219,5 +237,16 @@ class BulkUpdateRequest < ApplicationRecord
 
   def is_rejected?
     status == "rejected"
+  end
+
+  def estimate_update_count
+    AliasAndImplicationImporter.new(script, nil).estimate_update_count
+  end
+
+  def update_notice
+    TagChangeNoticeService.update_cache(
+      AliasAndImplicationImporter.new(script, nil).affected_tags,
+      forum_topic_id
+    )
   end
 end

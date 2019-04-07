@@ -1,6 +1,7 @@
 class TagRelationship < ApplicationRecord
   self.abstract_class = true
 
+  SUPPORT_HARD_CODED = true
   EXPIRY = 60
   EXPIRY_WARNING = 55
 
@@ -31,6 +32,7 @@ class TagRelationship < ApplicationRecord
   validates :approver, presence: { message: "must exist" }, if: -> { approver_id.present? }
   validates :forum_topic, presence: { message: "must exist" }, if: -> { forum_topic_id.present? }
   validate :antecedent_and_consequent_are_different
+  after_save :update_notice
 
   def initialize_creator
     self.creator_id = CurrentUser.user.id
@@ -42,8 +44,16 @@ class TagRelationship < ApplicationRecord
     self.consequent_name = consequent_name.mb_chars.downcase.tr(" ", "_")
   end
 
+  def is_approved?
+    status.in?(%w[active processing queued])
+  end
+
   def is_retired?
     status == "retired"
+  end
+
+  def is_deleted?
+    status == "deleted"
   end
 
   def is_pending?
@@ -52,6 +62,10 @@ class TagRelationship < ApplicationRecord
 
   def is_active?
     status == "active"
+  end
+
+  def is_errored?
+    status =~ /\Aerror:/
   end
 
   def deletable_by?(user)
@@ -87,7 +101,7 @@ class TagRelationship < ApplicationRecord
 
     def pending_first
       # unknown statuses return null and are sorted first
-      order(Arel.sql("array_position(array['queued', 'processing', 'pending', 'active', 'deleted', 'retired'], status) NULLS FIRST, antecedent_name, consequent_name"))
+      order(Arel.sql("array_position(array['queued', 'processing', 'pending', 'active', 'deleted', 'retired'], status::text) NULLS FIRST, antecedent_name, consequent_name"))
     end
 
     def default_order
@@ -173,10 +187,29 @@ class TagRelationship < ApplicationRecord
     end
   end
 
+  concerning :EmbeddedText do
+    class_methods do
+      def embedded_pattern
+        raise NotImplementedError
+      end
+    end
+  end
+
   def antecedent_and_consequent_are_different
     if antecedent_name == consequent_name
       errors[:base] << "Cannot alias or implicate a tag to itself"
     end
+  end
+
+  def estimate_update_count
+    Post.fast_count(antecedent_name, skip_cache: true)
+  end
+
+  def update_notice
+    TagChangeNoticeService.update_cache(
+      [antecedent_name, consequent_name],
+      forum_topic_id
+    )
   end
 
   extend SearchMethods

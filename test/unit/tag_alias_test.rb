@@ -58,6 +58,30 @@ class TagAliasTest < ActiveSupport::TestCase
       end
     end
 
+    context "#estimate_update_count" do
+      setup do
+        FactoryBot.create(:post, tag_string: "aaa bbb ccc")
+        @alias = FactoryBot.create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", status: "pending")
+      end
+
+      should "get the right count" do
+        assert_equal(1, @alias.estimate_update_count)
+      end
+    end
+
+    context "#update_notice" do
+      setup do
+        @mock_redis = MockRedis.new
+        @forum_topic = FactoryBot.create(:forum_topic)
+        TagChangeNoticeService.stubs(:redis_client).returns(@mock_redis)
+      end
+
+      should "update redis" do
+        FactoryBot.create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: true, forum_topic: @forum_topic)
+        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:aaa"))
+      end
+    end
+
     context "on secondary validation" do
       should "warn about missing wiki pages" do
         ti = FactoryBot.build(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: false)
@@ -178,7 +202,7 @@ class TagAliasTest < ActiveSupport::TestCase
         CurrentUser.scoped(@admin) do
           @topic = FactoryBot.create(:forum_topic, :title => TagAliasRequest.topic_title("aaa", "bbb"))
           @post = FactoryBot.create(:forum_post, :topic_id => @topic.id, :body => TagAliasRequest.command_string("aaa", "bbb"))
-          @alias = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :forum_topic => @topic, :status => "pending")
+          @alias = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :forum_topic => @topic, :forum_post => @post, :status => "pending")
         end
       end
 
