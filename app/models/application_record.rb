@@ -149,11 +149,27 @@ class ApplicationRecord < ActiveRecord::Base
 
     def as_json(options = {})
       options ||= {}
+
+      options[:include] ||= []
+
       options[:except] ||= []
       options[:except] += hidden_attributes
 
       options[:methods] ||= []
       options[:methods] += method_attributes
+
+      if !options.key?(:only) && RequestStore.exist?(:only_param)
+        options[:only] = RequestStore[:only_param]
+      end
+
+      if options[:only].is_a?(String)
+        options[:only] = options[:only].split(/,/)
+      end
+
+      if options[:only]
+        options[:methods] = options[:methods] & options[:only].map(&:to_sym)
+        options[:include] = options[:include] & options[:only].map(&:to_sym)
+      end
 
       super(options)
     end
@@ -161,11 +177,26 @@ class ApplicationRecord < ActiveRecord::Base
     def to_xml(options = {}, &block)
       options ||= {}
 
+      options[:include] ||= []
+
       options[:except] ||= []
       options[:except] += hidden_attributes
 
       options[:methods] ||= []
       options[:methods] += method_attributes
+
+      if !options.key?(:only) && RequestStore.exist?(:only_param)
+        options[:only] = RequestStore[:only_param]
+      end
+
+      if options[:only].is_a?(String)
+        options[:only] = options[:only].split(/,/)
+      end
+
+      if options[:only]
+        options[:methods] = options[:methods] & options[:only]
+        options[:include] = options[:include] & options[:only]
+      end
 
       super(options, &block)
     end
