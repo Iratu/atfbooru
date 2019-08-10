@@ -7,6 +7,6 @@
   <%= link_to "Expunge", expunge_moderator_post_post_path(:post_id => post.id, :id => post.id), :remote => true, :method => :post, :id => "expunge", :data => {:confirm => "This will permanently delete this post (meaning the file will be deleted(ONLY USE WHEN NEEDED!). Are you sure you want to delete this post?"} %> |
   <%= link_to "Find similar", iqdb_queries_path(:post_id => post.id) %> |
 	<% if CurrentUser.user.api_key %>	
-  <a href="https://allthefallen.ninja/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= CurrentUser.user.api_key.key %>" target="_blank">Tag Autocopy</a>
+  <a href="https://allthefallen.moe/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= CurrentUser.user.api_key.key %>" target="_blank">Tag Autocopy</a>
   <% end %>
 </div>

@@ -396,7 +396,7 @@ class User < ApplicationRecord
     end
 
     def is_voter?
-      is_gold? || is_super_voter?
+      is_member? || is_gold? || is_super_voter?
     end
 
     def is_approver?

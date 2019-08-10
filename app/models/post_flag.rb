@@ -162,10 +162,10 @@ class PostFlag < ApplicationRecord
       # do nothing
     elsif creator.created_at > 1.week.ago
       errors[:creator] << "cannot flag within the first week of sign up"
-    elsif creator.is_gold? && flag_count_for_creator >= 10
-      errors[:creator] << "can flag 10 posts a day"
-    elsif !creator.is_gold? && flag_count_for_creator >= 1
-      errors[:creator] << "can flag 1 post a day"
+    elsif creator.is_gold? && flag_count_for_creator >= 50
+      errors[:creator] << "can flag 50 posts a day"
+    elsif !creator.is_gold? && flag_count_for_creator >= 25
+      errors[:creator] << "can flag 25 post a day"
     end
 
     flag = post.flags.in_cooldown.last
