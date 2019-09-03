@@ -38,7 +38,7 @@ class TagImplicationTest < ActiveSupport::TestCase
       should allow_value(nil).for(:approver_id)
       should_not allow_value(-1).for(:approver_id).with_message("must exist", against: :approver)
 
-      should_not allow_value(nil).for(:creator_id)
+      # should_not allow_value(nil).for(:creator_id) # XXX https://github.com/thoughtbot/shoulda-context/issues/53
       should_not allow_value(-1).for(:creator_id).with_message("must exist", against: :creator)
 
       should "not allow duplicate active implications" do
@@ -67,14 +67,12 @@ class TagImplicationTest < ActiveSupport::TestCase
 
     context "#update_notice" do
       setup do
-        @mock_redis = MockRedis.new
         @forum_topic = FactoryBot.create(:forum_topic)
-        TagChangeNoticeService.stubs(:redis_client).returns(@mock_redis)
       end
 
-      should "update redis" do
+      should "update the cache" do
         FactoryBot.create(:tag_implication, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: true, forum_topic: @forum_topic)
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:aaa"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:aaa"))
       end
     end
 
@@ -245,8 +243,10 @@ class TagImplicationTest < ActiveSupport::TestCase
       p1 = FactoryBot.create(:post, :tag_string => "aaa bbb ccc")
       ti1 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "xxx")
       ti2 = FactoryBot.create(:tag_implication, :antecedent_name => "aaa", :consequent_name => "yyy")
+
       ti1.approve!
       ti2.approve!
+      workoff_active_jobs
 
       assert_equal("aaa bbb ccc xxx yyy", p1.reload.tag_string)
     end
@@ -262,11 +262,11 @@ class TagImplicationTest < ActiveSupport::TestCase
       should "update the topic when processed" do
         assert_difference("ForumPost.count") do
           @implication.approve!
+          workoff_active_jobs
         end
-        @post.reload
-        @topic.reload
-        assert_match(/The tag implication .* has been approved/, @post.body)
-        assert_equal("[APPROVED] Tag implication: aaa -> bbb", @topic.title)
+
+        assert_match(/The tag implication .* has been approved/, @post.reload.body)
+        assert_equal("[APPROVED] Tag implication: aaa -> bbb", @topic.reload.title)
       end
 
       should "update the topic when rejected" do

@@ -26,9 +26,9 @@
       <menu id="post-sections">
         <li class="active"><a href="#" id="show-posts-link">Posts</a></li>
 
-        <% if @post_set.has_artist? %>
+        <% if @post_set.artist.present? %>
           <li><%= link_to "Artist", artist_path(@post_set.artist), :id => "show-excerpt-link" %></li>
-        <% elsif @post_set.has_wiki? %>
+        <% elsif @post_set.wiki_page.present? %>
           <li><%= link_to "Wiki", wiki_page_path(@post_set.wiki_page), :id => "show-excerpt-link" %></li>
         <% elsif @post_set.has_pool? %>
           <li><%= link_to "Pool", pool_path(@post_set.pool), :id => "show-excerpt-link" %></li>
@@ -71,7 +71,6 @@
 
 <% content_for(:html_header) do %>
   <%= tag.link href: posts_path(format: "atom", tags: params[:tags]), rel: "alternate", title: "ATOM", type: "application/atom+xml" %>
-  <%= tag.link rel: "prefetch", href: next_page_url, as: "html", crossorigin: "use-credentials" %>
   <%= tag.link rel: "next", href: next_page_url %>
   <% if prev_page_url %>
     <%= tag.link rel: "prev", href: prev_page_url %>

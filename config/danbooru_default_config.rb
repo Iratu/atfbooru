@@ -1,12 +1,5 @@
-require 'socket'
-
 module Danbooru
   class Configuration
-    # The version of this Danbooru.
-    def version
-      "2.105.0"
-    end
-
     # The name of this Danbooru.
     def app_name
       if CurrentUser.safe_mode?
@@ -18,10 +11,6 @@ module Danbooru
 
     def description
       "Find good anime art fast"
-    end
-
-    def domain
-      "donmai.us"
     end
 
     # The canonical hostname of the site.
@@ -52,10 +41,6 @@ module Danbooru
       ForumTopic.where(title: "Upload Feedback Thread").first
     end
 
-    def upgrade_account_email
-      contact_email
-    end
-
     def source_code_url
       "https://github.com/Iratu/atfbooru"
     end
@@ -64,22 +49,8 @@ module Danbooru
       "#{source_code_url}/commit/#{hash}"
     end
 
-    def releases_url
-      "#{source_code_url}/releases"
-    end
-
     def issues_url
       "#{source_code_url}/issues"
-    end
-
-    # Stripped of any special characters.
-    def safe_app_name
-      app_name.gsub(/[^a-zA-Z0-9_-]/, "_")
-    end
-
-    # The default name to use for anyone who isn't logged in.
-    def default_guest_name
-      "Anonymous"
     end
 
     # This is a salt used to make dictionary attacks on account passwords harder.
@@ -103,13 +74,6 @@ module Danbooru
       true
     end
 
-    # What method to use to store images.
-    # local_flat: Store every image in one directory.
-    # local_hierarchy: Store every image in a hierarchical directory, based on the post's MD5 hash. On some file systems this may be faster.
-    def image_store
-      :local_hierarchy
-    end
-
     # Thumbnail size
     def small_image_width
       150
@@ -129,11 +93,6 @@ module Danbooru
       300
     end
 
-    # List of memcached servers
-    def memcached_servers
-      %w(127.0.0.1:11211)
-    end
-
     # After a post receives this many comments, new comments will no longer bump the post in comment/index.
     def comment_threshold
       40
@@ -147,16 +106,6 @@ module Danbooru
     # Members cannot change the category of pools with more than this many posts.
     def pool_category_change_limit
       100
-    end
-
-    # Whether safe mode should be enabled. Safe mode hides all non-rating:safe posts from view.
-    def enable_safe_mode?(request, user)
-      !!(request.host =~ /safe/ || request.params[:safe_mode] || user.enable_safe_mode?)
-    end
-
-    # Determines who can see ads.
-    def can_see_ads?(user)
-      !user.is_gold?
     end
 
     # Users cannot search for more than X regular tags at a time.
@@ -237,19 +186,6 @@ module Danbooru
     # the others. This should match whatever gethostname returns on the other servers.
     def all_server_hosts
       [server_host]
-    end
-
-    # Names of other Danbooru servers.
-    def other_server_hosts
-      @other_server_hosts ||= all_server_hosts.reject {|x| x == server_host}
-    end
-
-    def remote_server_login
-      "danbooru"
-    end
-
-    def archive_server_login
-      "danbooru"
     end
 
     # The method to use for storing image files.
@@ -413,11 +349,6 @@ module Danbooru
 
 #END TAG
 
-    # If enabled, users must verify their email addresses.
-    def enable_email_verification?
-      false
-    end
-
     # Any custom code you want to insert into the default layout without
     # having to modify the templates.
     def custom_html_header_content
@@ -461,10 +392,6 @@ module Danbooru
       end
     end
 
-    def select_posts_visible_to_user(user, posts)
-      posts.select {|x| can_user_see_post?(user, x)}
-    end
-
     def max_appeals_per_day
       1
     end
@@ -484,14 +411,6 @@ module Danbooru
       nil
     end
 
-    def tinami_login
-      nil
-    end
-
-    def tinami_password
-      nil
-    end
-
     def nico_seiga_login
       nil
     end
@@ -500,28 +419,11 @@ module Danbooru
       nil
     end
 
-    def pixa_login
-      nil
-    end
-
-    def pixa_password
-      nil
-    end
-
     def nijie_login
       nil
     end
 
     def nijie_password
-      nil
-    end
-
-    # Register at https://www.deviantart.com/developers/.
-    def deviantart_client_id
-      nil
-    end
-
-    def deviantart_client_secret
       nil
     end
 
@@ -546,7 +448,7 @@ module Danbooru
 
     # Should return true if the given tag should be suggested for removal in the post replacement dialog box.
     def remove_tag_after_replacement?(tag)
-      tag =~ /\A(?:replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts|corrupted_image|source_request)\z/i
+      tag =~ /\A(?:replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts|corrupted_image|source_request|non-web_source)\z/i
     end
 
     # Posts with these tags will be highlighted yellow in the modqueue.
@@ -557,10 +459,6 @@ module Danbooru
     # Posts with these tags will be highlighted red in the modqueue.
     def modqueue_sample_warning_tags
       %w[duplicate image_sample md5_mismatch resized upscaled downscaled]
-    end
-
-    def shared_dir_path
-      "/var/www/danbooru2/shared"
     end
 
     def stripe_secret_key
@@ -579,7 +477,7 @@ module Danbooru
     # services will fail if you don't set a valid User-Agent.
     def http_headers
       {
-        "User-Agent" => "#{Danbooru.config.safe_app_name}/#{Danbooru.config.version}",
+        "User-Agent" => "#{Danbooru.config.app_name}/#{Rails.application.config.x.git_hash}",
       }
     end
 
@@ -638,11 +536,6 @@ module Danbooru
     end
 
     def addthis_key
-    end
-
-    # enable s3-nginx proxy caching
-    def use_s3_proxy?(post)
-      false
     end
 
     # include essential tags in image urls (requires nginx/apache rewrites)
@@ -724,9 +617,6 @@ module Danbooru
       false
     end
 
-    def aws_sqs_saved_search_url
-    end
-
     def aws_sqs_reltagcalc_url
     end
 
@@ -740,15 +630,6 @@ module Danbooru
     end
 
     def aws_sqs_archives_url
-    end
-
-    def ccs_server
-    end
-
-    def ccs_key
-    end
-
-    def aws_sqs_cropper_url
     end
 
     # Use a recaptcha on the signup page to protect against spambots creating new accounts.
@@ -772,6 +653,7 @@ module Danbooru
     end
 
     def rakismet_url
+      "https://#{hostname}"
     end
 
     # Cloudflare data
@@ -791,6 +673,7 @@ module Danbooru
     end
 
     def redis_url
+      "redis://localhost:6379"
     end
   end
 

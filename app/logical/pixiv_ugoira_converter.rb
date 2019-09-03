@@ -1,5 +1,11 @@
 class PixivUgoiraConverter
+  def self.enabled?
+    system("ffmpeg -version > /dev/null") && system("mkvmerge --version > /dev/null")
+  end
+
   def self.generate_webm(ugoira_file, frame_data)
+    raise NotImplementedError, "can't convert ugoira to webm: ffmpeg or mkvmerge not installed" unless enabled?
+
     folder = Zip::File.new(ugoira_file.path)
     output_file = Tempfile.new(binmode: true)
     write_path = output_file.path
@@ -73,7 +79,7 @@ class PixivUgoiraConverter
 
     DanbooruImageResizer.crop(file, Danbooru.config.small_image_width, Danbooru.config.small_image_width, 85)
   ensure
-    file.close!
+    file&.close!
   end
 
   def self.generate_preview(ugoira_file)

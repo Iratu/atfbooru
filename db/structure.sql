@@ -5,22 +5,9 @@ SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
+SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
-
-
---
--- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
-
 
 --
 -- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner: -
@@ -350,19 +337,6 @@ CREATE FUNCTION public.favorites_insert_trigger() RETURNS trigger
 
 
 --
--- Name: sourcepattern(text); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.sourcepattern(src text) RETURNS text
-    LANGUAGE plpgsql IMMUTABLE STRICT
-    AS $_$
-               BEGIN
-                 RETURN regexp_replace(src, '^[^/]*(//)?[^/]*.pixiv.net/img.*(/[^/]*/[^/]*)$', E'pixiv\\2');
-               END;
-             $_$;
-
-
---
 -- Name: testprs_end(internal); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -424,138 +398,6 @@ ALTER TEXT SEARCH CONFIGURATION public.danbooru
 SET default_tablespace = '';
 
 SET default_with_oids = false;
-
---
--- Name: advertisement_hits; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.advertisement_hits (
-    id integer NOT NULL,
-    advertisement_id integer NOT NULL,
-    ip_addr inet NOT NULL,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone
-);
-
-
---
--- Name: advertisement_hits_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.advertisement_hits_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: advertisement_hits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.advertisement_hits_id_seq OWNED BY public.advertisement_hits.id;
-
-
---
--- Name: advertisements; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.advertisements (
-    id integer NOT NULL,
-    referral_url text NOT NULL,
-    ad_type character varying NOT NULL,
-    status character varying NOT NULL,
-    hit_count integer DEFAULT 0 NOT NULL,
-    width integer NOT NULL,
-    height integer NOT NULL,
-    file_name character varying NOT NULL,
-    is_work_safe boolean DEFAULT false NOT NULL,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone
-);
-
-
---
--- Name: advertisements_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.advertisements_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: advertisements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.advertisements_id_seq OWNED BY public.advertisements.id;
-
-
---
--- Name: amazon_backups; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.amazon_backups (
-    id integer NOT NULL,
-    last_id integer,
-    created_at timestamp without time zone,
-    updated_at timestamp without time zone
-);
-
-
---
--- Name: amazon_backups_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.amazon_backups_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: amazon_backups_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.amazon_backups_id_seq OWNED BY public.amazon_backups.id;
-
-
---
--- Name: anti_voters; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.anti_voters (
-    id integer NOT NULL,
-    user_id integer,
-    created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone NOT NULL
-);
-
-
---
--- Name: anti_voters_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.anti_voters_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: anti_voters_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.anti_voters_id_seq OWNED BY public.anti_voters.id;
-
 
 --
 -- Name: api_keys; Type: TABLE; Schema: public; Owner: -
@@ -2739,15 +2581,6 @@ ALTER SEQUENCE public.post_replacements_id_seq OWNED BY public.post_replacements
 
 
 --
--- Name: post_updates; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE UNLOGGED TABLE public.post_updates (
-    post_id integer
-);
-
-
---
 -- Name: post_votes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3374,34 +3207,6 @@ CREATE SEQUENCE public.wiki_pages_id_seq
 --
 
 ALTER SEQUENCE public.wiki_pages_id_seq OWNED BY public.wiki_pages.id;
-
-
---
--- Name: advertisement_hits id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.advertisement_hits ALTER COLUMN id SET DEFAULT nextval('public.advertisement_hits_id_seq'::regclass);
-
-
---
--- Name: advertisements id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.advertisements ALTER COLUMN id SET DEFAULT nextval('public.advertisements_id_seq'::regclass);
-
-
---
--- Name: amazon_backups id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.amazon_backups ALTER COLUMN id SET DEFAULT nextval('public.amazon_backups_id_seq'::regclass);
-
-
---
--- Name: anti_voters id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.anti_voters ALTER COLUMN id SET DEFAULT nextval('public.anti_voters_id_seq'::regclass);
 
 
 --
@@ -4441,38 +4246,6 @@ ALTER TABLE ONLY public.wiki_pages ALTER COLUMN id SET DEFAULT nextval('public.w
 
 
 --
--- Name: advertisement_hits advertisement_hits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.advertisement_hits
-    ADD CONSTRAINT advertisement_hits_pkey PRIMARY KEY (id);
-
-
---
--- Name: advertisements advertisements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.advertisements
-    ADD CONSTRAINT advertisements_pkey PRIMARY KEY (id);
-
-
---
--- Name: amazon_backups amazon_backups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.amazon_backups
-    ADD CONSTRAINT amazon_backups_pkey PRIMARY KEY (id);
-
-
---
--- Name: anti_voters anti_voters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.anti_voters
-    ADD CONSTRAINT anti_voters_pkey PRIMARY KEY (id);
-
-
---
 -- Name: api_keys api_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4769,14 +4542,6 @@ ALTER TABLE ONLY public.saved_searches
 
 
 --
--- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.schema_migrations
-    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
-
-
---
 -- Name: super_voters super_voters_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4870,27 +4635,6 @@ ALTER TABLE ONLY public.wiki_page_versions
 
 ALTER TABLE ONLY public.wiki_pages
     ADD CONSTRAINT wiki_pages_pkey PRIMARY KEY (id);
-
-
---
--- Name: index_advertisement_hits_on_advertisement_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_advertisement_hits_on_advertisement_id ON public.advertisement_hits USING btree (advertisement_id);
-
-
---
--- Name: index_advertisement_hits_on_created_at; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_advertisement_hits_on_created_at ON public.advertisement_hits USING btree (created_at);
-
-
---
--- Name: index_advertisements_on_ad_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_advertisements_on_ad_type ON public.advertisements USING btree (ad_type);
 
 
 --
@@ -5111,6 +4855,20 @@ CREATE INDEX index_comments_on_post_id ON public.comments USING btree (post_id);
 
 
 --
+-- Name: index_delayed_jobs_on_locked_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_delayed_jobs_on_locked_at ON public.delayed_jobs USING btree (locked_at);
+
+
+--
+-- Name: index_delayed_jobs_on_locked_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_delayed_jobs_on_locked_by ON public.delayed_jobs USING btree (locked_by);
+
+
+--
 -- Name: index_delayed_jobs_on_run_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5125,10 +4883,24 @@ CREATE UNIQUE INDEX index_dmail_filters_on_user_id ON public.dmail_filters USING
 
 
 --
+-- Name: index_dmails_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_dmails_on_created_at ON public.dmails USING btree (created_at);
+
+
+--
 -- Name: index_dmails_on_creator_ip_addr; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX index_dmails_on_creator_ip_addr ON public.dmails USING btree (creator_ip_addr);
+
+
+--
+-- Name: index_dmails_on_from_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_dmails_on_from_id ON public.dmails USING btree (from_id);
 
 
 --
@@ -6780,7 +6552,7 @@ CREATE INDEX index_pools_on_name ON public.pools USING btree (name);
 -- Name: index_pools_on_name_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_pools_on_name_trgm ON public.pools USING gin (lower((name)::text) public.gin_trgm_ops);
+CREATE INDEX index_pools_on_name_trgm ON public.pools USING gin (name public.gin_trgm_ops);
 
 
 --
@@ -6994,17 +6766,10 @@ CREATE INDEX index_posts_on_pixiv_id ON public.posts USING btree (pixiv_id) WHER
 
 
 --
--- Name: index_posts_on_source; Type: INDEX; Schema: public; Owner: -
+-- Name: index_posts_on_source_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_posts_on_source ON public.posts USING btree (lower((source)::text));
-
-
---
--- Name: index_posts_on_source_pattern; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_posts_on_source_pattern ON public.posts USING btree (public.sourcepattern(lower((source)::text)) text_pattern_ops);
+CREATE INDEX index_posts_on_source_trgm ON public.posts USING gin (source public.gin_trgm_ops);
 
 
 --
@@ -7019,13 +6784,6 @@ CREATE INDEX index_posts_on_tags_index ON public.posts USING gin (tag_index);
 --
 
 CREATE INDEX index_posts_on_uploader_id ON public.posts USING btree (uploader_id);
-
-
---
--- Name: index_posts_on_uploader_ip_addr; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_posts_on_uploader_ip_addr ON public.posts USING btree (uploader_ip_addr);
 
 
 --
@@ -7249,7 +7007,7 @@ CREATE UNIQUE INDEX index_users_on_name ON public.users USING btree (lower((name
 -- Name: index_users_on_name_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_users_on_name_trgm ON public.users USING gin (lower((name)::text) public.gin_trgm_ops);
+CREATE INDEX index_users_on_name_trgm ON public.users USING gin (name public.gin_trgm_ops);
 
 
 --
@@ -7306,6 +7064,13 @@ CREATE INDEX index_wiki_pages_on_title_pattern ON public.wiki_pages USING btree 
 --
 
 CREATE INDEX index_wiki_pages_on_updated_at ON public.wiki_pages USING btree (updated_at);
+
+
+--
+-- Name: unique_schema_migrations; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX unique_schema_migrations ON public.schema_migrations USING btree (version);
 
 
 --
@@ -7542,6 +7307,15 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20181130004740'),
 ('20181202172145'),
 ('20190109210822'),
-('20190129012253');
+('20190129012253'),
+('20190712174818'),
+('20190827013252'),
+('20190827014726'),
+('20190827233235'),
+('20190827234625'),
+('20190828005453'),
+('20190829052629'),
+('20190829055758'),
+('20190902224045');
 
 

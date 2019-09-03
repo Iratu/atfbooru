@@ -8,18 +8,17 @@ class Artist < ApplicationRecord
   before_validation :normalize_name
   before_validation :normalize_other_names
   after_save :create_version
-  after_save :categorize_tag
   after_save :update_wiki
   after_save :clear_url_string_changed
+  validate :validate_tag_category
   validates :name, tag_name: true, uniqueness: true
-  validate :validate_wiki, :on => :create
   belongs_to_creator
   has_many :members, :class_name => "Artist", :foreign_key => "group_name", :primary_key => "name"
   has_many :urls, :dependent => :destroy, :class_name => "ArtistUrl", :autosave => true
   has_many :versions, -> {order("artist_versions.id ASC")}, :class_name => "ArtistVersion"
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :tag_alias, :foreign_key => "antecedent_name", :primary_key => "name"
-  has_one :tag, :foreign_key => "name", :primary_key => "name"
+  belongs_to :tag, foreign_key: "name", primary_key: "name", default: -> { Tag.new(name: name, category: Tag.categories.artist) }
   attribute :notes, :string
 
   scope :active, -> { where(is_active: true) }
@@ -280,14 +279,7 @@ class Artist < ApplicationRecord
 
     def merge_version
       prev = versions.last
-      prev.update_attributes(
-        :name => name,
-        :urls => url_array,
-        :is_active => is_active,
-        :is_banned => is_banned,
-        :other_names => other_names,
-        :group_name => group_name
-      )
+      prev.update(name: name, urls: url_array, is_active: is_active, is_banned: is_banned, other_names: other_names, group_name: group_name)
     end
 
     def merge_version?
@@ -391,13 +383,6 @@ class Artist < ApplicationRecord
         wiki_page.save
       end
     end
-
-    def validate_wiki
-      if WikiPage.titled(name).exists?
-        errors.add(:name, "conflicts with a wiki page")
-        return false
-      end
-    end
   end
 
   module TagMethods
@@ -413,9 +398,13 @@ class Artist < ApplicationRecord
       Tag.category_for(name)
     end
 
-    def categorize_tag
-      if new_record? || saved_change_to_name?
-        Tag.find_or_create_by_name("artist:#{name}")
+    def validate_tag_category
+      return unless is_active? && name_changed?
+
+      if tag.category_name == "General"
+        tag.update(category: Tag.categories.artist)
+      elsif tag.category_name != "Artist"
+        errors[:base] << "'#{name}' is a #{tag.category_name.downcase} tag; artist entries can only be created for artist tags"
       end
     end
   end
@@ -427,14 +416,10 @@ class Artist < ApplicationRecord
           ti = TagImplication.where(:antecedent_name => name, :consequent_name => "banned_artist").first
           ti.destroy if ti
 
-          begin
-            Post.tag_match(name).where("true /* Artist.unban */").each do |post|
-              post.unban!
-              fixed_tags = post.tag_string.sub(/(?:\A| )banned_artist(?:\Z| )/, " ").strip
-              post.update_attributes(:tag_string => fixed_tags)
-            end
-          rescue Post::SearchError
-            # swallow
+          Post.tag_match(name).where("true /* Artist.unban */").each do |post|
+            post.unban!
+            fixed_tags = post.tag_string.sub(/(?:\A| )banned_artist(?:\Z| )/, " ").strip
+            post.update(tag_string: fixed_tags)
           end
 
           update_column(:is_banned, false)
@@ -446,12 +431,8 @@ class Artist < ApplicationRecord
     def ban!
       Post.transaction do
         CurrentUser.without_safe_mode do
-          begin
-            Post.tag_match(name).where("true /* Artist.ban */").each do |post|
-              post.ban!
-            end
-          rescue Post::SearchError
-            # swallow
+          Post.tag_match(name).where("true /* Artist.ban */").each do |post|
+            post.ban!
           end
 
           # potential race condition but unlikely
@@ -468,10 +449,6 @@ class Artist < ApplicationRecord
   end
 
   module SearchMethods
-    def named(name)
-      where(name: normalize_name(name))
-    end
-
     def any_other_name_matches(regex)
       where(id: Artist.from("unnest(other_names) AS other_name").where("other_name ~ ?", regex))
     end
@@ -513,8 +490,7 @@ class Artist < ApplicationRecord
     def search(params)
       q = super
 
-      q = q.search_text_attribute(:name, params)
-      q = q.search_text_attribute(:group_name, params)
+      q = q.search_attributes(params, :is_active, :is_banned, :creator, :name, :group_name)
 
       if params[:any_other_name_like]
         q = q.any_other_name_like(params[:any_other_name_like])
@@ -530,17 +506,6 @@ class Artist < ApplicationRecord
 
       if params[:url_matches].present?
         q = q.url_matches(params[:url_matches])
-      end
-
-      q = q.attribute_matches(:is_active, params[:is_active])
-      q = q.attribute_matches(:is_banned, params[:is_banned])
-
-      if params[:creator_name].present?
-        q = q.where("artists.creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].tr(" ", "_").mb_chars.downcase)
-      end
-
-      if params[:creator_id].present?
-        q = q.where("artists.creator_id = ?", params[:creator_id].to_i)
       end
 
       if params[:has_tag].to_s.truthy?

@@ -47,6 +47,7 @@ class FavoriteGroup < ApplicationRecord
 
     def search(params)
       q = super
+      q = q.search_attributes(params, :name, :is_public, :post_count)
 
       if params[:creator_id].present?
         user = User.find(params[:creator_id])
@@ -64,8 +65,6 @@ class FavoriteGroup < ApplicationRecord
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])
       end
-
-      q = q.attribute_matches(:is_public, params[:is_public])
 
       q.apply_default_order(params)
     end
@@ -88,18 +87,12 @@ class FavoriteGroup < ApplicationRecord
         error += " Upgrade your account to create more."
       end
       self.errors.add(:base, error)
-      return false
-    else
-      return true
     end
   end
 
   def validate_number_of_posts
     if post_id_array.size > 10_000
       self.errors.add(:base, "Favorite groups can have up to 10,000 posts each")
-      return false
-    else
-      return true
     end
   end
 
@@ -180,14 +173,7 @@ class FavoriteGroup < ApplicationRecord
       return if contains?(post_id)
 
       clear_post_id_array
-      update_attributes(:post_ids => add_number_to_string(post_id, post_ids))
-    end
-  end
-
-  def self.purge_post(post_id)
-    post_id = post_id.id if post_id.is_a?(Post)
-    for_post(post_id).find_each do |group|
-      group.remove!(post_id)
+      update(post_ids: add_number_to_string(post_id, post_ids))
     end
   end
 
@@ -197,7 +183,7 @@ class FavoriteGroup < ApplicationRecord
       return unless contains?(post_id)
 
       clear_post_id_array
-      update_attributes(:post_ids => remove_number_from_string(post_id, post_ids))
+      update(post_ids: remove_number_from_string(post_id, post_ids))
     end
   end
 

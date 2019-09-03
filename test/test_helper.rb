@@ -16,8 +16,6 @@ require 'webmock/minitest'
 Dir[File.expand_path(File.dirname(__FILE__) + "/factories/*.rb")].each {|file| require file}
 Dir[File.expand_path(File.dirname(__FILE__) + "/test_helpers/*.rb")].each {|file| require file}
 
-Dotenv.load(Rails.root + ".env.local")
-
 Shoulda::Matchers.configure do |config|
   config.integrate do |with|
     with.test_framework :minitest
@@ -26,13 +24,6 @@ Shoulda::Matchers.configure do |config|
 end
 
 module TestHelpers
-  def create(factory_bot_model, params = {})
-    record = FactoryBot.build(factory_bot_model, params)
-    record.save
-    raise ActiveRecord::RecordInvalid.new(record) if record.errors.any?
-    record
-  end
-
   def as(user, &block)
     CurrentUser.as(user, &block)
   end
@@ -60,10 +51,19 @@ module TestHelpers
       Thread.current[:pixiv_comic_session_cache_key] = Cache.get(PixivWebAgent::COMIC_SESSION_CACHE_KEY)
     end
   end
+
+  # XXX replace with `perform_enqueued_jobs` after rails 6 upgrade.
+  def workoff_active_jobs
+    queue_adapter.enqueued_jobs.each do |job_data|
+      args = ActiveJob::Arguments.deserialize(job_data[:args])
+      job = job_data[:job].new(*args)
+      job.perform_now
+    end
+  end
 end
 
-
 class ActiveSupport::TestCase
+  include ActiveJob::TestHelper
   include FactoryBot::Syntax::Methods
   include PostArchiveTestHelper
   include PoolArchiveTestHelper
@@ -98,10 +98,8 @@ class ActionDispatch::IntegrationTest
   include TestHelpers
 
   def method_authenticated(method_name, url, user, options)
-    Thread.current[:test_user_id] = user.id
+    post session_path, params: { name: user.name, password: user.password }
     self.send(method_name, url, options)
-  ensure
-    Thread.current[:test_user_id] = nil
   end
 
   def get_auth(url, user, options = {})

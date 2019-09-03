@@ -53,22 +53,15 @@ class WikiPage < ApplicationRecord
     def search(params = {})
       q = super
 
+      q = q.search_attributes(params, :creator, :updater, :is_locked, :is_deleted, :body)
+      q = q.text_attribute_matches(:body, params[:body_matches], index_column: :body_index, ts_config: "danbooru")
+
       if params[:title].present?
         q = q.where("title LIKE ? ESCAPE E'\\\\'", params[:title].mb_chars.downcase.strip.tr(" ", "_").to_escaped_for_sql_like)
       end
 
-      if params[:creator_id].present?
-        q = q.where("creator_id = ?", params[:creator_id])
-      end
-
-      q = q.attribute_matches(:body, params[:body_matches], index_column: :body_index, ts_config: "danbooru")
-
       if params[:other_names_match].present?
         q = q.other_names_match(params[:other_names_match])
-      end
-
-      if params[:creator_name].present?
-        q = q.where("creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].tr(" ", "_").mb_chars.downcase)
       end
 
       if params[:hide_deleted].to_s.truthy?
@@ -80,9 +73,6 @@ class WikiPage < ApplicationRecord
       elsif params[:other_names_present].to_s.falsy?
         q = q.where("other_names is null or other_names = '{}'")
       end
-
-      q = q.attribute_matches(:is_locked, params[:is_locked])
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       params[:order] ||= params.delete(:sort)
       case params[:order]
@@ -108,13 +98,16 @@ class WikiPage < ApplicationRecord
     end
   end
 
+  def creator_name
+    creator.name
+  end
+
   extend SearchMethods
   include ApiMethods
 
   def validate_not_locked
     if is_locked? && !CurrentUser.is_builder?
       errors.add(:is_locked, "and cannot be updated")
-      return false
     end
   end
 
@@ -173,13 +166,7 @@ class WikiPage < ApplicationRecord
 
   def merge_version
     prev = versions.last
-    prev.update_attributes(
-      :title => title,
-      :body => body,
-      :is_locked => is_locked,
-      :is_deleted => is_deleted,
-      :other_names => other_names
-    )
+    prev.update(title: title, body: body, is_locked: is_locked, is_deleted: is_deleted, other_names: other_names)
   end
 
   def merge_version?

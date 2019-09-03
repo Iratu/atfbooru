@@ -145,9 +145,7 @@ class TagImplication < TagRelationship
         forum_updater.update(failure_message(e), "FAILED") if update_topic
         update(status: "error: #{e}")
 
-        if Rails.env.production?
-          NewRelic::Agent.notice_error(e, :custom_params => {:tag_implication_id => id, :antecedent_name => antecedent_name, :consequent_name => consequent_name})
-        end
+        DanbooruLogger.log(e, tag_implication_id: id, antecedent_name: antecedent_name, consequent_name: consequent_name)
       end
     end
 
@@ -156,17 +154,15 @@ class TagImplication < TagRelationship
         Post.raw_tag_match(antecedent_name).where("true /* TagImplication#update_posts */").find_each do |post|
           fixed_tags = "#{post.tag_string} #{descendant_names_string}".strip
           CurrentUser.scoped(creator, creator_ip_addr) do
-            post.update_attributes(
-              :tag_string => fixed_tags
-            )
+            post.update(tag_string: fixed_tags)
           end
         end
       end
     end
 
     def approve!(approver: CurrentUser.user, update_topic: true)
-      update(status: "queued", approver_id: approver.id)
-      delay(:queue => "default").process!(update_topic: update_topic)
+      update(approver: approver, status: "queued")
+      ProcessTagImplicationJob.perform_later(self, update_topic: update_topic)
     end
 
     def reject!(update_topic: true)

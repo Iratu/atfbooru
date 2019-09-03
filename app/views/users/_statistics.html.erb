@@ -3,6 +3,10 @@
   <table width="100%" class="user-statistics">
     <tbody>
       <tr>
+        <th>User ID</th>
+        <td><%= user.id %></td>
+      </tr>
+      <tr>
         <th>Join Date</th>
         <td><%= presenter.join_date %></td>
       </tr>
@@ -18,7 +22,12 @@
 
       <tr>
         <th>Level</th>
-        <td><%= presenter.level %></td>
+        <td>
+          <%= user.level_string %>
+          <% if CurrentUser.user == user && !CurrentUser.is_gold? %>
+            (<%= link_to "upgrade", new_user_upgrade_path %>)
+          <% end %>
+        </td>
       </tr>
 
       <tr>
@@ -43,7 +52,7 @@
         <td>
           <%= presenter.upload_count(self) %>
           <% if presenter.has_uploads? %>
-            [<%= link_to "tag changes report", reports_upload_tags_path(user_id: user.id) %>]
+            (<%= link_to "tag changes report", reports_upload_tags_path(user_id: user.id) %>)
           <% end %>
           <% if CurrentUser.is_moderator? %>
             [<%= link_to "sample", posts_path(:tags => "user:#{user.name} order:random limit:300") %>]
@@ -82,7 +91,10 @@
         <td>
           <%= presenter.post_version_count(self) %>
           <% if CurrentUser.is_moderator? && UserRevert.can_revert?(user)%>
-            [<%= link_to "revert all", new_user_revert_path(user_id: user.id) %>]
+            (<%= link_to "revert all", new_user_revert_path(user_id: user.id) %>)
+          <% end %>
+          <% if CurrentUser.id == user.id %> 
+            (<%= link_to "refresh", new_maintenance_user_count_fixes_path %>)
           <% end %>
         </td>
       </tr>

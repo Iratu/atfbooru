@@ -2,7 +2,7 @@
 app_path = "/var/www/danbooru2/current"
 
 # Set unicorn options
-worker_processes 12
+worker_processes 16
 
 timeout 180
 #listen "0.0.0.0:9000", :tcp_nopush => true, :backlog => 512
@@ -14,7 +14,7 @@ user 'danbooru', 'danbooru'
 # Fill path to your app
 working_directory app_path
 
-# Should be 'production' by default, otherwise use other env 
+# Should be 'production' by default, otherwise use other env
 rails_env = ENV['RAILS_ENV'] || 'production'
 
 # Log everything to one file
@@ -80,4 +80,17 @@ after_fork do |server, worker|
   if defined?(ActiveRecord::Base)
     ActiveRecord::Base.establish_connection
   end
+end
+
+# This runs when we send unicorn a SIGUSR2 to do a hot restart. We need to
+# clear out old BUNDLER_* and GEM_* environment variables, otherwise the new
+# worker will still use the old Gemfile from the previous deployment, which
+# will cause mysterious problems with libraries. BUNDLER_GEMFILE is the main
+# thing we need to clear, but we wipe everything for safety.
+#
+# https://bogomips.org/unicorn/Sandbox.html
+# https://jamielinux.com/blog/zero-downtime-unicorn-restart-when-using-rbenv/
+before_exec do |server|
+  ENV.keep_if { |name, value| name.match?(/\A(RAILS_.*|UNICORN_.*|HOME)\z/) }
+  ENV["PATH"] = "#{ENV["HOME"]}/.rbenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 end

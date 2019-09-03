@@ -48,9 +48,14 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         assert_response :success
       end
 
-      should "redirect for a nonexistent title" do
-        get wiki_page_path(:id => "what")
+      should "redirect html requests for a nonexistent title" do
+        get wiki_page_path("what")
         assert_redirected_to(show_or_new_wiki_pages_path(title: "what"))
+      end
+
+      should "return 404 to api requests for a nonexistent title" do
+        get wiki_page_path("what"), as: :json
+        assert_response 404
       end
 
       should "render for a negated tag" do
@@ -162,10 +167,10 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         as_user do
           @wiki_page = create(:wiki_page, :body => "1")
         end
-        travel_to(1.day.from_now) do
+        travel(1.day) do
           @wiki_page.update(:body => "1 2")
         end
-        travel_to(2.days.from_now) do
+        travel(2.days) do
           @wiki_page.update(:body => "1 2 3")
         end
       end

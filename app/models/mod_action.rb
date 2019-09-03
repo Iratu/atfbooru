@@ -1,7 +1,6 @@
 class ModAction < ApplicationRecord
   belongs_to :creator, :class_name => "User"
   before_validation :initialize_creator, :on => :create
-  validates_presence_of :creator_id
 
   #####DIVISIONS#####
   #Groups:     0-999
@@ -56,21 +55,18 @@ class ModAction < ApplicationRecord
   def self.search(params)
     q = super
 
-    q = q.attribute_matches(:description, params[:description_matches])
-
-    if params[:creator_id].present?
-      q = q.where("creator_id = ?", params[:creator_id].to_i)
-    end
-
-    if params[:creator_name].present?
-      q = q.where("creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].mb_chars.downcase)
-    end
-
-    if params[:category].present?
-      q = q.attribute_matches(:category, params[:category])
-    end
+    q = q.search_attributes(params, :creator, :category, :description)
+    q = q.text_attribute_matches(:description, params[:description_matches])
 
     q.apply_default_order(params)
+  end
+
+  def filtered_description
+    if (ip_ban_create? || ip_ban_delete?) && !CurrentUser.user.is_moderator?
+      description.gsub(/(created|deleted) ip ban for .*/, "\\1 ip ban")
+    else
+      description
+    end
   end
 
   def category_id
@@ -79,6 +75,10 @@ class ModAction < ApplicationRecord
 
   def method_attributes
     super + [:category_id]
+  end
+
+  def serializable_hash(*args)
+    super(*args).merge("description" => filtered_description)
   end
 
   def self.log(desc, cat = :other)

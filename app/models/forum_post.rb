@@ -13,9 +13,9 @@ class ForumPost < ApplicationRecord
   after_create :update_topic_updated_at_on_create
   after_update :update_topic_updated_at_on_update_for_original_posts
   after_destroy :update_topic_updated_at_on_destroy
-  validates_presence_of :body, :creator_id
+  validates_presence_of :body
   validate :validate_topic_is_unlocked
-  validate :topic_id_not_invalid
+  validate :validate_post_is_not_spam, on: :create
   validate :topic_is_not_restricted, :on => :create
   before_destroy :validate_topic_is_unlocked
   after_save :delete_topic_if_original_post
@@ -27,21 +27,13 @@ class ForumPost < ApplicationRecord
   end
   mentionable(
     :message_field => :body, 
-    :title => ->(user_name) {%{#{creator_name} mentioned you in topic ##{topic_id} (#{topic.title})}},
-    :body => ->(user_name) {%{@#{creator_name} mentioned you in topic ##{topic_id} ("#{topic.title}":[/forum_topics/#{topic_id}?page=#{forum_topic_page}]):\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n}},
+    :title => ->(user_name) {%{#{creator.name} mentioned you in topic ##{topic_id} (#{topic.title})}},
+    :body => ->(user_name) {%{@#{creator.name} mentioned you in topic ##{topic_id} ("#{topic.title}":[/forum_topics/#{topic_id}?page=#{forum_topic_page}]):\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n}},
   )
 
   module SearchMethods
     def topic_title_matches(title)
       joins(:topic).merge(ForumTopic.search(title_matches: title))
-    end
-
-    def for_user(user_id)
-      where("forum_posts.creator_id = ?", user_id)
-    end
-
-    def creator_name(name)
-      where("forum_posts.creator_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
     end
 
     def active
@@ -55,30 +47,16 @@ class ForumPost < ApplicationRecord
     def search(params)
       q = super
       q = q.permitted
-
-      if params[:creator_id].present?
-        q = q.where("forum_posts.creator_id = ?", params[:creator_id].to_i)
-      end
-
-      if params[:topic_id].present?
-        q = q.where("forum_posts.topic_id = ?", params[:topic_id].to_i)
-      end
+      q = q.search_attributes(params, :creator, :updater, :topic_id, :is_deleted, :body)
+      q = q.text_attribute_matches(:body, params[:body_matches], index_column: :text_index)
 
       if params[:topic_title_matches].present?
         q = q.topic_title_matches(params[:topic_title_matches])
       end
 
-      q = q.attribute_matches(:body, params[:body_matches], index_column: :text_index)
-
-      if params[:creator_name].present?
-        q = q.creator_name(params[:creator_name].tr(" ", "_"))
-      end
-
       if params[:topic_category_id].present?
         q = q.joins(:topic).where("forum_topics.category_id = ?", params[:topic_category_id].to_i)
       end
-
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       q.apply_default_order(params)
     end
@@ -134,6 +112,10 @@ class ForumPost < ApplicationRecord
     votes.where(creator_id: user.id, score: score).exists?
   end
 
+  def validate_post_is_not_spam
+    errors[:base] << "Failed to create forum post" if SpamDetector.new(self, user_ip: CurrentUser.ip_addr).spam?
+  end
+
   def validate_topic_is_unlocked
     return if CurrentUser.is_moderator?
     return if topic.nil?
@@ -144,17 +126,9 @@ class ForumPost < ApplicationRecord
     end
   end
 
-  def topic_id_not_invalid
-    if topic_id && !topic
-      errors[:base] << "Topic ID is invalid"
-      return false
-    end
-  end
-
   def topic_is_not_restricted
     if topic && !topic.visible?(creator)
       errors[:topic] << "is restricted"
-      return false
     end
   end
 
@@ -218,16 +192,8 @@ class ForumPost < ApplicationRecord
     self.is_deleted = false if is_deleted.nil?
   end
 
-  def creator_name
-    User.id_to_name(creator_id)
-  end
-
-  def updater_name
-    User.id_to_name(updater_id)
-  end
-
   def quoted_response
-    DText.quote(body, creator_name)
+    DText.quote(body, creator.name)
   end
 
   def forum_topic_page
@@ -246,8 +212,6 @@ class ForumPost < ApplicationRecord
     if is_deleted? && is_original_post?
       topic.update_attribute(:is_deleted, true)
     end
-
-    true
   end
 
   def build_response

@@ -7,35 +7,10 @@ class ArtistVersion < ApplicationRecord
   delegate :visible?, :to => :artist
 
   module SearchMethods
-    def for_user(user_id)
-      where("updater_id = ?", user_id)
-    end
-
-    def updater_name(name)
-      where("updater_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
-    end
-
     def search(params)
       q = super
 
-      if params[:name].present?
-        q = q.where("name like ? escape E'\\\\'", params[:name].to_escaped_for_sql_like)
-      end
-
-      if params[:updater_name].present?
-        q = q.updater_name(params[:updater_name])
-      end
-
-      if params[:updater_id].present?
-        q = q.where(updater_id: params[:updater_id].split(",").map(&:to_i))
-      end
-
-      if params[:artist_id].present?
-        q = q.where(artist_id: params[:artist_id].split(",").map(&:to_i))
-      end
-
-      q = q.attribute_matches(:is_active, params[:is_active])
-      q = q.attribute_matches(:is_banned, params[:is_banned])
+      q = q.search_attributes(params, :updater, :is_active, :is_banned, :artist_id, :name, :group_name)
 
       params[:order] ||= params.delete(:sort)
       if params[:order] == "name"

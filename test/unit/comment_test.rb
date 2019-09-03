@@ -143,7 +143,7 @@ class CommentTest < ActiveSupport::TestCase
         Danbooru.config.stubs(:comment_threshold).returns(1)
         p = FactoryBot.create(:post)
         c1 = FactoryBot.create(:comment, :post => p)
-        Timecop.travel(2.seconds.from_now) do
+        travel(2.seconds) do
           c2 = FactoryBot.create(:comment, :post => p)
         end
         p.reload
@@ -158,7 +158,7 @@ class CommentTest < ActiveSupport::TestCase
         post.reload
         assert_equal(c1.created_at.to_s, post.last_commented_at.to_s)
 
-        Timecop.travel(2.seconds.from_now) do
+        travel(2.seconds) do
           c2 = FactoryBot.create(:comment, :post => post)
           post.reload
           assert_equal(c2.created_at.to_s, post.last_commented_at.to_s)
@@ -242,33 +242,13 @@ class CommentTest < ActiveSupport::TestCase
 
         should "create a mod action" do
           assert_difference("ModAction.count") do
-            @comment.update_attributes(:body => "nope")
+            @comment.update(body: "nope")
           end
         end
 
         should "credit the moderator as the updater" do
           @comment.update(body: "test")
           assert_equal(@mod.id, @comment.updater_id)
-        end
-      end
-
-      context "that is below the score threshold" do
-        should "be hidden if not stickied" do
-          user = FactoryBot.create(:user, :comment_threshold => 0)
-          post = FactoryBot.create(:post)
-          comment = FactoryBot.create(:comment, :post => post, :score => -5)
-
-          assert_equal([comment], post.comments.hidden(user))
-          assert_equal([], post.comments.visible(user))
-        end
-
-        should "be visible if stickied" do
-          user = FactoryBot.create(:user, :comment_threshold => 0)
-          post = FactoryBot.create(:post)
-          comment = FactoryBot.create(:comment, :post => post, :score => -5, :is_sticky => true)
-
-          assert_equal([], post.comments.hidden(user))
-          assert_equal([comment], post.comments.visible(user))
         end
       end
 
@@ -288,7 +268,7 @@ class CommentTest < ActiveSupport::TestCase
 
           assert_equal(<<-EOS.strip_heredoc, comment.quoted_response)
             [quote]
-            #{comment.creator_name} said:
+            #{comment.creator.name} said:
 
             paragraph one
 

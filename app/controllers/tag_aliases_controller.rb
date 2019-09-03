@@ -22,7 +22,7 @@ class TagAliasesController < ApplicationController
   end
 
   def index
-    @tag_aliases = TagAlias.search(search_params).paginate(params[:page], :limit => params[:limit])
+    @tag_aliases = TagAlias.includes(:antecedent_tag, :consequent_tag, :approver).search(search_params).paginate(params[:page], :limit => params[:limit])
     respond_with(@tag_aliases) do |format|
       format.xml do
         render :xml => @tag_aliases.to_xml(:root => "tag-aliases")
@@ -32,12 +32,10 @@ class TagAliasesController < ApplicationController
 
   def destroy
     @tag_alias = TagAlias.find(params[:id])
-    if @tag_alias.deletable_by?(CurrentUser.user)
-      @tag_alias.reject!
-      respond_with(@tag_alias, :location => tag_aliases_path)
-    else
-      access_denied
-    end
+    raise User::PrivilegeError unless @tag_alias.deletable_by?(CurrentUser.user)
+
+    @tag_alias.reject!
+    respond_with(@tag_alias, location: tag_aliases_path, notice: "Tag alias was deleted")
   end
 
   def approve

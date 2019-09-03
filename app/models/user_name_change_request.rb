@@ -1,6 +1,6 @@
 class UserNameChangeRequest < ApplicationRecord
   after_initialize :initialize_attributes, if: :new_record?
-  validates_presence_of :user_id, :original_name, :desired_name
+  validates_presence_of :original_name, :desired_name
   validates_inclusion_of :status, :in => %w(pending approved rejected)
   belongs_to :user
   belongs_to :approver, :class_name => "User", optional: true
@@ -43,11 +43,11 @@ class UserNameChangeRequest < ApplicationRecord
   end
   
   def feedback
-    UserFeedback.for_user(user_id).order("id desc")
+    user.feedback.order("id desc")
   end
   
   def approve!
-    update_attributes(:status => "approved", :approver_id => CurrentUser.user.id)
+    update(status: "approved", approver_id: CurrentUser.user.id)
     user.update_attribute(:name, desired_name)
     body = "Your name change request has been approved. Be sure to log in with your new user name."
     Dmail.create_automated(:title => "Name change request approved", :body => body, :to_id => user_id)
@@ -56,7 +56,7 @@ class UserNameChangeRequest < ApplicationRecord
   end
   
   def reject!(reason)
-    update_attributes(:status => "rejected", :rejection_reason => reason)
+    update(status: "rejected", rejection_reason: reason)
     body = "Your name change request has been rejected for the following reason: #{rejection_reason}"
     Dmail.create_automated(:title => "Name change request rejected", :body => body, :to_id => user_id)
   end
@@ -64,9 +64,6 @@ class UserNameChangeRequest < ApplicationRecord
   def not_limited
     if UserNameChangeRequest.where("user_id = ? and created_at >= ?", CurrentUser.user.id, 1.week.ago).exists?
       errors.add(:base, "You can only submit one name change request per week")
-      return false
-    else
-      return true
     end
   end
 

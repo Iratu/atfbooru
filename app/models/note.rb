@@ -5,8 +5,7 @@ class Note < ApplicationRecord
   belongs_to :post
   belongs_to_creator
   has_many :versions, -> {order("note_versions.id ASC")}, :class_name => "NoteVersion", :dependent => :destroy
-  validates_presence_of :creator_id, :x, :y, :width, :height, :body
-  validate :post_must_exist
+  validates_presence_of :x, :y, :width, :height, :body
   validate :note_within_image
   after_save :update_post
   after_save :create_version
@@ -17,39 +16,11 @@ class Note < ApplicationRecord
       where("is_active = TRUE")
     end
 
-    def post_tags_match(query)
-      where(post_id: PostQueryBuilder.new(query).build.reorder(""))
-    end
-
-    def for_creator(user_id)
-      where("creator_id = ?", user_id)
-    end
-
-    def creator_name(name)
-      where("creator_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
-    end
-
     def search(params)
       q = super
 
-      q = q.attribute_matches(:body, params[:body_matches], index_column: :body_index)
-      q = q.attribute_matches(:is_active, params[:is_active])
-
-      if params[:post_id].present?
-        q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
-      end
-
-      if params[:post_tags_match].present?
-        q = q.post_tags_match(params[:post_tags_match])
-      end
-
-      if params[:creator_name].present?
-        q = q.creator_name(params[:creator_name].tr(" ", "_"))
-      end
-
-      if params[:creator_id].present?
-        q = q.where(creator_id: params[:creator_id].split(",").map(&:to_i))
-      end
+      q = q.search_attributes(params, :creator, :post, :is_active, :x, :y, :width, :height, :body, :version)
+      q = q.text_attribute_matches(:body, params[:body_matches], index_column: :body_index)
 
       q.apply_default_order(params)
     end
@@ -65,20 +36,16 @@ class Note < ApplicationRecord
     end
   end
 
+  def creator_name
+    creator.name
+  end
+
   extend SearchMethods
   include ApiMethods
-
-  def post_must_exist
-    if !Post.exists?(post_id)
-      errors.add :post, "must exist"
-      return false
-    end
-  end
 
   def post_must_not_be_note_locked
     if is_locked?
       errors.add :post, "is note locked"
-      return false
     end
   end
 
@@ -86,7 +53,6 @@ class Note < ApplicationRecord
     return false unless post.present?
     if x < 0 || y < 0 || (x > post.image_width) || (y > post.image_height) || width < 0 || height < 0 || (x + width > post.image_width) || (y + height > post.image_height)
       self.errors.add(:note, "must be inside the image")
-      return false
     end
   end
 
@@ -145,14 +111,7 @@ class Note < ApplicationRecord
 
   def merge_version
     prev = versions.last
-    prev.update_attributes(
-      :x => x,
-      :y => y,
-      :width => width,
-      :height => height,
-      :is_active => is_active,
-      :body => body
-    )
+    prev.update(x: x, y: y, width: width, height: height, is_active: is_active, body: body)
   end
 
   def merge_version?(updater_id)

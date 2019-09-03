@@ -1,5 +1,5 @@
 class SavedSearch < ApplicationRecord
-  REDIS_EXPIRY = 3600
+  REDIS_EXPIRY = 1.hour
   QUERY_LIMIT = 1000
 
   def self.enabled?
@@ -7,6 +7,8 @@ class SavedSearch < ApplicationRecord
   end
 
   concerning :Redis do
+    extend Memoist
+
     class_methods do
       extend Memoist
 
@@ -19,25 +21,31 @@ class SavedSearch < ApplicationRecord
         label = normalize_label(label) if label
         queries = queries_for(user_id, label: label)
         post_ids = Set.new
-        update_count = 0
         queries.each do |query|
           redis_key = "search:#{query}"
           if redis.exists(redis_key)
             sub_ids = redis.smembers(redis_key).map(&:to_i)
             post_ids.merge(sub_ids)
-            redis.expire(redis_key, REDIS_EXPIRY)
-          elsif CurrentUser.is_gold? && update_count < 5
-            SavedSearch.populate(query)
-            sub_ids = redis.smembers(redis_key).map(&:to_i)
-            post_ids.merge(sub_ids)
-            update_count += 1
+            redis.expire(redis_key, REDIS_EXPIRY.to_i)
           else
-            SavedSearch.delay(queue: "default").populate(query)
+            PopulateSavedSearchJob.perform_later(query)
           end
         end
         post_ids.to_a.sort.last(QUERY_LIMIT)
       end
     end
+
+    def refreshed_at
+      ttl = SavedSearch.redis.ttl("search:#{query}")
+      return nil if ttl < 0
+      (REDIS_EXPIRY.to_i - ttl).seconds.ago
+    end
+    memoize :refreshed_at
+
+    def cached_size
+      SavedSearch.redis.scard("search:#{query}")
+    end
+    memoize :cached_size
   end
 
   concerning :Labels do
@@ -93,16 +101,31 @@ class SavedSearch < ApplicationRecord
 
   concerning :Search do
     class_methods do
-      def populate(query)
+      def search(params)
+        q = super
+        q = q.search_attributes(params, :query)
+
+        if params[:label]
+          q = q.labeled(params[:label])
+        end
+
+        q.apply_default_order(params)
+      end
+
+      def populate(query, timeout: 10_000)
         CurrentUser.as_system do
           redis_key = "search:#{query}"
           return if redis.exists(redis_key)
-          post_ids = Post.tag_match(query, true).limit(QUERY_LIMIT).pluck(:id)
-          redis.sadd(redis_key, post_ids)
-          redis.expire(redis_key, REDIS_EXPIRY)
+
+          post_ids = Post.with_timeout(timeout, [], query: query) do
+            Post.tag_match(query).limit(QUERY_LIMIT).pluck(:id)
+          end
+
+          if post_ids.present?
+            redis.sadd(redis_key, post_ids)
+            redis.expire(redis_key, REDIS_EXPIRY.to_i)
+          end
         end
-      rescue Exception
-        # swallow
       end
     end
   end

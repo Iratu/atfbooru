@@ -21,7 +21,6 @@ class Post < ApplicationRecord
   before_validation :remove_parent_loops
   validates_uniqueness_of :md5, :on => :create, message: ->(obj, data) { "duplicate: #{Post.find_by_md5(obj.md5).id}"}
   validates_inclusion_of :rating, in: %w(s q e), message: "rating must be s, q, or e"
-  validate :tag_names_are_valid
   validate :added_tags_are_valid
   validate :removed_tags_are_valid
   validate :has_artist_tag
@@ -39,7 +38,6 @@ class Post < ApplicationRecord
   after_commit :delete_files, :on => :destroy
   after_commit :remove_iqdb_async, :on => :destroy
   after_commit :update_iqdb_async, :on => :create
-  after_commit :notify_pubsub
 
   belongs_to :updater, :class_name => "User", optional: true # this is handled in versions
   belongs_to :approver, class_name: "User", optional: true
@@ -52,7 +50,7 @@ class Post < ApplicationRecord
   has_many :appeals, :class_name => "PostAppeal", :dependent => :destroy
   has_many :votes, :class_name => "PostVote", :dependent => :destroy
   has_many :notes, :dependent => :destroy
-  has_many :comments, -> {includes(:creator, :updater).order("comments.id")}, :dependent => :destroy
+  has_many :comments, -> {order("comments.id")}, :dependent => :destroy
   has_many :children, -> {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
   has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
@@ -89,7 +87,7 @@ class Post < ApplicationRecord
     end
 
     def queue_delete_files(grace_period)
-      Post.delay(queue: "default", run_at: Time.now + grace_period).delete_files(id, md5, file_ext)
+      DeletePostFilesJob.set(wait: grace_period).perform_later(id, md5, file_ext)
     end
 
     def delete_files
@@ -363,20 +361,6 @@ class Post < ApplicationRecord
         base_36_id = base_10_id.to_s(36)
         "https://twitpic.com/#{base_36_id}"
 
-      # http://orig12.deviantart.net/9b69/f/2017/023/7/c/illustration___tokyo_encount_oei__by_melisaongmiqin-dawi58s.png
-      # http://pre15.deviantart.net/81de/th/pre/f/2015/063/5/f/inha_by_inhaestudios-d8kfzm5.jpg
-      # http://th00.deviantart.net/fs71/PRE/f/2014/065/3/b/goruto_by_xyelkiltrox-d797tit.png
-      # http://th04.deviantart.net/fs70/300W/f/2009/364/4/d/Alphes_Mimic___Rika_by_Juriesute.png
-      # http://fc02.deviantart.net/fs48/f/2009/186/2/c/Animation_by_epe_tohri.swf
-      # http://fc08.deviantart.net/files/f/2007/120/c/9/Cool_Like_Me_by_47ness.jpg
-      # http://fc08.deviantart.net/images3/i/2004/088/8/f/Blackrose_for_MuzicFreq.jpg
-      # http://img04.deviantart.net/720b/i/2003/37/9/6/princess_peach.jpg
-      when %r{\Ahttps?://(?:(?:fc|th|pre|orig|img|prnt)\d{2}|origin-orig)\.deviantart\.net/.+/(?<title>[a-z0-9_]+)_by_(?<artist>[a-z0-9_]+)-d(?<id>[a-z0-9]+)\.}i
-        artist = $~[:artist].dasherize
-        title = $~[:title].titleize.strip.squeeze(" ").tr(" ", "-")
-        id = $~[:id].to_i(36)
-        "https://www.deviantart.com/#{artist}/art/#{title}-#{id}"
-
       # http://prnt00.deviantart.net/9b74/b/2016/101/4/468a9d89f52a835d4f6f1c8caca0dfb2-pnjfbh.jpg
       # http://fc00.deviantart.net/fs71/f/2013/234/d/8/d84e05f26f0695b1153e9dab3a962f16-d6j8jl9.jpg
       # http://th04.deviantart.net/fs71/PRE/f/2013/337/3/5/35081351f62b432f84eaeddeb4693caf-d6wlrqs.jpg
@@ -384,6 +368,9 @@ class Post < ApplicationRecord
       when %r{\Ahttps?://(?:fc|th|pre|orig|img|prnt)\d{2}\.deviantart\.net/.+/[a-f0-9]{32}-d(?<id>[a-z0-9]+)\.}i
         id = $~[:id].to_i(36)
         "https://deviantart.com/deviation/#{id}"
+
+      when Sources::Strategies::DeviantArt::ASSET
+        Sources::Strategies::DeviantArt.new(source).page_url_from_image_url || source
 
       when %r{\Ahttp://www\.karabako\.net/images(?:ub)?/karabako_(\d+)(?:_\d+)?\.}i
         "http://www.karabako.net/post/view/#{$1}"
@@ -459,12 +446,6 @@ class Post < ApplicationRecord
         
       when %r{\Ahttp://(?:(?:(?:img\d?|cdn)\.)?rule34\.xxx|img\.booru\.org/(?:rule34|r34))(?:/(?:img/rule34|r34))?/{1,2}images/\d+/(?:[a-f0-9]{32}|[a-f0-9]{40})\.}i
         "https://rule34.xxx/index.php?page=post&s=list&md5=#{md5}"
-        
-      when %r{\Ahttps?://(?:s3\.amazonaws\.com/imgly_production|img\.ly/system/uploads)/((?:\d{3}/){3}|\d+/)}i
-        imgly_id = $1
-        imgly_id = imgly_id.gsub(/[^0-9]/, '')
-        base_62 = imgly_id.to_i.encode62
-        "https://img.ly/#{base_62}"
         
       when %r{(\Ahttp://.+)/diarypro/d(?:ata/upfile/|iary\.cgi\?mode=image&upfile=)(\d+)}i
         base_url = $1
@@ -680,23 +661,16 @@ class Post < ApplicationRecord
 	  normalized_tags = check_tagme(normalized_tags)
     end
 
-    def check_tagme(tags)
-	  if tags.count() > 10 && tags.include?("tagme")
-		tags -= %w(tagme)
-	  end
-	  if tags.count() < 10 && !tags.include?("tagme")
-		tags << "tagme"
-	  end
-	  return tags
-	end
-    
-    
-    def remove_invalid_tags(tags)
-      invalid_tags = Tag.invalid_cosplay_tags(tags)
-      if invalid_tags.present?
-        self.warnings[:base] << "The root tag must be a character tag: #{invalid_tags.map {|tag| "[b]#{tag}[/b]" }.join(", ")}"
+    def remove_invalid_tags(tag_names)
+      invalid_tags = tag_names.map { |name| Tag.new(name: name) }.select { |tag| tag.invalid?(:name) }
+
+      invalid_tags.each do |tag|
+        tag.errors.messages.each do |attribute, messages|
+          warnings[:base] << "Couldn't add tag: #{messages.join(';')}"
+        end
       end
-      tags - invalid_tags
+
+      tag_names - invalid_tags.map(&:name)
     end
 
     def remove_negated_tags(tags)
@@ -1028,7 +1002,9 @@ class Post < ApplicationRecord
     end
 
     def remove_from_fav_groups
-      FavoriteGroup.delay.purge_post(id)
+      FavoriteGroup.for_post(id).find_each do |favgroup|
+        favgroup.remove!(id)
+      end
     end
   end
 
@@ -1041,7 +1017,7 @@ class Post < ApplicationRecord
     end
 
     def uploader_name
-      User.id_to_name(uploader_id)
+      uploader.name
     end
   end
 
@@ -1142,7 +1118,7 @@ class Post < ApplicationRecord
       tags = tags.to_s
       tags += " rating:s" if CurrentUser.safe_mode?
       tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !Tag.has_metatag?(tags, "status", "-status")
-      tags = Tag.normalize_query(tags)
+      tags = Tag.normalize_query(tags, normalize_aliases: false)
 
       # optimize some cases. these are just estimates but at these
       # quantities being off by a few hundred doesn't matter much
@@ -1208,7 +1184,7 @@ class Post < ApplicationRecord
 
     def get_count_from_cache(tags)
       if Tag.is_simple_tag?(tags)
-        count = select_value_sql("SELECT post_count FROM tags WHERE name = ?", tags.to_s)
+        count = Tag.find_by(name: tags).try(:post_count)
       else
         # this will only have a value for multi-tag searches or single metatag searches
         count = Cache.get(count_cache_key(tags))
@@ -1448,12 +1424,6 @@ class Post < ApplicationRecord
       revert_to(target)
       save!
     end
-
-    def notify_pubsub
-      return unless Danbooru.config.google_api_project
-
-      # PostUpdate.insert(id)
-    end
   end
 
   module NoteMethods
@@ -1538,7 +1508,7 @@ class Post < ApplicationRecord
         "created_at" => created_at.to_formatted_s(:db),
         "has_notes" => has_notes?,
         "rating" => rating,
-        "author" => uploader_name,
+        "author" => uploader.name,
         "creator_id" => uploader_id,
         "width" => image_width,
         "source" => source,
@@ -1715,21 +1685,8 @@ class Post < ApplicationRecord
       where("posts.tag_index @@ to_tsquery('danbooru', E?)", tag.to_escaped_for_tsquery)
     end
 
-    def tag_match(query, read_only = false)
-      if query =~ /status:deleted.status:deleted/
-        # temp fix for degenerate crawlers
-        raise ActiveRecord::RecordNotFound
-      end
-
-      if read_only
-        begin
-          PostQueryBuilder.new(query, read_only: true).build
-        rescue PG::ConnectionBad
-          PostQueryBuilder.new(query).build
-        end
-      else
-        PostQueryBuilder.new(query).build
-      end
+    def tag_match(query, read_only: false)
+      PostQueryBuilder.new(query, read_only: read_only).build
     end
   end
   
@@ -1787,22 +1744,6 @@ class Post < ApplicationRecord
         # Don't forbid changes if the rating lock was just now set in the same update.
         if !is_rating_locked_changed?
           errors.add(:rating, "is locked and cannot be changed. Unlock the post first.")
-        end
-      end
-    end
-
-    def tag_names_are_valid
-      # only validate new tags; allow invalid names for tags that already exist.
-      added_tags = tag_array - tag_array_was
-      new_tags = added_tags - Tag.where(name: added_tags).pluck(:name)
-
-      new_tags.each do |name|
-        tag = Tag.new
-        tag.name = name
-        tag.valid?
-
-        tag.errors.messages.each do |attribute, messages|
-          errors[:tag_string] << "tag #{attribute} #{messages.join(';')}"
         end
       end
     end
@@ -1944,17 +1885,5 @@ class Post < ApplicationRecord
     end
 
     save
-  end
-
-  def update_column(name, value)
-    ret = super(name, value)
-    notify_pubsub
-    ret
-  end
-
-  def update_columns(attributes)
-    ret = super(attributes)
-    notify_pubsub
-    ret
   end
 end

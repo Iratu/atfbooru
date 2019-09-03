@@ -1,5 +1,4 @@
 class Tag < ApplicationRecord
-  COSINE_SIMILARITY_RELATED_TAG_THRESHOLD = 300
   COUNT_METATAGS = %w[
     comment_count deleted_comment_count active_comment_count
     note_count deleted_note_count active_note_count
@@ -52,7 +51,8 @@ class Tag < ApplicationRecord
   has_many :antecedent_implications, -> {active}, :class_name => "TagImplication", :foreign_key => "antecedent_name", :primary_key => "name"
   has_many :consequent_implications, -> {active}, :class_name => "TagImplication", :foreign_key => "consequent_name", :primary_key => "name"
 
-  validates :name, uniqueness: true, tag_name: true, on: :create
+  validates :name, tag_name: true, uniqueness: true, on: :create
+  validates :name, tag_name: true, on: :name
   validates_inclusion_of :category, in: TagCategory.category_ids
 
   before_save :update_category_cache, if: :category_changed?
@@ -98,11 +98,6 @@ class Tag < ApplicationRecord
       end
 
       def increment_post_counts(tag_names)
-        if Rails.env.production? && tag_names.include?("breasts")
-          trace = Kernel.caller.grep(/danbooru/).reject {|x| x =~ /bundle/}.map {|x| x.sub(/\/var\/www\/danbooru2\/releases\/\d+\//, "")}.join("\n").slice(0, 4095)
-          ::NewRelic::Agent.record_custom_event("increment_post_counts", user_id: CurrentUser.id, pid: Process.pid, stacktrace: trace, hash: Cache.hash(tag_names))
-        end
-
         Tag.where(:name => tag_names).update_all("post_count = post_count + 1")
       end
 
@@ -277,10 +272,10 @@ class Tag < ApplicationRecord
       query.to_s.gsub(/\u3000/, " ").strip
     end
 
-    def normalize_query(query, sort: true)
+    def normalize_query(query, normalize_aliases: true, sort: true)
       tags = Tag.scan_query(query.to_s)
       tags = tags.map { |t| Tag.normalize_name(t) }
-      tags = TagAlias.to_aliased(tags)
+      tags = TagAlias.to_aliased(tags) if normalize_aliases
       tags = tags.sort if sort
       tags = tags.uniq
       tags.join(" ")
@@ -755,12 +750,10 @@ class Tag < ApplicationRecord
             q[:filesize] = parse_helper_fudged(g2, :filesize)
 
           when "source"
-            src = g2.gsub(/\A"(.*)"\Z/, '\1')
-            q[:source] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
+            q[:source] = g2.gsub(/\A"(.*)"\Z/, '\1')
 
           when "-source"
-            src = g2.gsub(/\A"(.*)"\Z/, '\1')
-            q[:source_neg] = (src.to_escaped_for_sql_like + "%").gsub(/%+/, '%')
+            q[:source_neg] = g2.gsub(/\A"(.*)"\Z/, '\1')
 
           when "date"
             q[:date] = parse_helper(g2, :date)
@@ -858,57 +851,6 @@ class Tag < ApplicationRecord
     end
   end
 
-  module RelationMethods
-    def update_related
-      return unless should_update_related?
-
-      CurrentUser.scoped(User.first, "127.0.0.1") do
-        self.related_tags = RelatedTagCalculator.calculate_from_sample_to_array(name).join(" ")
-      end
-      self.related_tags_updated_at = Time.now
-      fix_post_count if post_count > 20 && rand(post_count) <= 1
-      save
-    rescue ActiveRecord::StatementInvalid
-    end
-
-    def update_related_if_outdated
-      key = Cache.hash(name)
-
-      if Cache.get("urt:#{key}").nil? && should_update_related?
-        if post_count < COSINE_SIMILARITY_RELATED_TAG_THRESHOLD
-          delay(:queue => "default").update_related
-        else
-          sqs = SqsService.new(Danbooru.config.aws_sqs_reltagcalc_url)
-          sqs.send_message("calculate #{name}")
-          self.related_tags_updated_at = Time.now
-          save
-        end
-
-        Cache.put("urt:#{key}", true, 600) # mutex to prevent redundant updates
-      end
-    end
-
-    def related_cache_expiry
-      base = Math.sqrt([post_count, 0].max)
-      if base > 24 * 30
-        24 * 30
-      elsif base < 24
-        24
-      else
-        base
-      end
-    end
-
-    def should_update_related?
-      related_tags.blank? || related_tags_updated_at.blank? || related_tags_updated_at < related_cache_expiry.hours.ago
-    end
-
-    def related_tag_array
-      update_related_if_outdated
-      related_tags.to_s.split(/ /).in_groups_of(2)
-    end
-  end
-
   module SearchMethods
     def empty
       where("tags.post_count <= 0")
@@ -934,12 +876,10 @@ class Tag < ApplicationRecord
       where("tags.name LIKE ? ESCAPE E'\\\\'", normalize_name(name).to_escaped_for_sql_like)
     end
 
-    def named(name)
-      where("tags.name = ?", TagAlias.to_aliased([name]).join(""))
-    end
-
     def search(params)
       q = super
+
+      q = q.search_attributes(params, :is_locked, :category, :post_count)
 
       if params[:fuzzy_name_matches].present?
         q = q.fuzzy_name_matches(params[:fuzzy_name_matches])
@@ -951,10 +891,6 @@ class Tag < ApplicationRecord
 
       if params[:name].present?
         q = q.where("tags.name": normalize_name(params[:name]).split(","))
-      end
-
-      if params[:category].present?
-        q = q.where("category = ?", params[:category])
       end
 
       if params[:hide_empty].blank? || params[:hide_empty].to_s.truthy?
@@ -972,8 +908,6 @@ class Tag < ApplicationRecord
       elsif params[:has_artist].to_s.falsy?
         q = q.joins("LEFT JOIN artists ON tags.name = artists.name").where("artists.name IS NULL OR artists.is_active = false")
       end
-
-      q = q.attribute_matches(:is_locked, params[:is_locked])
 
       params[:order] ||= params.delete(:sort)
       case params[:order]
@@ -1024,14 +958,6 @@ class Tag < ApplicationRecord
     cosplay_tags.grep(/\A(.+)_\(cosplay\)\Z/) { "#{TagAlias.to_aliased([$1]).first}_(cosplay)" } + other_tags
   end
 
-  def self.invalid_cosplay_tags(tags)
-    tags.grep(/\A(.+)_\(cosplay\)\Z/) {|match| [match,TagAlias.to_aliased([$1]).first] }.
-      select do |name|
-        tag = Tag.find_by_name(name[1])
-        !tag.nil? && tag.category != Tag.categories.character
-      end.map {|tag| tag[0]}
-  end
-
   def editable_by?(user)
     return true if user.is_admin?
     return true if !is_locked? && user.is_builder? && post_count < 1_000
@@ -1045,6 +971,5 @@ class Tag < ApplicationRecord
   extend StatisticsMethods
   extend NameMethods
   extend ParseMethods
-  include RelationMethods
   extend SearchMethods
 end

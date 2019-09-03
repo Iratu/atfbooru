@@ -16,7 +16,7 @@ class TagTest < ActiveSupport::TestCase
     setup do
       Tag.stubs(:trending_count_limit).returns(0)
 
-      Timecop.travel(1.week.ago) do
+      travel_to(1.week.ago) do
         FactoryBot.create(:post, :tag_string => "aaa")
         FactoryBot.create(:post, :tag_string => "bbb")
       end
@@ -259,6 +259,17 @@ class TagTest < ActiveSupport::TestCase
       metatags = Tag::METATAGS + TagCategory.mapping.keys
       metatags.each do |metatag|
         should_not allow_value("#{metatag}:foo").for(:name).on(:create)
+      end
+
+      context "a cosplay tag" do
+        setup do
+          create(:tag, name: "bkub", category: Tag.categories.artist)
+          create(:tag, name: "fumimi", category: Tag.categories.character)
+        end
+
+        should allow_value("fumimi_(cosplay)").for(:name)
+        should allow_value("new_tag_(cosplay)").for(:name)
+        should_not allow_value("bkub_(cosplay)").for(:name)
       end
     end
   end

@@ -17,7 +17,7 @@ class PoolsController < ApplicationController
   end
 
   def index
-    @pools = Pool.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @pools = Pool.includes(:creator).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     respond_with(@pools) do |format|
       format.xml do
         render :xml => @pools.to_xml(:root => "pools")
@@ -30,16 +30,18 @@ class PoolsController < ApplicationController
   end
 
   def gallery
-    params[:limit] ||= CurrentUser.user.per_page
+    limit = params[:limit].presence || CurrentUser.user.per_page
     search = search_params.presence || ActionController::Parameters.new(category: "series")
 
-    @pools = Pool.search(search).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @pools = Pool.search(search).paginate(params[:page], limit: limit, search_count: params[:search])
     @post_set = PostSets::PoolGallery.new(@pools)
   end
 
   def show
+    limit = params[:limit].presence || CurrentUser.user.per_page
+
     @pool = Pool.find(params[:id])
-    @post_set = PostSets::Pool.new(@pool, params[:page])
+    @posts = @pool.posts.paginate(params[:page], limit: limit, count: @pool.post_count)
     respond_with(@pool)
   end
 

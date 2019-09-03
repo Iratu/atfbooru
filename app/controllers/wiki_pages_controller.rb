@@ -15,7 +15,7 @@ class WikiPagesController < ApplicationController
   end
 
   def index
-    @wiki_pages = WikiPage.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @wiki_pages = WikiPage.includes(:creator).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     respond_with(@wiki_pages) do |format|
       format.html do
         if params[:page].nil? || params[:page].to_i == 1
@@ -40,17 +40,19 @@ class WikiPagesController < ApplicationController
   end
 
   def show
-    if params[:id] =~ /\A\d+\Z/
+    if params[:id] =~ /\A\d+\z/
       @wiki_page = WikiPage.find(params[:id])
     else
-      @wiki_page = WikiPage.find_by_title(params[:id])
-      if @wiki_page.nil? && request.format.symbol == :html
-        redirect_to show_or_new_wiki_pages_path(:title => params[:id])
-        return
-      end
+      @wiki_page = WikiPage.titled(params[:id]).first
     end
-    
-    respond_with(@wiki_page)
+
+    if @wiki_page.present?
+      respond_with(@wiki_page)
+    elsif request.format.html?
+      redirect_to show_or_new_wiki_pages_path(title: params[:id])
+    else
+      raise ActiveRecord::RecordNotFound
+    end
   end
 
   def create
@@ -66,7 +68,7 @@ class WikiPagesController < ApplicationController
 
   def destroy
     @wiki_page = WikiPage.find(params[:id])
-    @wiki_page.update_attributes(:is_deleted => true)
+    @wiki_page.update(is_deleted: true)
     respond_with(@wiki_page)
   end
 
@@ -80,11 +82,13 @@ class WikiPagesController < ApplicationController
 
   def show_or_new
     @wiki_page = WikiPage.find_by_title(params[:title])
-    if @wiki_page
+
+    if params[:title].blank?
+      redirect_to new_wiki_page_path(wiki_page_params(:create))
+    elsif @wiki_page.present?
       redirect_to wiki_page_path(@wiki_page)
     else
       @wiki_page = WikiPage.new(:title => params[:title])
-      @artist = Artist.named(@wiki_page.title).active.first
       respond_with(@wiki_page)
     end
   end

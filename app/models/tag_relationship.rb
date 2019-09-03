@@ -27,8 +27,7 @@ class TagRelationship < ApplicationRecord
   before_validation :initialize_creator, :on => :create
   before_validation :normalize_names
   validates_format_of :status, :with => /\A(active|deleted|pending|processing|queued|retired|error: .*)\Z/
-  validates_presence_of :creator_id, :antecedent_name, :consequent_name
-  validates :creator, presence: { message: "must exist" }, if: -> { creator_id.present? }
+  validates_presence_of :antecedent_name, :consequent_name
   validates :approver, presence: { message: "must exist" }, if: -> { approver_id.present? }
   validates :forum_topic, presence: { message: "must exist" }, if: -> { forum_topic_id.present? }
   validate :antecedent_and_consequent_are_different
@@ -110,6 +109,7 @@ class TagRelationship < ApplicationRecord
 
     def search(params)
       q = super
+      q = q.search_attributes(params, :creator, :approver, :forum_topic_id, :forum_post_id)
 
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])

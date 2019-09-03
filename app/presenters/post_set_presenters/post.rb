@@ -1,5 +1,7 @@
 module PostSetPresenters
   class Post < Base
+    MAX_TAGS = 25
+
     attr_accessor :post_set
     delegate :posts, :to => :post_set
 
@@ -8,7 +10,7 @@ module PostSetPresenters
     end
 
     def tag_set_presenter
-      @tag_set_presenter ||= TagSetPresenter.new(related_tags)
+      @tag_set_presenter ||= TagSetPresenter.new(related_tags.take(MAX_TAGS))
     end
 
     def post_previews_html(template, options = {})
@@ -19,52 +21,38 @@ module PostSetPresenters
       if post_set.is_pattern_search?
         pattern_tags
       elsif post_set.is_saved_search?
-        ["search:all"] + SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
+        saved_search_tags
       elsif post_set.is_empty_tag? || post_set.tag_string == "order:rank"
         popular_tags
       elsif post_set.is_single_tag?
-        related_tags_for_single(post_set.tag_string)
-      elsif post_set.unordered_tag_array.size == 1
-        related_tags_for_single(post_set.unordered_tag_array.first)
-      elsif Tag.has_metatag?(post_set.tag_array, *Tag::SUBQUERY_METATAGS)
-        calculate_related_tags_from_post_set
+        similar_tags
       else
-        related_tags_for_group
+        frequent_tags
       end
     end
 
     def popular_tags
       if PopularSearchService.enabled?
-        PopularSearchService.new(Date.today).tags.slice(0, 25)
+        PopularSearchService.new(Date.today).tags
       else
         Tag.trending
       end
     end
 
+    def similar_tags
+      RelatedTagCalculator.cached_similar_tags_for_search(post_set.tag_string, MAX_TAGS)
+    end
+
+    def frequent_tags
+      RelatedTagCalculator.frequent_tags_for_posts(post_set.posts).take(MAX_TAGS)
+    end
+
     def pattern_tags
-      Tag.name_matches(post_set.tag_string).select("name").limit(Danbooru.config.tag_query_limit).order("post_count DESC").map(&:name)
+      Tag.name_matches(post_set.tag_string).order(post_count: :desc).limit(MAX_TAGS).pluck(:name)
     end
 
-    def related_tags_for_group
-      RelatedTagCalculator.calculate_from_sample_to_array(post_set.tag_string).map(&:first)
-    end
-
-    def related_tags_for_single(tag_string)
-      tag = Tag.find_by_name(tag_string.downcase)
-
-      if tag
-        tag.related_tag_array.map(&:first)
-      else
-        calculate_related_tags_from_post_set
-      end
-    end
-
-    def calculate_related_tags_from_post_set
-      RelatedTagCalculator.calculate_from_posts_to_array(post_set.posts).map(&:first)
-    end
-
-    def saved_search_labels
-      SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
+    def saved_search_tags
+      ["search:all"] + SavedSearch.labels_for(CurrentUser.user.id).map {|x| "search:#{x}"}
     end
 
     def tag_list_html(**options)

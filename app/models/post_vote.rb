@@ -6,14 +6,10 @@ class PostVote < ApplicationRecord
   attr_accessor :vote
 
   after_initialize :initialize_attributes, if: :new_record?
-  validates_presence_of :post_id, :user_id, :score
+  validates_presence_of :score
   validates_inclusion_of :score, :in => [SuperVoter::MAGNITUDE, 1, -1, -SuperVoter::MAGNITUDE]
   after_create :update_post_on_create
   after_destroy :update_post_on_destroy
-
-  def self.prune!
-    where("created_at < ?", 90.days.ago).delete_all
-  end
 
   def self.positive_user_ids
     select_values_sql("select user_id from post_votes where score > 0 group by user_id having count(*) > 100")

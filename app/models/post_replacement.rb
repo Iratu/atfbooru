@@ -20,36 +20,9 @@ class PostReplacement < ApplicationRecord
 
   concerning :Search do
     class_methods do
-      def post_tags_match(query)
-        where(post_id: PostQueryBuilder.new(query).build.reorder(""))
-      end
-
       def search(params = {})
         q = super
-
-        q = q.attribute_matches(:replacement_url, params[:replacement_url])
-        q = q.attribute_matches(:original_url, params[:original_url])
-        q = q.attribute_matches(:file_ext_was, params[:file_ext_was])
-        q = q.attribute_matches(:file_ext, params[:file_ext])
-        q = q.attribute_matches(:md5_was, params[:md5_was])
-        q = q.attribute_matches(:md5, params[:md5])
-
-        if params[:creator_id].present?
-          q = q.where(creator_id: params[:creator_id].split(",").map(&:to_i))
-        end
-
-        if params[:creator_name].present?
-          q = q.where(creator_id: User.name_to_id(params[:creator_name]))
-        end
-
-        if params[:post_id].present?
-          q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
-        end
-
-        if params[:post_tags_match].present?
-          q = q.post_tags_match(params[:post_tags_match])
-        end
-
+        q = q.search_attributes(params, :post, :creator, :md5, :md5_was, :file_ext, :file_ext_was, :original_url, :replacement_url)
         q.apply_default_order(params)
       end
     end

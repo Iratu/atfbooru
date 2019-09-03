@@ -13,14 +13,20 @@ class UsersController < ApplicationController
     respond_with(@user)
   end
 
+  def settings
+    @user = CurrentUser.user
+
+    if @user.is_anonymous?
+      redirect_to new_session_path
+    else
+      respond_with(@user, template: "users/edit")
+    end
+  end
+
   def index
     if params[:name].present?
-      @user = User.find_by_name(params[:name])
-      if @user.nil?
-        raise "No user found with name: #{params[:name]}"
-      else
-        redirect_to user_path(@user)
-      end
+      @user = User.find_by_name!(params[:name])
+      redirect_to user_path(@user)
     else
       @users = User.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
       respond_with(@users) do |format|
@@ -40,8 +46,19 @@ class UsersController < ApplicationController
 
   def show
     @user = User.find(params[:id])
-    @presenter = UserPresenter.new(@user)
     respond_with(@user, methods: @user.full_attributes)
+  end
+
+  def profile
+    @user = CurrentUser.user
+
+    if @user.is_member?
+      respond_with(@user, methods: @user.full_attributes, template: "users/show")
+    elsif request.format.html?
+      redirect_to new_session_path
+    else
+      raise ActiveRecord::RecordNotFound
+    end
   end
 
   def create
@@ -75,6 +92,11 @@ class UsersController < ApplicationController
     end
   end
 
+  def custom_style
+    @css = CustomCss.parse(CurrentUser.user.custom_style)
+    expires_in 10.years
+  end
+
   private
 
   def check_privilege(user)
@@ -92,7 +114,7 @@ class UsersController < ApplicationController
       enable_sequential_post_navigation hide_deleted_posts style_usernames
       enable_auto_complete show_deleted_children
       disable_categorized_saved_searches disable_tagged_filenames
-      enable_recent_searches disable_cropped_thumbnails disable_mobile_gestures
+      disable_cropped_thumbnails disable_mobile_gestures
       enable_safe_mode disable_responsive_mode disable_post_tooltips
       enable_recommended_posts opt_out_tracking
     ]
