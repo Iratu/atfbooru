@@ -658,7 +658,6 @@ class Post < ApplicationRecord
       normalized_tags = normalized_tags.compact.uniq.sort
       normalized_tags = Tag.create_for_list(normalized_tags)
       set_tag_string(normalized_tags.join(" "))
-	  normalized_tags = check_tagme(normalized_tags)
     end
 
     def remove_invalid_tags(tag_names)
