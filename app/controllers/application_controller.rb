@@ -20,9 +20,6 @@ class ApplicationController < ActionController::Base
     rescue_from *klasses do |exception|
       render_error_page(status, exception)
     end
-  def show_moderation_notice?
-    #CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
-	false
   end
 
   def enable_cors
