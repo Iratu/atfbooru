@@ -2,7 +2,6 @@ class JanitorTrial < ApplicationRecord
   belongs_to :user
   after_create :send_dmail
   after_create :promote_user
-  validates_presence_of :user
   belongs_to_creator
   validates_inclusion_of :status, :in => %w(active inactive)
   before_validation :initialize_status
@@ -10,15 +9,7 @@ class JanitorTrial < ApplicationRecord
 
   def self.search(params)
     q = super.where(status: "active")
-
-    if params[:user_name]
-      q = q.where("user_id = (select _.id from users _ where lower(_.name) = ?)", params[:user_name].mb_chars.downcase)
-    end
-
-    if params[:user_id]
-      q = q.where("user_id = ?", params[:user_id].to_i)
-    end
-
+    q = q.search_attributes(params, :user, :creator, :original_level)
     q.apply_default_order(params)
   end
 
@@ -31,7 +22,7 @@ class JanitorTrial < ApplicationRecord
   end
 
   def user_name=(name)
-    self.user_id = User.name_to_id(name)
+    self.user = User.find_by_name(name)
   end
 
   def send_dmail

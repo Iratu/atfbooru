@@ -18,12 +18,14 @@
           <label for="remember" id="remember-label">Remember</label>
         </div>
 
+        <p class="hint">
+          New to <%= Danbooru.config.app_name %>? <%= link_to "Create a new account", new_user_path %>.
+        </p>
+
         <div class="input">
           <%= submit_tag "Submit", :data => { :disable_with => "Signing in..." } %>
         </div>
       <% end %>
-
-      <p><%= link_to "Sign in securely", new_session_url(:protocol => "https", :only_path => false) %></p>
     </section>
   </div>
 </div>

@@ -17,7 +17,7 @@
           <tr>
             <td><%= compact_time mod_action.created_at %></td>
             <td><%= link_to_user mod_action.creator %></td>
-            <td><%= format_text(mod_action.description) %></td>
+            <td><%= format_text(mod_action.filtered_description) %></td>
           </tr>
         <% end %>
       </tbody>
@@ -26,7 +26,3 @@
     <%= numbered_paginator(@mod_actions) %>
   </div>
 </div>
-
-<% content_for(:page_title) do %>
-  Mod Actions - <%= Danbooru.config.app_name %>
-<% end %>

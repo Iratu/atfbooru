@@ -37,40 +37,44 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
 
     context "#update_notice" do
       setup do
-        @mock_redis = MockRedis.new
         @forum_topic = FactoryBot.create(:forum_topic)
-        TagChangeNoticeService.stubs(:redis_client).returns(@mock_redis)
       end
 
-      should "update redis" do
+      should "update the cache" do
         @script = "create alias aaa -> 000\n" +
           "create implication bbb -> 111\n" +
           "remove alias ccc -> 222\n" +
           "remove implication ddd -> 333\n" +
           "mass update eee -> 444\n"
         FactoryBot.create(:bulk_update_request, script: @script, forum_topic: @forum_topic)
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:aaa"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:000"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:bbb"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:111"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:ccc"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:222"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:ddd"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:333"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:eee"))
-        assert_equal(@forum_topic.id.to_s, @mock_redis.get("tcn:444"))
+
+        assert_equal(@forum_topic.id, Cache.get("tcn:aaa"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:000"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:bbb"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:111"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:ccc"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:222"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:ddd"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:333"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:eee"))
+        assert_equal(@forum_topic.id, Cache.get("tcn:444"))
       end
     end
 
     context "on approval" do
       setup do
+        @post = create(:post, tag_string: "foo aaa")
         @script = %q(
           create alias foo -> bar
           create implication bar -> baz
+          mass update aaa -> bbb
         )
 
         @bur = FactoryBot.create(:bulk_update_request, :script => @script)
         @bur.approve!(@admin)
+
+        assert_enqueued_jobs(3)
+        workoff_active_jobs
 
         @ta = TagAlias.where(:antecedent_name => "foo", :consequent_name => "bar").first
         @ti = TagImplication.where(:antecedent_name => "bar", :consequent_name => "baz").first
@@ -87,6 +91,10 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
       should "create aliases/implications" do
         assert_equal("active", @ta.status)
         assert_equal("active", @ti.status)
+      end
+
+      should "process mass updates" do
+        assert_equal("bar baz bbb", @post.reload.tag_string)
       end
 
       should "set the alias/implication approvers" do

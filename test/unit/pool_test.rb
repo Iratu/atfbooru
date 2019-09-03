@@ -4,7 +4,7 @@ require 'test_helper'
 
 class PoolTest < ActiveSupport::TestCase
   setup do
-    Timecop.travel(1.month.ago) do
+    travel_to(1.month.ago) do
       @user = FactoryBot.create(:user)
       CurrentUser.user = @user
     end
@@ -49,6 +49,15 @@ class PoolTest < ActiveSupport::TestCase
 
     should "be mapped to a pool id" do
       assert_equal(@pool.id, Pool.name_to_id(@pool.id.to_s))
+    end
+  end
+
+  context "Searching pools" do
+    should "find pools by name" do
+      @pool = FactoryBot.create(:pool, name: "Test Pool")
+
+      assert_equal(@pool.id, Pool.find_by_name("test pool").id)
+      assert_equal(@pool.id, Pool.search(name_matches: "test pool").first.id)
     end
   end
 
@@ -267,8 +276,10 @@ class PoolTest < ActiveSupport::TestCase
       end
 
       should "allow Builders to change the category of large pools" do
-        @builder = FactoryBot.create(:builder_user)
-        as(@builder) { @pool.update(category: "collection") }
+        perform_enqueued_jobs do
+          @builder = create(:builder_user)
+          as(@builder) { @pool.update(category: "collection") }
+        end
 
         assert_equal(true, @pool.valid?)
         assert_equal("collection", @pool.category)
@@ -279,7 +290,7 @@ class PoolTest < ActiveSupport::TestCase
 
     should "create new versions for each distinct user" do
       assert_equal(1, @pool.versions.size)
-      user2 = Timecop.travel(1.month.ago) {FactoryBot.create(:user)}
+      user2 = travel_to(1.month.ago) {FactoryBot.create(:user)}
 
       CurrentUser.scoped(user2, "127.0.0.2") do
         @pool.post_ids = [@p1.id]

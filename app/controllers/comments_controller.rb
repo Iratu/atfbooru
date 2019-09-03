@@ -74,7 +74,10 @@ private
 
   def index_by_post
     @posts = Post.where("last_comment_bumped_at IS NOT NULL").tag_match(params[:tags]).reorder("last_comment_bumped_at DESC NULLS LAST").paginate(params[:page], :limit => 5, :search_count => params[:search])
-    @posts.each # hack to force rails to eager load
+
+    @posts = @posts.includes(comments: [:creator])
+    @posts = @posts.includes(comments: [:votes]) if CurrentUser.is_member?
+
     respond_with(@posts) do |format|
       format.xml do
         render :xml => @posts.to_xml(:root => "posts")
@@ -83,7 +86,7 @@ private
   end
 
   def index_by_comment
-    @comments = Comment.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @comments = Comment.includes(:creator, :updater).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
     respond_with(@comments) do |format|
       format.atom do
         @comments = @comments.includes(:post, :creator).load

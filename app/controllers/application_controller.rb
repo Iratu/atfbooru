@@ -1,34 +1,25 @@
 class ApplicationController < ActionController::Base
-  protect_from_forgery
-  helper :pagination
+  class ApiLimitError < StandardError; end
+
+  skip_forgery_protection if: -> { SessionLoader.new(request).has_api_authentication? }
   before_action :reset_current_user
   before_action :set_current_user
-  after_action :reset_current_user
-  before_action :set_title
   before_action :normalize_search
-  before_action :set_started_at_session
   before_action :api_check
-  before_action :set_safe_mode
   before_action :set_variant
   before_action :track_only_param
-  # before_action :secure_cookies_check
-  layout "default"
-  helper_method :show_moderation_notice?
   before_action :enable_cors
+  after_action :reset_current_user
+  layout "default"
 
   rescue_from Exception, :with => :rescue_exception
-  rescue_from User::PrivilegeError, :with => :access_denied
-  rescue_from SessionLoader::AuthenticationFailure, :with => :authentication_failed
-  rescue_from Danbooru::Paginator::PaginationError, :with => :render_pagination_limit
-  rescue_from PG::ConnectionBad, with: :bad_db_connection
-  rescue_from ActionController::UnpermittedParameters, :with => :access_denied
-
-  # This is raised on requests to `/blah.js`. Rails has already rendered StaticController#not_found
-  # here, so calling `rescue_exception` would cause a double render error.
-  rescue_from ActionController::InvalidCrossOriginRequest, with: -> {}
 
   protected
 
+  def self.rescue_with(*klasses, status: 500)
+    rescue_from *klasses do |exception|
+      render_error_page(status, exception)
+    end
   def show_moderation_notice?
     #CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
 	false
@@ -38,18 +29,6 @@ class ApplicationController < ActionController::Base
     response.headers["Access-Control-Allow-Origin"] = "*"
   end
 
-  def bad_db_connection
-    respond_to do |format|
-      format.json do
-        render json: {success: false, reason: "database is unavailable"}.to_json, status: 503
-      end
-
-      format.html do
-        render template: "static/service_unavailable", status: 503
-      end
-    end
-  end
-
   def track_only_param
     if params[:only]
       RequestStore[:only_param] = params[:only].split(/,/)
@@ -57,133 +36,79 @@ class ApplicationController < ActionController::Base
   end
 
   def api_check
-    if !CurrentUser.is_anonymous? && !request.get? && !request.head?
-      if CurrentUser.user.token_bucket.nil?
-        TokenBucket.create_default(CurrentUser.user)
-        CurrentUser.user.reload
-      end
+    return if CurrentUser.is_anonymous? || request.get? || request.head?
 
-      throttled = CurrentUser.user.token_bucket.throttled?
-      headers["X-Api-Limit"] = CurrentUser.user.token_bucket.token_count.to_s
-
-      if throttled
-        respond_to do |format|
-          format.json do
-            render json: {success: false, reason: "too many requests"}.to_json, status: 429
-          end
-
-          format.xml do
-            render xml: {success: false, reason: "too many requests"}.to_xml(:root => "response"), status: 429
-          end
-
-          format.html do
-            render :template => "static/too_many_requests", :status => 429
-          end
-        end
-
-        return false
-      end
+    if CurrentUser.user.token_bucket.nil?
+      TokenBucket.create_default(CurrentUser.user)
+      CurrentUser.user.reload
     end
 
-    return true
+    throttled = CurrentUser.user.token_bucket.throttled?
+    headers["X-Api-Limit"] = CurrentUser.user.token_bucket.token_count.to_s
+
+    if throttled
+      raise ApiLimitError, "too many requests"
+    end
   end
 
   def rescue_exception(exception)
-    @exception = exception
-
-    if Rails.env.test? && ENV["DEBUG"]
-      puts "---"
-      STDERR.puts("#{exception.class} exception thrown: #{exception.message}")
-      exception.backtrace.each {|x| STDERR.puts(x)}
-      puts "---"
-    end
-
-    if exception.is_a?(::ActiveRecord::StatementInvalid) && exception.to_s =~ /statement timeout/
-      if Rails.env.production?
-        NewRelic::Agent.notice_error(exception, :uri => request.original_url, :referer => request.referer, :request_params => params, :custom_params => {:user_id => CurrentUser.user.id, :user_ip_addr => CurrentUser.ip_addr})
-      end
-
-      @error_message = "The database timed out running your query."
-      render :template => "static/error", :status => 500
-    elsif exception.is_a?(::ActiveRecord::RecordNotFound)
-      @error_message = "That record was not found"
-      render :template => "static/error", :status => 404
-    elsif exception.is_a?(NotImplementedError)
-      flash[:notice] = "This feature isn't available: #{@exception.message}"
-      respond_to do |fmt|
-        fmt.html { redirect_back fallback_location: root_path }
-        fmt.js { head 501 }
-        fmt.json { render template: "static/error", status: 501 }
-        fmt.xml  { render template: "static/error", status: 501 }
-      end
+    case exception
+    when ActiveRecord::QueryCanceled
+      render_error_page(500, exception, message: "The database timed out running your query.")
+    when ActionController::BadRequest
+      render_error_page(400, exception)
+    when SessionLoader::AuthenticationFailure
+      render_error_page(401, exception)
+    when ActionController::InvalidAuthenticityToken, ActionController::UnpermittedParameters, ActionController::InvalidCrossOriginRequest
+      render_error_page(403, exception)
+    when User::PrivilegeError
+      render_error_page(403, exception, template: "static/access_denied", message: "Access denied")
+    when ActiveRecord::RecordNotFound
+      render_error_page(404, exception, message: "That record was not found.")
+    when ActionController::RoutingError
+      render_error_page(405, exception)
+    when ActionController::UnknownFormat, ActionView::MissingTemplate
+      render_error_page(406, exception, message: "#{request.format.to_s} is not a supported format for this page")
+    when Danbooru::Paginator::PaginationError
+      render_error_page(410, exception)
+    when Post::SearchError
+      render_error_page(422, exception)
+    when ApiLimitError
+      render_error_page(429, exception)
+    when NotImplementedError
+      render_error_page(501, exception, message: "This feature isn't available: #{exception.message}")
+    when PG::ConnectionBad
+      render_error_page(503, exception, message: "The database is unavailable. Try again later.")
     else
-      render :template => "static/error", :status => 500, :layout => "blank"
+      render_error_page(500, exception)
     end
   end
 
-  def render_pagination_limit
-    @error_message = "You can only view up to #{Danbooru.config.max_numbered_pages} pages. Please narrow your search terms."
-    render :template => "static/error", :status => 410
-  end
+  def render_error_page(status, exception, message: exception.message, template: "static/error", format: request.format.symbol)
+    @exception = exception
+    @expected = status < 500
+    @message = message.encode("utf-8", { invalid: :replace, undef: :replace })
+    @backtrace = Rails.backtrace_cleaner.clean(@exception.backtrace)
+    format = :html unless format.in?(%i[html json xml js atom])
 
-  def authentication_failed
-    respond_to do |fmt|
-      fmt.html do
-        render :plain => "authentication failed", :status => 401
-      end
+    # if InvalidAuthenticityToken was raised, CurrentUser isn't set so we have to use the blank layout.
+    layout = CurrentUser.user.present? ? "default" : "blank"
 
-      fmt.xml do
-        render :xml => {:sucess => false, :reason => "authentication failed"}.to_xml(:root => "response"), :status => 401
-      end
-
-      fmt.json do
-        render :json => {:success => false, :reason => "authentication failed"}.to_json, :status => 401
-      end
-    end
-  end
-
-  def access_denied(exception = nil)
-    previous_url = params[:url] || request.fullpath
-
-    respond_to do |fmt|
-      fmt.html do
-        if CurrentUser.is_anonymous?
-          if request.get?
-            redirect_to new_session_path(:url => previous_url), :notice => "Access denied"
-          else
-            redirect_to new_session_path, :notice => "Access denied"
-          end
-        else
-          render :template => "static/access_denied", :status => 403
-        end
-      end
-      fmt.xml do
-        render :xml => {:success => false, :reason => "access denied"}.to_xml(:root => "response"), :status => 403
-      end
-      fmt.json do
-        render :json => {:success => false, :reason => "access denied"}.to_json, :status => 403
-      end
-      fmt.js do
-        render js: "", :status => 403
-      end
-    end
+    DanbooruLogger.log(@exception, expected: @expected)
+    render template, layout: layout, status: status, formats: format
+  rescue ActionView::MissingTemplate
+    render "static/error", layout: layout, status: status, formats: format
   end
 
   def set_current_user
-    session_loader = SessionLoader.new(session, cookies, request, params)
-    session_loader.load
+    SessionLoader.new(request).load
   end
 
   def reset_current_user
     CurrentUser.user = nil
     CurrentUser.ip_addr = nil
+    CurrentUser.safe_mode = false
     CurrentUser.root_url = root_url.chomp("/")
-  end
-
-  def set_started_at_session
-    if session[:started_at].blank?
-      session[:started_at] = Time.now
-    end
   end
 
   def set_variant
@@ -193,13 +118,9 @@ class ApplicationController < ActionController::Base
   User::Roles.each do |role|
     define_method("#{role}_only") do
       if !CurrentUser.user.send("is_#{role}?") || CurrentUser.user.is_banned? || IpBan.is_banned?(CurrentUser.ip_addr)
-        access_denied
+        raise User::PrivilegeError
       end
     end
-  end
-
-  def set_title
-    @page_title = Danbooru.config.app_name + "/#{params[:controller]}"
   end
 
   # Remove blank `search` params from the url.
@@ -207,7 +128,7 @@ class ApplicationController < ActionController::Base
   # /tags?search[name]=touhou&search[category]=&search[order]=
   # => /tags?search[name]=touhou
   def normalize_search
-    return unless request.get?
+    return unless request.get? || request.head?
     params[:search] ||= ActionController::Parameters.new
 
     deep_reject_blank = lambda do |hash|
@@ -223,17 +144,5 @@ class ApplicationController < ActionController::Base
 
   def search_params
     params.fetch(:search, {}).permit!
-  end
-
-  def set_safe_mode
-    CurrentUser.set_safe_mode(request)
-  end
-
-  def secure_cookies_check
-    if request.ssl?
-      Rails.application.config.session_store :cookie_store, :key => '_danbooru_session', :secure => true
-    else
-      Rails.application.config.session_store :cookie_store, :key => '_danbooru_session', :secure => false
-    end
   end
 end

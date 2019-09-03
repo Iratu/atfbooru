@@ -7,7 +7,7 @@ class Ban < ApplicationRecord
   belongs_to :user
   belongs_to :banner, :class_name => "User"
   validate :user_is_inferior
-  validates_presence_of :user_id, :reason, :duration
+  validates_presence_of :reason, :duration
   before_validation :initialize_banner_id, :on => :create
 
   scope :unexpired, -> { where("bans.expires_at > ?", Time.now) }
@@ -28,23 +28,8 @@ class Ban < ApplicationRecord
   def self.search(params)
     q = super
 
-    if params[:banner_name]
-      q = q.where("banner_id = (select _.id from users _ where lower(_.name) = ?)", params[:banner_name].mb_chars.downcase)
-    end
-
-    if params[:banner_id]
-      q = q.where("banner_id = ?", params[:banner_id].to_i)
-    end
-
-    if params[:user_name]
-      q = q.where("user_id = (select _.id from users _ where lower(_.name) = ?)", params[:user_name].mb_chars.downcase)
-    end
-
-    if params[:user_id]
-      q = q.where("user_id = ?", params[:user_id].to_i)
-    end
-
-    q = q.attribute_matches(:reason, params[:reason_matches])
+    q = q.search_attributes(params, :banner, :user, :expires_at, :reason)
+    q = q.text_attribute_matches(:reason, params[:reason_matches])
 
     q = q.expired if params[:expired].to_s.truthy?
     q = q.unexpired if params[:expired].to_s.falsy?
@@ -89,7 +74,7 @@ class Ban < ApplicationRecord
   end
 
   def update_user_on_create
-    user.update_attribute(:is_banned, true)
+    user.update!(is_banned: true)
   end
 
   def update_user_on_destroy
@@ -101,7 +86,7 @@ class Ban < ApplicationRecord
   end
 
   def user_name=(username)
-    self.user_id = User.name_to_id(username)
+    self.user = User.find_by_name(username)
   end
 
   def duration=(dur)
@@ -122,7 +107,7 @@ class Ban < ApplicationRecord
   end
 
   def create_feedback
-    user.feedback.create(category: "negative", body: "Banned for #{humanized_duration}: #{reason}")
+    user.feedback.create!(creator: banner, category: "negative", body: "Banned for #{humanized_duration}: #{reason}")
   end
 
   def create_ban_mod_action

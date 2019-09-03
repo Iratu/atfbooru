@@ -17,7 +17,7 @@ class ForumTopic < ApplicationRecord
   has_one :original_post, -> {order("forum_posts.id asc")}, class_name: "ForumPost", foreign_key: "topic_id", inverse_of: :topic
   has_many :subscriptions, :class_name => "ForumSubscription"
   before_validation :initialize_is_deleted, :on => :create
-  validates_presence_of :title, :creator_id
+  validates_presence_of :title
   validates_associated :original_post
   validates_inclusion_of :category_id, :in => CATEGORIES.keys
   validates_inclusion_of :min_level, :in => MIN_LEVELS.values
@@ -38,10 +38,6 @@ class ForumTopic < ApplicationRecord
 
       def reverse_category_mapping
         @reverse_category_mapping ||= CATEGORIES.invert
-      end
-
-      def for_category_id(cid)
-        where(:category_id => cid)
       end
     end
 
@@ -70,24 +66,12 @@ class ForumTopic < ApplicationRecord
     def search(params)
       q = super
       q = q.permitted
+      q = q.search_attributes(params, :creator, :updater, :is_sticky, :is_locked, :is_deleted, :category_id, :title, :response_count)
+      q = q.text_attribute_matches(:title, params[:title_matches], index_column: :text_index)
 
       if params[:mod_only].present?
         q = q.where("min_level >= ?", MIN_LEVELS[:Moderator])
       end
-
-      q = q.attribute_matches(:title, params[:title_matches], index_column: :text_index)
-
-      if params[:category_id].present?
-        q = q.for_category_id(params[:category_id])
-      end
-
-      if params[:title].present?
-        q = q.where("title = ?", params[:title])
-      end
-
-      q = q.attribute_matches(:is_sticky, params[:is_sticky])
-      q = q.attribute_matches(:is_locked, params[:is_locked])
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       case params[:order]
       when "sticky"
@@ -193,7 +177,7 @@ class ForumTopic < ApplicationRecord
 
   def merge(topic)
     ForumPost.where(:id => self.posts.map(&:id)).update_all(:topic_id => topic.id)
-    topic.update_attributes(:response_count => topic.response_count + self.posts.length, :updater_id => CurrentUser.id)
+    topic.update(response_count: topic.response_count + self.posts.length, updater_id: CurrentUser.id)
     self.update_columns(:response_count => 0, :is_deleted => true, :updater_id => CurrentUser.id)
   end
 

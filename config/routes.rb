@@ -255,10 +255,8 @@ Rails.application.routes.draw do
       get :labels
     end
   end
-  resource :session do
-    collection do
-      get :sign_out
-    end
+  resource :session, only: [:new, :create, :destroy] do
+    get :sign_out, on: :collection
   end
   resource :source, :only => [:show]
   resources :tags do
@@ -268,7 +266,6 @@ Rails.application.routes.draw do
     end
   end
   resources :tag_aliases do
-    resource :correction, :controller => "tag_alias_corrections"
     member do
       post :approve
     end
@@ -413,6 +410,8 @@ Rails.application.routes.draw do
   get "/user/show/:id" => redirect("/users/%{id}")
   get "/user/login" => redirect("/sessions/new")
   get "/user_record" => redirect {|params, req| "/user_feedbacks?search[user_id]=#{req.params[:user_id]}"}
+  get "/profile", to: "users#profile", as: :profile
+  get "/settings", to: "users#settings", as: :settings
 
   get "/wiki" => redirect {|params, req| "/wiki_pages?page=#{req.params[:page]}"}
   get "/wiki/index" => redirect {|params, req| "/wiki_pages?page=#{req.params[:page]}"}
@@ -426,8 +425,6 @@ Rails.application.routes.draw do
   get "/static/bookmarklet" => "static#bookmarklet", :as => "bookmarklet"
   get "/static/site_map" => "static#site_map", :as => "site_map"
   get "/static/terms_of_service" => "static#terms_of_service", :as => "terms_of_service"
-  post "/static/accept_terms_of_service" => "static#accept_terms_of_service", :as => "accept_terms_of_service"
-  get "/static/mrtg" => "static#mrtg", :as => "mrtg"
   get "/static/contact" => "static#contact", :as => "contact"
   get "/meta_searches/tags" => "meta_searches#tags", :as => "meta_searches_tags"
 

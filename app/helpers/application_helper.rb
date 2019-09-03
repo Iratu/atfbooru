@@ -36,38 +36,6 @@ module ApplicationHelper
     tag.li(link_to(text, url, id: "#{id}-link", **options), id: id, class: klass)
   end
 
-  def fast_link_to(text, link_params, options = {})
-    if options
-      attributes = options.map do |k, v|
-        %{#{k}="#{h(v)}"}
-      end.join(" ")
-    else
-      attributes = ""
-    end
-
-    if link_params.is_a?(Hash)
-      action = link_params.delete(:action)
-      controller = link_params.delete(:controller) || controller_name
-      id = link_params.delete(:id)
-
-      link_params = link_params.map {|k, v| "#{k}=#{u(v)}"}.join("&")
-
-      if link_params.present?
-        link_params = "?#{link_params}"
-      end
-
-      if id
-        url = "/#{controller}/#{action}/#{id}#{link_params}"
-      else
-        url = "/#{controller}/#{action}#{link_params}"
-      end
-    else
-      url = link_params
-    end
-
-    raw %{<a href="#{h(url)}" #{attributes}>#{text}</a>}
-  end
-
   def format_text(text, **options)
     raw DTextRagel.parse(text, **options)
   rescue DTextRagel::Error => e
@@ -147,7 +115,7 @@ module ApplicationHelper
   def link_to_user(user, options = {})
     return "anonymous" if user.blank?
 
-    user_class = user.level_class
+    user_class = "user-#{user.level_string.downcase}"
     user_class = user_class + " user-post-approver" if user.can_approve_posts?
     user_class = user_class + " user-post-uploader" if user.can_upload_free?
     user_class = user_class + " user-super-voter" if user.is_super_voter?
@@ -230,7 +198,29 @@ module ApplicationHelper
       [:"#{prefix}-#{name}", value]
     end.to_h
   end
-  
+
+  def page_title
+    if content_for(:page_title).present?
+      content_for(:page_title)
+    elsif action_name == "index"
+      "#{controller_name.titleize} - #{Danbooru.config.app_name}"
+    elsif action_name == "show"
+      "#{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif action_name == "new"
+      "New #{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif action_name == "edit"
+      "Edit #{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif action_name == "search"
+      "Search #{controller_name.titleize} - #{Danbooru.config.app_name}"
+    else
+      "#{Danbooru.config.app_name}/#{controller_name}"
+    end
+  end
+
+  def show_moderation_notice?
+    CurrentUser.can_approve_posts? && (cookies[:moderated].blank? || Time.at(cookies[:moderated].to_i) < 20.hours.ago)
+  end
+
 protected
   def nav_link_match(controller, url)
     url =~ case controller
@@ -261,7 +251,7 @@ protected
     when "moderator/dashboards"
       /^\/moderator/
 
-    when "tag_aliases", "tag_alias_corrections", "tag_alias_requests"
+    when "tag_aliases", "tag_alias_requests"
       /^\/tag_aliases/
 
     when "tag_implications", "tag_implication_requests"

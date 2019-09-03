@@ -4,69 +4,10 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
   context "The posts controller" do
     setup do
       PopularSearchService.stubs(:enabled?).returns(false)
-      
+
       @user = travel_to(1.month.ago) {create(:user)}
       as_user do
         @post = create(:post, :tag_string => "aaaa")
-      end
-    end
-    
-    context "for api calls" do
-      setup do
-        @api_key = ApiKey.generate!(@user)
-      end
-
-      context "passing the api limit" do
-        setup do
-          as_user do
-            @post = create(:post)
-          end
-          TokenBucket.any_instance.stubs(:throttled?).returns(true)
-          @bucket = TokenBucket.create(user_id: @user.id, token_count: 0, last_touched_at: Time.now)
-        end
-        
-        should "work" do
-          put post_path(@post), params: {:format => "json", :post => {:rating => "q"}, :login => @user.name, :api_key => @user.api_key.key}
-          assert_response 429
-        end
-      end
-      
-      context "using http basic auth" do
-        should "succeed for password matches" do
-          @basic_auth_string = "Basic #{::Base64.encode64("#{@user.name}:#{@api_key.key}")}"
-          get posts_path, params: {:format => "json"}, headers: {'HTTP_AUTHORIZATION' => @basic_auth_string}
-          assert_response :success
-        end
-        
-        should "fail for password mismatches" do
-          @basic_auth_string = "Basic #{::Base64.encode64("#{@user.name}:badpassword")}"
-          get posts_path, params: {:format => "json"}, headers: {'HTTP_AUTHORIZATION' => @basic_auth_string}
-          assert_response 401
-        end
-      end
-      
-      context "using the api_key parameter" do
-        should "succeed for password matches" do
-          get posts_path, params: {:format => "json", :login => @user.name, :api_key => @api_key.key}
-          assert_response :success
-        end
-        
-        should "fail for password mismatches" do
-          get posts_path, params: {:format => "json", :login => @user.name, :api_key => "bad"}
-          assert_response 401
-        end
-      end
-      
-      context "using the password_hash parameter" do
-        should "succeed for password matches" do
-          get posts_path, params: {:format => "json", :login => @user.name, :password_hash => User.sha1("password")}
-          assert_response :success
-        end
-        
-        # should "fail for password mismatches" do
-        #   get posts_path, {:format => "json", :login => @user.name, :password_hash => "bad"}
-        #   assert_response 403
-        # end
       end
     end
 
@@ -76,9 +17,53 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         assert_response :success
       end
 
-      context "with a search" do
+      context "with a single tag search" do
+        should "render for an empty tag" do
+          get posts_path, params: { tags: "does_not_exist" }
+          assert_response :success
+        end
+
+        should "render for an artist tag" do
+          create(:post, tag_string: "artist:bkub")
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+
+          artist = create(:artist, name: "bkub")
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+
+          artist.update(is_banned: true)
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+
+          artist.update(is_banned: false, is_active: false)
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+
+          as_user { create(:wiki_page, title: "bkub") }
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+        end
+
+        should "render for a tag with a wiki page" do
+          create(:post, tag_string: "char:fumimi")
+          get posts_path, params: { tags: "fumimi" }
+          assert_response :success
+
+          as_user { @wiki = create(:wiki_page, title: "fumimi") }
+          get posts_path, params: { tags: "fumimi" }
+          assert_response :success
+
+          as_user { @wiki.update(is_deleted: true) }
+          get posts_path, params: { tags: "bkub" }
+          assert_response :success
+        end
+      end
+
+      context "with a multi-tag search" do
         should "render" do
-          get posts_path, params: {:tags => "aaaa"}
+          create(:post, tag_string: "1girl solo")
+          get posts_path, params: {:tags => "1girl solo"}
           assert_response :success
         end
       end
@@ -87,6 +72,11 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         should "render" do
           get posts_path, params: { md5: @post.md5 }
           assert_redirected_to(@post)
+        end
+
+        should "return error on nonexistent md5" do
+          get posts_path(md5: "foo")
+          assert_response 404
         end
       end
 
@@ -97,6 +87,33 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
 
           get posts_path, params: { random: "1" }
           assert_response :success
+
+          get posts_path(format: :json), params: { random: "1" }
+          assert_response :success
+        end
+      end
+
+      context "with the .atom format" do
+        should "render without tags" do
+          get posts_path(format: :atom)
+
+          assert_response :success
+          assert_select "entry", 1
+        end
+
+        should "render with tags" do
+          get posts_path(format: :atom), params: { tags: "aaaa" }
+
+          assert_response :success
+          assert_select "entry", 1
+        end
+
+        should "hide restricted posts" do
+          @post.update(is_banned: true)
+          get posts_path(format: :atom)
+
+          assert_response :success
+          assert_select "entry", 0
         end
       end
     end
@@ -124,6 +141,58 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
       should "render" do
         get post_path(@post), params: {:id => @post.id}
         assert_response :success
+      end
+
+      context "with only deleted comments" do
+        setup do
+          as(@user) { create(:comment, post: @post, is_deleted: true) }
+        end
+
+        should "not show deleted comments to regular members" do
+          get_auth post_path(@post), @user, params: { id: @post.id }
+
+          assert_response :success
+          assert_select "article.comment", 0
+          assert_select "a#show-all-comments-link", 0
+          assert_select "div.list-of-comments p", /There are no comments/
+        end
+
+        should "not show deleted comments to moderators by default, but allow them to be unhidden" do
+          mod = create(:mod_user)
+          get_auth post_path(@post), mod, params: { id: @post.id }
+
+          assert_response :success
+          assert_select "article.comment", 0
+          assert_select "a#show-all-comments-link", 1
+          assert_select "div.list-of-comments p", /There are no comments/
+        end
+      end
+
+      context "with only downvoted comments" do
+        should "not show thresholded comments" do
+          comment = as(@user) { create(:comment, post: @post, score: -10) }
+          get_auth post_path(@post), @user, params: { id: @post.id }
+
+          assert_response :success
+          assert_select "article.comment", 0
+          assert_select "a#show-all-comments-link", 1
+          assert_select "div.list-of-comments p", /There are no visible comments/
+        end
+      end
+
+      context "with a mix of comments" do
+        should "not show deleted or thresholded comments " do
+          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "good") }
+          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "bad", score: -10) }
+          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "ugly", is_deleted: true) }
+
+          get_auth post_path(@post), @user, params: { id: @post.id }
+
+          assert_response :success
+          assert_select "article.comment", 1
+          assert_select "article.comment", /good/
+          assert_select "a#show-all-comments-link", 1
+        end
       end
 
       context "when the recommend service is enabled" do

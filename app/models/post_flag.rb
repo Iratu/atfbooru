@@ -32,10 +32,6 @@ class PostFlag < ApplicationRecord
       where("to_tsvector('english', post_flags.reason) @@ to_tsquery('!dup & !duplicate & !sample & !smaller')")
     end
 
-    def post_tags_match(query)
-      where(post_id: PostQueryBuilder.new(query).build.reorder(""))
-    end
-
     def resolved
       where("is_resolved = ?", true)
     end
@@ -52,15 +48,13 @@ class PostFlag < ApplicationRecord
       where("created_at <= ?", 3.days.ago)
     end
 
-    def for_creator(user_id)
-      where("creator_id = ?", user_id)
-    end
-
     def search(params)
       q = super
 
-      q = q.attribute_matches(:reason, params[:reason_matches])
+      q = q.search_attributes(params, :post, :is_resolved, :reason)
+      q = q.text_attribute_matches(:reason, params[:reason_matches])
 
+      # XXX
       if params[:creator_id].present?
         if CurrentUser.can_view_flagger?(params[:creator_id].to_i)
           q = q.where.not(post_id: CurrentUser.user.posts)
@@ -70,6 +64,7 @@ class PostFlag < ApplicationRecord
         end
       end
 
+      # XXX
       if params[:creator_name].present?
         flagger_id = User.name_to_id(params[:creator_name].strip)
         if flagger_id && CurrentUser.can_view_flagger?(flagger_id)
@@ -79,16 +74,6 @@ class PostFlag < ApplicationRecord
           q = q.none
         end
       end
-
-      if params[:post_id].present?
-        q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
-      end
-
-      if params[:post_tags_match].present?
-        q = q.post_tags_match(params[:post_tags_match])
-      end
-
-      q = q.attribute_matches(:is_resolved, params[:is_resolved])
 
       case params[:category]
       when "normal"
@@ -150,7 +135,7 @@ class PostFlag < ApplicationRecord
       errors[:creator] << "cannot flag posts"
     end
 
-    if creator_id != User.system.id && PostFlag.for_creator(creator_id).where("created_at > ?", 30.days.ago).count >= CREATION_THRESHOLD
+    if creator_id != User.system.id && creator.post_flags.where("created_at > ?", 30.days.ago).count >= CREATION_THRESHOLD
       report = Reports::PostFlags.new(user_id: post.uploader_id, date_range: 90.days.ago)
 
       if report.attackers.include?(creator_id)
@@ -185,7 +170,7 @@ class PostFlag < ApplicationRecord
   end
 
   def flag_count_for_creator
-    PostFlag.where(:creator_id => creator_id).recent.count
+    creator.post_flags.recent.count
   end
 
   def uploader_id

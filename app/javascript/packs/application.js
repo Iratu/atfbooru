@@ -7,6 +7,10 @@ function importAll(r) {
 
 require('jquery-ujs');
 require('hammerjs');
+require('dropzone');
+require('spark-md5');
+require('stupid-table-plugin');
+require('jquery-hotkeys');
 
 // should start looking for nodejs replacements
 importAll(require.context('../vendor', true, /\.js$/));
@@ -43,3 +47,5 @@ export { default as Shortcuts } from '../src/javascripts/shortcuts.js';
 export { default as Upload } from '../src/javascripts/uploads.js';
 export { default as Utility } from '../src/javascripts/utility.js';
 export { default as Ugoira } from '../src/javascripts/ugoira.js';
+export { default as Dropzone } from 'dropzone';
+export { default as SparkMD5 } from 'spark-md5';

@@ -5,7 +5,7 @@ class ArtistCommentary < ApplicationRecord
   attr_accessor :add_commentary_tag, :add_commentary_request_tag, :add_commentary_check_tag, :add_partial_commentary_tag
   before_validation :trim_whitespace
   validates_uniqueness_of :post_id
-  belongs_to :post, required: true
+  belongs_to :post
   has_many :versions, -> {order("artist_commentary_versions.id ASC")}, :class_name => "ArtistCommentaryVersion", :dependent => :destroy, :foreign_key => :post_id, :primary_key => :post_id
   has_one :previous_version, -> {order(id: :desc)}, :class_name => "ArtistCommentaryVersion", :foreign_key => :post_id, :primary_key => :post_id
   after_save :create_version
@@ -16,10 +16,6 @@ class ArtistCommentary < ApplicationRecord
       query = "*#{query}*" unless query =~ /\*/
       escaped_query = query.to_escaped_for_sql_like
       where("original_title ILIKE ? ESCAPE E'\\\\' OR original_description ILIKE ? ESCAPE E'\\\\' OR translated_title ILIKE ? ESCAPE E'\\\\' OR translated_description ILIKE ? ESCAPE E'\\\\'", escaped_query, escaped_query, escaped_query, escaped_query)
-    end
-
-    def post_tags_match(query)
-      where(post_id: PostQueryBuilder.new(query).build.reorder(""))
     end
 
     def deleted
@@ -33,12 +29,10 @@ class ArtistCommentary < ApplicationRecord
     def search(params)
       q = super
 
+      q = q.search_attributes(params, :post, :original_title, :original_description, :translated_title, :translated_description)
+
       if params[:text_matches].present?
         q = q.text_matches(params[:text_matches])
-      end
-
-      if params[:post_id].present?
-        q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
       end
 
       if params[:original_present].to_s.truthy?
@@ -51,10 +45,6 @@ class ArtistCommentary < ApplicationRecord
         q = q.where("(translated_title != '') or (translated_description != '')")
       elsif params[:translated_present].to_s.falsy?
         q = q.where("(translated_title = '') and (translated_description = '')")
-      end
-
-      if params[:post_tags_match].present?
-        q = q.post_tags_match(params[:post_tags_match])
       end
 
       q = q.deleted if params[:is_deleted] == "yes"

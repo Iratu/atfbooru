@@ -1,5 +1,6 @@
 class Pool < ApplicationRecord
   class RevertError < Exception ; end
+  POOL_ORDER_LIMIT = 1000
 
   array_attribute :post_ids, parse: /\d+/, cast: :to_i
   belongs_to_creator
@@ -46,7 +47,7 @@ class Pool < ApplicationRecord
     def name_matches(name)
       name = normalize_name_for_search(name)
       name = "*#{name}*" unless name =~ /\*/
-      where("lower(pools.name) like ? escape E'\\\\'", name.to_escaped_for_sql_like)
+      where_ilike(:name, name)
     end
 
     def default_order
@@ -56,18 +57,11 @@ class Pool < ApplicationRecord
     def search(params)
       q = super
 
+      q = q.search_attributes(params, :creator, :is_active, :is_deleted, :name, :description)
+      q = q.text_attribute_matches(:description, params[:description_matches])
+
       if params[:name_matches].present?
         q = q.name_matches(params[:name_matches])
-      end
-
-      q = q.attribute_matches(:description, params[:description_matches])
-
-      if params[:creator_name].present?
-        q = q.where("pools.creator_id = (select _.id from users _ where lower(_.name) = ?)", params[:creator_name].tr(" ", "_").mb_chars.downcase)
-      end
-
-      if params[:creator_id].present?
-        q = q.where(creator_id: params[:creator_id].split(",").map(&:to_i))
       end
 
       if params[:category] == "series"
@@ -75,9 +69,6 @@ class Pool < ApplicationRecord
       elsif params[:category] == "collection"
         q = q.collection
       end
-
-      q = q.attribute_matches(:is_active, params[:is_active])
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       params[:order] ||= params.delete(:sort)
       case params[:order]
@@ -117,7 +108,7 @@ class Pool < ApplicationRecord
     if name =~ /^\d+$/
       where("pools.id = ?", name.to_i).first
     elsif name
-      where("lower(pools.name) = ?", normalize_name_for_search(name)).first
+      where_ilike(:name, normalize_name_for_search(name)).first
     else
       nil
     end
@@ -213,21 +204,10 @@ class Pool < ApplicationRecord
     end
   end
 
-  def posts(options = {})
-    offset = options[:offset] || 0
-    limit = options[:limit] || Danbooru.config.posts_per_page
-    slice = post_ids.slice(offset, limit)
-    if slice && slice.any?
-      slice.map do |id|
-        begin
-          Post.find(id)
-        rescue ActiveRecord::RecordNotFound
-          # swallow
-        end
-      end.compact
-    else
-      []
-    end
+  # XXX unify with PostQueryBuilder ordpool search
+  def posts
+    pool_posts = Pool.where(id: id).joins("CROSS JOIN unnest(pools.post_ids) WITH ORDINALITY AS row(post_id, pool_index)").select(:post_id, :pool_index)
+    posts = Post.joins("JOIN (#{pool_posts.to_sql}) pool_posts ON pool_posts.post_id = posts.id").order("pool_posts.pool_index ASC")
   end
 
   def synchronize
@@ -300,9 +280,13 @@ class Pool < ApplicationRecord
     super + [:creator_name, :post_count]
   end
 
+  def creator_name
+    creator.name
+  end
+
   def update_category_pseudo_tags_for_posts_async
     if saved_change_to_category?
-      delay(:queue => "default").update_category_pseudo_tags_for_posts
+      UpdatePoolPseudoTagsJob.perform_later(self)
     end
   end
 

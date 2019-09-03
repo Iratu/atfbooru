@@ -2,10 +2,11 @@ require 'resolv-replace'
 
 class PixivApiClient
   extend Memoist
-  
+
   API_VERSION = "1"
   CLIENT_ID = "bYGKuGVw91e0NMfPGp44euvGt59s"
   CLIENT_SECRET = "HP3RmkgAmEGro0gn1x9ioawQE8WMfvLXDz3ZqxpK"
+  CLIENT_HASH_SALT = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
 
   # Tools to not include in the tags list. We don't tag digital media, so
   # including these results in bad translated tags suggestions.
@@ -220,15 +221,21 @@ class PixivApiClient
   def access_token
     Cache.get("pixiv-papi-access-token", 3000) do
       access_token = nil
+
+      client_time = Time.now.rfc3339
+      client_hash = Digest::MD5.hexdigest(client_time + CLIENT_HASH_SALT)
+
       headers = {
-        "Referer" => "http://www.pixiv.net"
+        "Referer": "http://www.pixiv.net",
+        "X-Client-Time": client_time,
+        "X-Client-Hash": client_hash,
       }
       params = {
-        "username" => Danbooru.config.pixiv_login,
-        "password" => Danbooru.config.pixiv_password,
-        "grant_type" => "password",
-        "client_id" => CLIENT_ID,
-        "client_secret" => CLIENT_SECRET
+        username: Danbooru.config.pixiv_login,
+        password: Danbooru.config.pixiv_password,
+        grant_type: "password",
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
       }
       url = "https://oauth.secure.pixiv.net/auth/token"
 

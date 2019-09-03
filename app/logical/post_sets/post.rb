@@ -1,7 +1,7 @@
 module PostSets
   class Post < PostSets::Base
     MAX_PER_PAGE = 200
-    attr_reader :tag_array, :page, :raw, :random, :post_count, :format, :read_only
+    attr_reader :tag_array, :page, :raw, :random, :post_count, :format
 
     def initialize(tags, page = 1, per_page = nil, options = {})
       @tag_array = Tag.scan_query(tags)
@@ -10,7 +10,6 @@ module PostSets
       @raw = options[:raw].present?
       @random = options[:random].present?
       @format = options[:format] || "html"
-      @read_only = options[:read_only]
     end
 
     def tag_string
@@ -25,24 +24,14 @@ module PostSets
       tag_array.reject {|tag| tag =~ /\Aorder:/i }
     end
 
-    def has_wiki?
-      is_single_tag? && ::WikiPage.titled(tag_string).exists? && wiki_page.visible?
-    end
-
-    def has_wiki_text?
-      has_wiki? && wiki_page.body.present?
-    end
-
     def has_blank_wiki?
-      is_simple_tag? && !has_wiki?
+      tag.present? && !wiki_page.present?
     end
 
     def wiki_page
-      if is_single_tag?
-        ::WikiPage.titled(tag_string).first
-      else
-        nil
-      end
+      return nil unless tag.present? && tag.wiki_page.present?
+      return nil unless !tag.wiki_page.is_deleted? && tag.wiki_page.visible?
+      tag.wiki_page
     end
 
     def tag
@@ -50,12 +39,10 @@ module PostSets
       @tag ||= Tag.find_by(name: Tag.normalize_name(tag_string))
     end
 
-    def has_artist?
-      is_single_tag? && artist.present? && artist.visible?
-    end
-
     def artist
-      @artist ||= ::Artist.named(tag_string).active.first
+      return nil unless tag.present? && tag.category == Tag.categories.artist
+      return nil unless tag.artist.present? && tag.artist.is_active? && tag.artist.visible?
+      tag.artist
     end
 
     def pool_name
@@ -134,10 +121,6 @@ module PostSets
     end
 
     def posts
-      if tag_array.any? {|x| x =~ /^-?source:.*\*.*pixiv/} && !CurrentUser.user.is_builder?
-        raise SearchError.new("Your search took too long to execute and was canceled")
-      end
-
       @posts ||= begin
         @post_count = get_post_count()
 
@@ -146,8 +129,12 @@ module PostSets
         elsif raw
           temp = ::Post.raw_tag_match(tag_string).order("posts.id DESC").where("true /* PostSets::Post#posts:1 */").paginate(page, :count => post_count, :limit => per_page)
         else
-          temp = ::Post.tag_match(tag_string, read_only).where("true /* PostSets::Post#posts:2 */").paginate(page, :count => post_count, :limit => per_page)
+          temp = ::Post.tag_match(tag_string).where("true /* PostSets::Post#posts:2 */").paginate(page, :count => post_count, :limit => per_page)
         end
+
+        # XXX HACK: uploader_name is needed in api responses and in data-uploader attribs (visible to mods only).
+        temp = temp.includes(:uploader) if !is_random? && (format.to_sym != :html || CurrentUser.is_moderator?)
+
         temp.each # hack to force rails to eager load
         temp
       end
@@ -191,7 +178,7 @@ module PostSets
 
     def best_post
       # be smarter about this in the future
-      posts.max {|a, b| a.fav_count <=> b.fav_count}
+      posts.reject(&:is_deleted).select(&:visible?).max_by(&:fav_count)
     end
   end
 end

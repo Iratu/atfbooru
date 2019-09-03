@@ -3,41 +3,42 @@ class SessionLoader
 
   attr_reader :session, :cookies, :request, :params
 
-  def initialize(session, cookies, request, params)
-    @session = session
-    @cookies = cookies
+  def initialize(request)
     @request = request
-    @params = params
+    @session = request.session
+    @cookies = request.cookie_jar
+    @params = request.parameters
   end
 
   def load
     CurrentUser.user = User.anonymous
     CurrentUser.ip_addr = request.remote_ip
 
-    if Rails.env.test? && Thread.current[:test_user_id]
-      load_for_test(Thread.current[:test_user_id])
+    if has_api_authentication?
+      load_session_for_api
     elsif session[:user_id]
       load_session_user
     elsif cookie_password_hash_valid?
       load_cookie_user
-    else
-      load_session_for_api
     end
 
     set_statement_timeout
     update_last_logged_in_at
     update_last_ip_addr
     set_time_zone
+    set_safe_mode
+    set_started_at_session
     CurrentUser.user.unban! if CurrentUser.user.ban_expired?
+  ensure
+    DanbooruLogger.add_session_attributes(request, session, CurrentUser.user)
+  end
+
+  def has_api_authentication?
+    request.authorization.present? || params[:login].present? || params[:api_key].present? || params[:password_hash].present?
   end
 
 private
 
-  def load_for_test(user_id)
-    CurrentUser.user = User.find(user_id)
-    CurrentUser.ip_addr = "127.0.0.1"
-  end
-  
   def set_statement_timeout
     timeout = CurrentUser.user.statement_timeout
     ActiveRecord::Base.connection.execute("set statement_timeout = #{timeout}")
@@ -46,21 +47,22 @@ private
   def load_session_for_api
     if request.authorization
       authenticate_basic_auth
-      
     elsif params[:login].present? && params[:api_key].present?
       authenticate_api_key(params[:login], params[:api_key])
-      
     elsif params[:login].present? && params[:password_hash].present?
       authenticate_legacy_api_key(params[:login], params[:password_hash])
+    else
+      raise AuthenticationFailure
     end
   end
-  
+
   def authenticate_basic_auth
     credentials = ::Base64.decode64(request.authorization.split(' ', 2).last || '')
     login, api_key = credentials.split(/:/, 2)
+    DanbooruLogger.add_attributes("request.params", login: login)
     authenticate_api_key(login, api_key)
   end
-  
+
   def authenticate_api_key(name, api_key)
     CurrentUser.user = User.authenticate_api_key(name, api_key)
 
@@ -68,7 +70,7 @@ private
       raise AuthenticationFailure.new
     end
   end
-  
+
   def authenticate_legacy_api_key(name, password_hash)
     CurrentUser.user = User.authenticate_hash(name, password_hash)
 
@@ -106,5 +108,15 @@ private
   def set_time_zone
     Time.zone = CurrentUser.user.time_zone
   end
-end
 
+  def set_safe_mode
+    safe_mode = request.host.match?(/safebooru/i) || params[:safe_mode].to_s.truthy? || CurrentUser.user.enable_safe_mode?
+    CurrentUser.safe_mode = safe_mode
+  end
+
+  def set_started_at_session
+    if session[:started_at].blank?
+      session[:started_at] = Time.now.utc.to_s
+    end
+  end
+end

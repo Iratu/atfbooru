@@ -5,7 +5,7 @@ class PostArchiveTest < ActiveSupport::TestCase
 
   context "A post" do
     setup do
-      Timecop.travel(1.month.ago) do
+      travel_to(1.month.ago) do
         @user = FactoryBot.create(:user)
       end
       CurrentUser.user = @user
@@ -21,8 +21,8 @@ class PostArchiveTest < ActiveSupport::TestCase
       setup do
         PostArchive.sqs_service.stubs(:merge?).returns(false)
         @post = FactoryBot.create(:post, :tag_string => "1")
-        @post.update_attributes(:tag_string => "1 2")
-        @post.update_attributes(:tag_string => "2 3")
+        @post.update(tag_string: "1 2")
+        @post.update(tag_string: "2 3")
       end
 
       subject { @post.versions.sort_by(&:id)[1] }
@@ -38,8 +38,8 @@ class PostArchiveTest < ActiveSupport::TestCase
       setup do
         PostArchive.sqs_service.stubs(:merge?).returns(false)
         @post = FactoryBot.create(:post, :tag_string => "1")
-        @post.update_attributes(:tag_string => "1 2")
-        @post.update_attributes(:tag_string => "2 3")
+        @post.update(tag_string: "1 2")
+        @post.update(tag_string: "2 3")
       end
 
       context "a version record" do
@@ -94,7 +94,7 @@ class PostArchiveTest < ActiveSupport::TestCase
 
       should "delete the previous version" do
         assert_equal(1, @post.versions.count)
-        @post.update_attributes(:tag_string => "bbb ccc xxx", :source => "")
+        @post.update(tag_string: "bbb ccc xxx", source: "")
         @post.reload
         assert_equal(1, @post.versions.count)
       end
@@ -104,7 +104,7 @@ class PostArchiveTest < ActiveSupport::TestCase
       setup do
         PostArchive.sqs_service.stubs(:merge?).returns(false)
         @post = FactoryBot.create(:post, :tag_string => "aaa bbb ccc", :rating => "q", :source => "xyz")
-        @post.update_attributes(:tag_string => "bbb ccc xxx", :source => "")
+        @post.update(tag_string: "bbb ccc xxx", source: "")
       end
 
       should "also create a version" do

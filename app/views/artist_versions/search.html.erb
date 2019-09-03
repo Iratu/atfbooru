@@ -4,7 +4,7 @@
 
     <div id="search">
       <%= form_tag(artist_versions_path, :method => :get, :class => "simple_form") do %>
-        <%= search_field "updater_name", :label => "User" %>
+        <%= search_field "updater_name", :label => "User", :data => { autocomplete: "user" } %>
         <%= search_field "name", :label => "Name", :data => { autocomplete: "artist" } %>
         <%= submit_tag "Search" %>
       <% end %>
@@ -13,7 +13,3 @@
 </div>
 
 <%= render "secondary_links" %>
-
-<% content_for(:page_title) do %>
-  Search Artist Changes - <%= Danbooru.config.app_name %>
-<% end %>

@@ -5,7 +5,7 @@
 #
 # Run: curl -L -s https://raw.githubusercontent.com/r888888888/danbooru/master/script/install/app_server.sh | sh
 
-export RUBY_VERSION=2.5.1
+export RUBY_VERSION=2.6.3
 export GITHUB_INSTALL_SCRIPTS=https://raw.githubusercontent.com/r888888888/danbooru/master/script/install
 export VIPS_VERSION=8.7.0
 
@@ -27,7 +27,7 @@ read VLAN_IP_ADDR
 echo "* Installing packages..."
 
 apt-get update
-apt-get -y install libssl-dev build-essential automake libxml2-dev libxslt-dev ncurses-dev sudo libreadline-dev flex bison ragel memcached libmemcached-dev git curl libcurl4-openssl-dev sendmail-bin sendmail nginx ssh coreutils ffmpeg mkvtoolnix
+apt-get -y install libssl-dev build-essential automake libxml2-dev libxslt-dev ncurses-dev sudo libreadline-dev flex bison ragel redis git curl libcurl4-openssl-dev sendmail-bin sendmail nginx ssh coreutils ffmpeg mkvtoolnix
 apt-get -y install libpq-dev postgresql-client
 apt-get -y install liblcms2-dev libjpeg-turbo8-dev libexpat1-dev libgif-dev libpng-dev libexif-dev
 

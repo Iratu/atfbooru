@@ -5,10 +5,20 @@ class PostTest < ActiveSupport::TestCase
     assert_equal(posts.map(&:id), Post.tag_match(query).pluck(:id))
   end
 
+  def self.assert_invalid_tag(tag_name)
+    should "not allow '#{tag_name}' to be tagged" do
+      post = build(:post, tag_string: "touhou #{tag_name}")
+
+      assert(post.valid?)
+      assert_equal("touhou", post.tag_string)
+      assert_equal(1, post.warnings[:base].grep(/Couldn't add tag/).count)
+    end
+  end
+
   def setup
     super
 
-    Timecop.travel(2.weeks.ago) do
+    travel_to(2.weeks.ago) do
       @user = FactoryBot.create(:user)
     end
     CurrentUser.user = @user
@@ -31,6 +41,7 @@ class PostTest < ActiveSupport::TestCase
         @upload = UploadService.new(FactoryBot.attributes_for(:jpg_upload)).start!
         @post = @upload.post
         Favorite.add(post: @post, user: @user)
+        create(:favorite_group).add!(@post.id)
       end
 
       teardown do
@@ -51,6 +62,12 @@ class PostTest < ActiveSupport::TestCase
         @post.expunge!
 
         assert_equal(0, Favorite.for_user(@user.id).where("post_id = ?", @post.id).count)
+      end
+
+      should "remove all favgroups" do
+        assert_equal(1, FavoriteGroup.for_post(@post.id).count)
+        @post.expunge!
+        assert_equal(0, FavoriteGroup.for_post(@post.id).count)
       end
 
       should "decrement the uploader's upload count" do
@@ -575,12 +592,12 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "not allow you to remove tags" do
-          @post.update_attributes(:tag_string => "aaa")
+          @post.update(tag_string: "aaa")
           assert_equal(["You must have an account at least 1 week old to remove tags"], @post.errors.full_messages)
         end
 
         should "allow you to remove request tags" do
-          @post.update_attributes(:tag_string => "aaa bbb ccc ddd")
+          @post.update(tag_string: "aaa bbb ccc ddd")
           @post.reload
           assert_equal("aaa bbb ccc ddd", @post.tag_string)
         end
@@ -664,43 +681,41 @@ class PostTest < ActiveSupport::TestCase
       end
 
       context "tagged with an invalid tag" do
-        subject { @post }
-
         context "that doesn't already exist" do
-          should_not allow_value("touhou user:evazion").for(:tag_string)
-          should_not allow_value("touhou *~foo").for(:tag_string)
-          should_not allow_value("touhou *-foo").for(:tag_string)
-          should_not allow_value("touhou ,-foo").for(:tag_string)
+          assert_invalid_tag("user:evazion")
+          assert_invalid_tag("*~foo")
+          assert_invalid_tag("*-foo")
+          assert_invalid_tag(",-foo")
 
-          should_not allow_value("touhou ___").for(:tag_string)
-          should_not allow_value("touhou ~foo").for(:tag_string)
-          should_not allow_value("touhou _foo").for(:tag_string)
-          should_not allow_value("touhou foo_").for(:tag_string)
-          should_not allow_value("touhou foo__bar").for(:tag_string)
-          should_not allow_value("touhou foo*bar").for(:tag_string)
-          should_not allow_value("touhou foo,bar").for(:tag_string)
-          should_not allow_value("touhou foo\abar").for(:tag_string)
-          should_not allow_value("touhou café").for(:tag_string)
-          should_not allow_value("touhou 東方").for(:tag_string)
+          assert_invalid_tag("___")
+          assert_invalid_tag("~foo")
+          assert_invalid_tag("_foo")
+          assert_invalid_tag("foo_")
+          assert_invalid_tag("foo__bar")
+          assert_invalid_tag("foo*bar")
+          assert_invalid_tag("foo,bar")
+          assert_invalid_tag("foo\abar")
+          assert_invalid_tag("café")
+          assert_invalid_tag("東方")
         end
 
         context "that already exists" do
           setup do
             %W(___ ~foo _foo foo_ foo__bar foo*bar foo,bar foo\abar café 東方).each do |tag|
-              FactoryBot.build(:tag, name: tag).save(validate: false)
+              build(:tag, name: tag).save(validate: false)
             end
           end
 
-          should allow_value("touhou ___").for(:tag_string)
-          should allow_value("touhou ~foo").for(:tag_string)
-          should allow_value("touhou _foo").for(:tag_string)
-          should allow_value("touhou foo_").for(:tag_string)
-          should allow_value("touhou foo__bar").for(:tag_string)
-          should allow_value("touhou foo*bar").for(:tag_string)
-          should allow_value("touhou foo,bar").for(:tag_string)
-          should allow_value("touhou foo\abar").for(:tag_string)
-          should allow_value("touhou café").for(:tag_string)
-          should allow_value("touhou 東方").for(:tag_string)
+          assert_invalid_tag("___")
+          assert_invalid_tag("~foo")
+          assert_invalid_tag("_foo")
+          assert_invalid_tag("foo_")
+          assert_invalid_tag("foo__bar")
+          assert_invalid_tag("foo*bar")
+          assert_invalid_tag("foo,bar")
+          assert_invalid_tag("foo\abar")
+          assert_invalid_tag("café")
+          assert_invalid_tag("東方")
         end
       end
 
@@ -780,7 +795,7 @@ class PostTest < ActiveSupport::TestCase
           end
 
           should "update the parent relationships for both posts" do
-            @post.update_attributes(:tag_string => "aaa parent:#{@parent.id}")
+            @post.update(tag_string: "aaa parent:#{@parent.id}")
             @post.reload
             @parent.reload
             assert_equal(@parent.id, @post.parent_id)
@@ -872,7 +887,7 @@ class PostTest < ActiveSupport::TestCase
           context "id" do
             setup do
               @pool = FactoryBot.create(:pool)
-              @post.update_attributes(:tag_string => "aaa pool:#{@pool.id}")
+              @post.update(tag_string: "aaa pool:#{@pool.id}")
             end
 
             should "add the post to the pool" do
@@ -887,7 +902,7 @@ class PostTest < ActiveSupport::TestCase
             context "that exists" do
               setup do
                 @pool = FactoryBot.create(:pool, :name => "abc")
-                @post.update_attributes(:tag_string => "aaa pool:abc")
+                @post.update(tag_string: "aaa pool:abc")
               end
 
               should "add the post to the pool" do
@@ -900,7 +915,7 @@ class PostTest < ActiveSupport::TestCase
 
             context "that doesn't exist" do
               should "create a new pool and add the post to that pool" do
-                @post.update_attributes(:tag_string => "aaa newpool:abc")
+                @post.update(tag_string: "aaa newpool:abc")
                 @pool = Pool.find_by_name("abc")
                 @post.reload
                 assert_not_nil(@pool)
@@ -921,7 +936,7 @@ class PostTest < ActiveSupport::TestCase
         context "for a rating" do
           context "that is valid" do
             should "update the rating if the post is unlocked" do
-              @post.update_attributes(:tag_string => "aaa rating:e")
+              @post.update(tag_string: "aaa rating:e")
               @post.reload
               assert_equal("e", @post.rating)
             end
@@ -929,7 +944,7 @@ class PostTest < ActiveSupport::TestCase
 
           context "that is invalid" do
             should "not update the rating" do
-              @post.update_attributes(:tag_string => "aaa rating:z")
+              @post.update(tag_string: "aaa rating:z")
               @post.reload
               assert_equal("q", @post.rating)
             end
@@ -957,10 +972,10 @@ class PostTest < ActiveSupport::TestCase
 
         context "for a fav" do
           should "add/remove the current user to the post's favorite listing" do
-            @post.update_attributes(:tag_string => "aaa fav:self")
+            @post.update(tag_string: "aaa fav:self")
             assert_equal("fav:#{@user.id}", @post.fav_string)
 
-            @post.update_attributes(:tag_string => "aaa -fav:self")
+            @post.update(tag_string: "aaa -fav:self")
             assert_equal("", @post.fav_string)
           end
         end
@@ -1133,8 +1148,8 @@ class PostTest < ActiveSupport::TestCase
 
       context "tagged with a negated tag" do
         should "remove the tag if present" do
-          @post.update_attributes(:tag_string => "aaa bbb ccc")
-          @post.update_attributes(:tag_string => "aaa bbb ccc -bbb")
+          @post.update(tag_string: "aaa bbb ccc")
+          @post.update(tag_string: "aaa bbb ccc -bbb")
           @post.reload
           assert_equal("aaa ccc", @post.tag_string)
         end
@@ -1234,16 +1249,23 @@ class PostTest < ActiveSupport::TestCase
       end
 
       context "with *_(cosplay) tags" do
-        setup do
+        should "add the character tags and the cosplay tag" do
           @post.add_tag("hakurei_reimu_(cosplay)")
           @post.add_tag("hatsune_miku_(cosplay)")
           @post.save
-        end
 
-        should "add the character tags and the cosplay tag" do
           assert(@post.has_tag?("hakurei_reimu"))
           assert(@post.has_tag?("hatsune_miku"))
           assert(@post.has_tag?("cosplay"))
+        end
+
+        should "not add the _(cosplay) tag if it conflicts with an existing tag" do
+          create(:tag, name: "little_red_riding_hood", category: Tag.categories.copyright)
+          @post = create(:post, tag_string: "little_red_riding_hood_(cosplay)")
+
+          refute(@post.has_tag?("little_red_riding_hood"))
+          refute(@post.has_tag?("cosplay"))
+          assert(@post.warnings[:base].grep(/Couldn't add tag/).present?)
         end
       end
 
@@ -1256,9 +1278,9 @@ class PostTest < ActiveSupport::TestCase
 
         should "create a new version if it's been over an hour since the last update" do
           post = FactoryBot.create(:post)
-          Timecop.travel(6.hours.from_now) do
+          travel(6.hours) do
             assert_difference("PostArchive.count", 1) do
-              post.update_attributes(:tag_string => "zzz")
+              post.update(tag_string: "zzz")
             end
           end
         end
@@ -1266,7 +1288,7 @@ class PostTest < ActiveSupport::TestCase
         should "merge with the previous version if the updater is the same user and it's been less than an hour" do
           post = FactoryBot.create(:post)
           assert_difference("PostArchive.count", 0) do
-            post.update_attributes(:tag_string => "zzz")
+            post.update(tag_string: "zzz")
           end
           assert_equal("zzz", post.versions.last.tags)
         end
@@ -1280,7 +1302,7 @@ class PostTest < ActiveSupport::TestCase
           # production the counter cache doesn't bump the count, because
           # versions are created on a separate server.
           assert_difference("CurrentUser.user.reload.post_update_count", 2) do
-            post.update_attributes(:tag_string => "zzz")
+            post.update(tag_string: "zzz")
           end
         end
 
@@ -1771,7 +1793,7 @@ class PostTest < ActiveSupport::TestCase
         post.uploader_id = user2.id
         assert_equal(user2.id, post.uploader_id)
         assert_equal(user2.id, post.uploader_id)
-        assert_equal(user2.name, post.uploader_name)
+        assert_equal(user2.name, post.uploader.name)
       end
 
       context "tag post counts" do
@@ -2184,8 +2206,6 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([],     "source:*.pixiv.net/img*/artist-fake/*")
       assert_tag_match([post], "source:http://*.pixiv.net/img*/img/artist-name/*")
       assert_tag_match([],     "source:http://*.pixiv.net/img*/img/artist-fake/*")
-      assert_tag_match([post], "source:pixiv/artist-name/*")
-      assert_tag_match([],     "source:pixiv/artist-fake/*")
     end
 
     should "return posts for a pixiv id search (type 1)" do
@@ -2407,6 +2427,15 @@ class PostTest < ActiveSupport::TestCase
       assert_tag_match([], "filesize:1048000")
     end
 
+    should "resolve aliases to the actual tag" do
+      create(:tag_alias, antecedent_name: "kitten", consequent_name: "cat")
+      post1 = create(:post, tag_string: "cat")
+      post2 = create(:post, tag_string: "dog")
+
+      assert_tag_match([post1], "kitten")
+      assert_tag_match([post2], "-kitten")
+    end
+
     should "fail for more than 6 tags" do
       post1 = FactoryBot.create(:post, :rating => "s")
 
@@ -2575,7 +2604,7 @@ class PostTest < ActiveSupport::TestCase
           end
         end
 
-        should "translate an alias" do
+        should_eventually "translate an alias" do
           assert_equal(1, Post.fast_count("alias"))
         end
 
@@ -2629,7 +2658,7 @@ class PostTest < ActiveSupport::TestCase
     context "a post that is rating locked" do
       setup do
         @post = FactoryBot.create(:post, :rating => "s")
-        Timecop.travel(2.hours.from_now) do
+        travel(2.hours) do
           @post.update(rating: "q", is_rating_locked: true)
         end
       end

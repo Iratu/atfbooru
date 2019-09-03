@@ -4,12 +4,12 @@ class PostsController < ApplicationController
 
   def index
     if params[:md5].present?
-      @post = Post.find_by_md5(params[:md5])
+      @post = Post.find_by!(md5: params[:md5])
       respond_with(@post) do |format|
         format.html { redirect_to(@post) }
       end
     else
-      @post_set = PostSets::Post.new(tag_query, params[:page], params[:limit], raw: params[:raw], random: params[:random], format: params[:format], read_only: params[:ro])
+      @post_set = PostSets::Post.new(tag_query, params[:page], params[:limit], raw: params[:raw], random: params[:random], format: params[:format])
       @posts = @post_set.posts
       respond_with(@posts) do |format|
         format.atom
@@ -22,6 +22,11 @@ class PostsController < ApplicationController
 
   def show
     @post = Post.find(params[:id])
+
+    @comments = @post.comments
+    @comments = @comments.includes(:creator)
+    @comments = @comments.includes(:votes) if CurrentUser.is_member?
+    @comments = @comments.visible(CurrentUser.user)
 
     include_deleted = @post.is_deleted? || (@post.parent_id.present? && @post.parent.is_deleted?) || CurrentUser.user.show_deleted_children?
     @parent_post_set = PostSets::PostRelationship.new(@post.parent_id, :include_deleted => include_deleted)

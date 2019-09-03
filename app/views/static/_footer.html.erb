@@ -1,12 +1,14 @@
 <footer id="page-footer">
   Running <%= Danbooru.config.app_name %> 
   <% if Rails.application.config.x.git_hash %>
-    (<%= link_to Rails.application.config.x.git_hash, Danbooru.config.commit_url(Rails.application.config.x.git_hash) %>)
+    (<%= link_to Rails.application.config.x.git_hash.first(9), Danbooru.config.commit_url(Rails.application.config.x.git_hash) %>)
   <% end %>
   &ndash; <%= link_to "Rules", terms_of_service_path %>
   &ndash; <%= link_to "Contact", contact_path %>
   <% if CurrentUser.user.enable_post_navigation %>
-    &ndash; <%= link_to "Keyboard shortcuts available", keyboard_shortcuts_path %>
+    <span id="keyboard-shortcuts-link">
+      &ndash; <%= link_to "Keyboard shortcuts", keyboard_shortcuts_path %>
+    </span>
   <% end %>
   <% if CurrentUser.is_member? %>
     <span id="desktop-version-link">

@@ -1,5 +1,4 @@
 require 'set'
-require 'timecop'
 
 CurrentUser.ip_addr = "127.0.0.1"
 Delayed::Worker.delay_jobs = false
@@ -40,7 +39,7 @@ end
 if User.count == 0
   puts "Creating users"
 
-  Timecop.travel(1.month.ago) do
+  begin
     user = User.create(
       :name => "admin",
       :password => "password1",
@@ -48,7 +47,7 @@ if User.count == 0
     )
 
     CurrentUser.user = user
-    User::Levels.constants.reject{|x| [:ADMIN, :BLOCKED].include?(x)}.each do |level|
+    User::Levels.constants.reject{ |x| x == :ADMIN }.each do |level|
       newuser = User.create(
       :name => level.to_s.downcase,
       :password => "password1",
@@ -132,7 +131,7 @@ if Note.count == 0
       note = Note.create(:post_id => post.id, :x => rand(post.image_width), :y => rand(post.image_height), :width => 100, :height => 100, :body => Time.now.to_f.to_s)
 
       rand(20).times do |i|
-        note.update_attributes(:body => rand_sentence(6))
+        note.update(body: rand_sentence(6))
       end
     end
   end

@@ -19,7 +19,7 @@ class ArtistTest < ActiveSupport::TestCase
 
   context "An artist" do
     setup do
-      user = Timecop.travel(1.month.ago) {FactoryBot.create(:user)}
+      user = travel_to(1.month.ago) {FactoryBot.create(:user)}
       CurrentUser.user = user
       CurrentUser.ip_addr = "127.0.0.1"
     end
@@ -108,8 +108,9 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       should "create a new tag implication" do
+        workoff_active_jobs
         assert_equal(1, TagImplication.where(:antecedent_name => "aaa", :consequent_name => "banned_artist").count)
-        assert_equal("aaa banned_artist", @post.tag_string)
+        assert_equal("aaa banned_artist", @post.reload.tag_string)
       end
 
       should "set the approver of the banned_artist implication" do
@@ -126,18 +127,6 @@ class ArtistTest < ActiveSupport::TestCase
       assert_equal("testing", artist.notes)
       assert_equal("testing", artist.wiki_page.body)
       assert_equal(artist.name, artist.wiki_page.title)
-    end
-
-    context "when a wiki page with the same name already exists" do
-      setup do
-        @wiki_page = FactoryBot.create(:wiki_page, :title => "aaa")
-        @artist = FactoryBot.build(:artist, :name => "aaa")
-      end
-
-      should "not validate" do
-        @artist.save
-        assert_equal(["Name conflicts with a wiki page"], @artist.errors.full_messages)
-      end
     end
 
     should "update the wiki page when notes are assigned" do
@@ -241,7 +230,6 @@ class ArtistTest < ActiveSupport::TestCase
 
     context "when finding deviantart artists" do
       setup do
-        skip "DeviantArt API keys not set" unless Danbooru.config.deviantart_client_id.present?
         FactoryBot.create(:artist, :name => "artgerm", :url_string => "http://artgerm.deviantart.com/")
         FactoryBot.create(:artist, :name => "trixia",  :url_string => "http://trixdraws.deviantart.com/")
       end
@@ -469,7 +457,7 @@ class ArtistTest < ActiveSupport::TestCase
 
       assert_difference("ArtistVersion.count") do
         artist.other_names = "xxx"
-        Timecop.travel(1.day.from_now) do
+        travel(1.day) do
           artist.save
         end
       end
@@ -481,20 +469,36 @@ class ArtistTest < ActiveSupport::TestCase
       assert_equal(%w[yyy], artist.other_names)
     end
 
-    should "update the category of the tag when created" do
-      tag = FactoryBot.create(:tag, :name => "abc")
-      artist = FactoryBot.create(:artist, :name => "abc")
-      tag.reload
-      assert_equal(Tag.categories.artist, tag.category)
+    context "when creating" do
+      should "create a new artist tag if one does not already exist" do
+        FactoryBot.create(:artist, name: "bkub")
+        assert(Tag.exists?(name: "bkub", category: Tag.categories.artist))
+      end
+
+      should "change the tag to an artist tag if it was a gentag" do
+        tag = FactoryBot.create(:tag, name: "abc", category: Tag.categories.general)
+        artist = FactoryBot.create(:artist, name: "abc")
+
+        assert_equal(Tag.categories.artist, tag.reload.category)
+      end
+
+      should "not allow creating artist entries for non-artist tags" do
+        tag = FactoryBot.create(:tag, name: "touhou", category: Tag.categories.copyright)
+        artist = FactoryBot.build(:artist, name: "touhou")
+
+        assert(artist.invalid?)
+        assert_match(/'touhou' is a copyright tag/, artist.errors.full_messages.join)
+      end
     end
 
-    should "update the category of the tag when renamed" do
-      tag = FactoryBot.create(:tag, :name => "def")
-      artist = FactoryBot.create(:artist, :name => "abc")
-      artist.name = "def"
-      artist.save
-      tag.reload
-      assert_equal(Tag.categories.artist, tag.category)
+    context "when renaming" do
+      should "change the new tag to an artist tag if it was a gentag" do
+        tag = FactoryBot.create(:tag, name: "def", category: Tag.categories.general)
+        artist = FactoryBot.create(:artist, name: "abc")
+        artist.update(name: "def")
+
+        assert_equal(Tag.categories.artist, tag.reload.category)
+      end
     end
 
     context "when saving" do

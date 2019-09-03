@@ -6,8 +6,6 @@ class Dmail < ApplicationRecord
   AUTOBAN_WINDOW = 24.hours
   AUTOBAN_DURATION = 3
 
-  include Rakismet::Model
-
   validates_presence_of :title, :body, on: :create
   validate :validate_sender_is_not_banned, on: :create
 
@@ -19,8 +17,6 @@ class Dmail < ApplicationRecord
   before_create :auto_read_if_filtered
   after_create :update_recipient
   after_commit :send_email, on: :create
-
-  rakismet_attrs author: :from_name, author_email: :from_email, content: :title_and_body, user_ip: :creator_ip_addr_str
 
   concerning :SpamMethods do
     class_methods do
@@ -40,36 +36,14 @@ class Dmail < ApplicationRecord
       end
     end
 
-    def title_and_body
-      "#{title}\n\n#{body}"
-    end
-
-    def creator_ip_addr_str
-      creator_ip_addr.to_s
-    end
-
     def spam?
-      return false if Danbooru.config.rakismet_key.blank?
-      return false if from.is_gold?
-      super()
+      SpamDetector.new(self).spam?
     end
   end
 
   module AddressMethods
-    def to_name
-      User.id_to_pretty_name(to_id)
-    end
-
-    def from_name
-      User.id_to_pretty_name(from_id)
-    end
-
-    def from_email
-      from.email
-    end
-
     def to_name=(name)
-      self.to_id = User.name_to_id(name)
+      self.to = User.find_by_name(name)
     end
 
     def initialize_attributes
@@ -164,40 +138,14 @@ class Dmail < ApplicationRecord
       where("owner_id = ?", CurrentUser.id)
     end
 
-    def to_name_matches(name)
-      where("to_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
-    end
-
-    def from_name_matches(name)
-      where("from_id = (select _.id from users _ where lower(_.name) = ?)", name.mb_chars.downcase)
-    end
-
     def search(params)
       q = super
 
-      q = q.attribute_matches(:title, params[:title_matches])
-      q = q.attribute_matches(:body, params[:message_matches], index_column: :message_index)
-
-      if params[:to_name].present?
-        q = q.to_name_matches(params[:to_name])
-      end
-
-      if params[:to_id].present?
-        q = q.where("to_id = ?", params[:to_id].to_i)
-      end
-
-      if params[:from_name].present?
-        q = q.from_name_matches(params[:from_name])
-      end
-
-      if params[:from_id].present?
-        q = q.where("from_id = ?", params[:from_id].to_i)
-      end
+      q = q.search_attributes(params, :to, :from, :is_spam, :is_read, :is_deleted, :title, :body)
+      q = q.text_attribute_matches(:title, params[:title_matches])
+      q = q.text_attribute_matches(:body, params[:message_matches], index_column: :message_index)
 
       params[:is_spam] = false unless params[:is_spam].present?
-      q = q.attribute_matches(:is_spam, params[:is_spam])
-      q = q.attribute_matches(:is_read, params[:is_read])
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
 
       q = q.read if params[:read].to_s.truthy?
       q = q.unread if params[:read].to_s.falsy?
@@ -214,18 +162,15 @@ class Dmail < ApplicationRecord
   def validate_sender_is_not_banned
     if from.try(:is_banned?)
       errors[:base] << "Sender is banned and cannot send messages"
-      return false
-    else
-      return true
     end
   end
 
   def quoted_body
-    "[quote]\n#{from_name} said:\n\n#{body}\n[/quote]\n\n"
+    "[quote]\n#{from.pretty_name} said:\n\n#{body}\n[/quote]\n\n"
   end
 
   def send_email
-    if !is_spam? && to.receive_email_notifications? && to.email =~ /@/ && owner_id == to.id
+    if is_recipient? && !is_spam? && to.receive_email_notifications? && to.email =~ /@/
       UserMailer.dmail_notice(self).deliver_now
     end
   end
@@ -241,27 +186,35 @@ class Dmail < ApplicationRecord
     from == User.system
   end
 
+  def is_sender?
+    owner == from
+  end
+
+  def is_recipient?
+    owner == to
+  end
+
   def filtered?
     CurrentUser.dmail_filter.try(:filtered?, self)
   end
 
   def auto_read_if_filtered
-    if owner_id != CurrentUser.id && to.dmail_filter.try(:filtered?, self)
+    if is_recipient? && to.dmail_filter.try(:filtered?, self)
       self.is_read = true
     end
   end
 
   def update_recipient
-    if owner_id != CurrentUser.user.id && !is_deleted? && !is_read?
+    if is_recipient? && !is_deleted? && !is_read?
       to.update(has_mail: true, unread_dmail_count: to.dmails.unread.count)
     end
   end
-  
+
   def key
     verifier = ActiveSupport::MessageVerifier.new(Danbooru.config.email_key, serializer: JSON, digest: "SHA256")
     verifier.generate("#{title} #{body}")
   end
-  
+
   def visible_to?(user, key)
     owner_id == user.id || (user.is_moderator? && key == self.key)
   end

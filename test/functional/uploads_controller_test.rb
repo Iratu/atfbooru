@@ -137,6 +137,7 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
       setup do
         as_user do
           @upload = create(:source_upload, tag_string: "foo bar")
+          @upload2 = create(:source_upload, tag_string: "tagme", rating: "e")
         end
       end
 
@@ -148,17 +149,19 @@ class UploadsControllerTest < ActionDispatch::IntegrationTest
       context "with search parameters" do
         should "render" do
           search_params = {
-            uploader_name: @upload.uploader_name,
+            uploader_name: @upload.uploader.name,
             source_matches: @upload.source,
             rating: @upload.rating,
-            has_post: "yes",
-            post_tags_match: @upload.tag_string,
             status: @upload.status,
             server: @upload.server,
           }
 
           get uploads_path, params: { search: search_params }
           assert_response :success
+
+          get uploads_path(format: :json), params: { search: search_params }
+          assert_response :success
+          assert_equal(@upload.id, response.parsed_body.first["id"])
         end
       end
     end

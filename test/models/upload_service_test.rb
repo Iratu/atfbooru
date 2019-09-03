@@ -94,16 +94,15 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "work on an ugoira url" do
-          begin
-            file = subject.get_file_for_upload(@upload)
+          skip unless PixivUgoiraConverter.enabled?
+          file = subject.get_file_for_upload(@upload)
 
-            assert_not_nil(@upload.context["ugoira"])
-            assert_operator(File.size(file.path), :>, 0)
+          assert_not_nil(@upload.context["ugoira"])
+          assert_operator(File.size(file.path), :>, 0)
 
-            file.close
-          rescue Net::OpenTimeout
-            skip "network failure"
-          end
+          file.close
+        rescue Net::OpenTimeout
+          skip "network failure"
         end
       end
     end
@@ -227,6 +226,8 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "generate a preview and a video" do
+          skip unless PixivUgoiraConverter.enabled?
+
           preview, crop, sample = subject.generate_resizes(@file, @upload)
           assert_operator(File.size(preview.path), :>, 0)
           assert_operator(File.size(crop.path), :>, 0)
@@ -454,6 +455,8 @@ class UploadServiceTest < ActiveSupport::TestCase
         end
 
         should "download the file" do
+          skip unless PixivUgoiraConverter.enabled?
+
           @service = subject.new(source: @source)
           begin
             @upload = @service.start!
@@ -838,7 +841,7 @@ class UploadServiceTest < ActiveSupport::TestCase
             as_user { @post.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350") }
 
             travel_to((PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now) do
-              Delayed::Worker.new.work_off
+              workoff_active_jobs
             end
           rescue Net::OpenTimeout
             skip "Remote connection to Pixiv failed"
@@ -848,7 +851,7 @@ class UploadServiceTest < ActiveSupport::TestCase
 
       context "a post that is replaced by a ugoira" do
         should "save the frame data" do
-          skip "ffmpeg not installed" unless check_ffmpeg
+          skip "ffmpeg not installed" unless PixivUgoiraConverter.enabled?
           begin
             as_user { @post.replace!(replacement_url: "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364") }
             @post.reload
@@ -871,6 +874,8 @@ class UploadServiceTest < ActiveSupport::TestCase
       context "a post that is replaced to another file then replaced back to the original file" do
         should "not delete the original files" do
           begin
+            skip unless PixivUgoiraConverter.enabled?
+
             # this is called thrice to delete the file for 62247364
             FileUtils.expects(:rm_f).times(3) 
 
@@ -887,7 +892,7 @@ class UploadServiceTest < ActiveSupport::TestCase
             assert_nothing_raised { @post.file(:preview) }
 
             travel_to((PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now) do
-              Delayed::Worker.new.work_off
+              workoff_active_jobs
             end
 
             assert_nothing_raised { @post.file(:original) }
@@ -910,24 +915,30 @@ class UploadServiceTest < ActiveSupport::TestCase
           # swap the images between @post1 and @post2.
           begin
             as_user do
+              skip unless PixivUgoiraConverter.enabled?
+
               @post1.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350")
               @post2.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364")
               assert_equal("4ceadc314938bc27f3574053a3e1459a", @post1.md5)
               assert_equal("cad1da177ef309bf40a117c17b8eecf5", @post2.md5)
+
               @post2.reload
               @post2.replace!(replacement_url: "https://raikou1.donmai.us/d3/4e/d34e4cf0a437a5d65f8e82b7bcd02606.jpg")
               assert_equal("d34e4cf0a437a5d65f8e82b7bcd02606", @post2.md5)
               Upload.destroy_all
               @post1.reload
               @post2.reload
+
               @post1.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247364")
               @post2.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350")
               assert_equal("cad1da177ef309bf40a117c17b8eecf5", @post1.md5)
               assert_equal("4ceadc314938bc27f3574053a3e1459a", @post2.md5)
             end
 
-            Timecop.travel(Time.now + PostReplacement::DELETION_GRACE_PERIOD + 1.day) do
-              Delayed::Worker.new.work_off
+            travel_to (PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now do
+              assert_raise(Post::DeletionError) do
+                workoff_active_jobs
+              end
             end
 
             assert_nothing_raised { @post1.file(:original) }
@@ -1221,5 +1232,54 @@ class UploadServiceTest < ActiveSupport::TestCase
       end
     end
 
+  end
+
+  context "Upload#prune!" do
+    setup do
+      @user = create(:user, created_at: 1.year.ago)
+    end
+
+    should "delete stale upload records" do
+      @upload = as(@user) { UploadService.new(file: upload_file("test/files/test.jpg")).start! }
+
+      assert_difference("Upload.count", -1) { Upload.prune!(0.seconds.ago) }
+    end
+
+    should "delete unused files after deleting the upload" do
+      @upload = as(@user) { UploadService::Preprocessor.new(file: upload_file("test/files/test.jpg")).start! }
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
+
+      @upload.destroy!
+      refute(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
+    end
+
+    should "not delete files that are still in use by a post" do
+      @upload = as(@user) { UploadService.new(file: upload_file("test/files/test.jpg")).start! }
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
+
+      @upload.destroy!
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
+    end
+
+    should "not delete files if they're still in use by another upload" do
+      @upload1 = as(@user) { UploadService::Preprocessor.new(file: upload_file("test/files/test.jpg")).start! }
+      @upload2 = as(@user) { UploadService::Preprocessor.new(file: upload_file("test/files/test.jpg")).start! }
+      assert_equal(@upload1.md5, @upload2.md5)
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload1.md5, "jpg", :original)))
+
+      @upload1.destroy!
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload1.md5, "jpg", :original)))
+
+      @upload2.destroy!
+      refute(File.exists?(Danbooru.config.storage_manager.file_path(@upload2.md5, "jpg", :original)))
+    end
+
+    should "work on uploads without a file" do
+      @upload = as(@user) { UploadService.new(source: "http://14903gf0vm3g134yjq3n535yn3n.com/does_not_exist.jpg").start! }
+
+      assert(@upload.is_errored?)
+      assert_nil(@upload.md5)
+      assert_difference("Upload.count", -1) { @upload.destroy! }
+    end
   end
 end

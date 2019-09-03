@@ -7,7 +7,6 @@ class User < ApplicationRecord
 
   module Levels
     ANONYMOUS = 0
-    BLOCKED = 10
     MEMBER = 20
     GOLD = 30
     PLATINUM = 31
@@ -22,7 +21,6 @@ class User < ApplicationRecord
     :approver,
     :voter,
     :super_voter,
-    :verified,
   ]
 
   # candidates for removal:
@@ -77,7 +75,6 @@ class User < ApplicationRecord
   validates_inclusion_of :default_image_size, :in => %w(large original)
   validates_inclusion_of :per_page, :in => 1..100
   validates_confirmation_of :password
-  validates_presence_of :email, :if => ->(rec) { rec.new_record? && Danbooru.config.enable_email_verification?}
   validates_presence_of :comment_threshold
   validate :validate_ip_addr_is_not_banned, :on => :create
   validate :validate_sock_puppets, :on => :create, :if => -> { Danbooru.config.enable_sock_puppet_validation? }
@@ -86,17 +83,20 @@ class User < ApplicationRecord
   before_validation :normalize_email
   before_create :encrypt_password_on_create
   before_update :encrypt_password_on_update
-  after_save :update_cache
   before_create :promote_to_admin_if_first_user
   before_create :customize_new_user
-  #after_create :notify_sock_puppets
+  has_many :artist_versions, foreign_key: :updater_id
+  has_many :artist_commentary_versions, foreign_key: :updater_id
+  has_many :comments, foreign_key: :creator_id
+  has_many :wiki_page_versions, foreign_key: :updater_id
   has_many :feedback, :class_name => "UserFeedback", :dependent => :destroy
   has_many :posts, :foreign_key => "uploader_id"
+  has_many :post_appeals, foreign_key: :creator_id
   has_many :post_approvals, :dependent => :destroy
   has_many :post_disapprovals, :dependent => :destroy
+  has_many :post_flags, foreign_key: :creator_id
   has_many :post_votes
   has_many :post_archives
-  has_many :note_versions
   has_many :bans, -> {order("bans.id desc")}
   has_one :recent_ban, -> {order("bans.id desc")}, :class_name => "Ban"
 
@@ -117,8 +117,7 @@ class User < ApplicationRecord
   module BanMethods
     def validate_ip_addr_is_not_banned
       if IpBan.is_banned?(CurrentUser.ip_addr)
-        self.errors[:base] << "IP address is banned"
-        return false
+        errors[:base] << "IP address is banned"
       end
     end
 
@@ -132,33 +131,15 @@ class User < ApplicationRecord
     end
   end
 
-  module NameMethods
-    extend ActiveSupport::Concern
-
-    module ClassMethods
+  concerning :NameMethods do
+    class_methods do
       def name_to_id(name)
-        Cache.get("uni:#{Cache.hash(name)}", 4.hours) do
-          val = select_value_sql("SELECT id FROM users WHERE lower(name) = ?", name.mb_chars.downcase.tr(" ", "_").to_s)
-          if val.present?
-            val.to_i
-          else
-            nil
-          end
-        end
+        find_by_name(name).try(:id)
       end
 
-      def id_to_name(user_id)
-        Cache.get("uin:#{user_id}", 4.hours) do
-          select_value_sql("SELECT name FROM users WHERE id = ?", user_id) || Danbooru.config.default_guest_name
-        end
-      end
-
+      # XXX downcasing is the wrong way to do case-insensitive comparison for unicode (should use casefolding).
       def find_by_name(name)
-        where("lower(name) = ?", name.mb_chars.downcase.tr(" ", "_")).first
-      end
-
-      def id_to_pretty_name(user_id)
-        id_to_name(user_id).gsub(/([^_])_+(?=[^_])/, "\\1 \\2")
+        where_ilike(:name, normalize_name(name)).first
       end
 
       def normalize_name(name)
@@ -168,11 +149,6 @@ class User < ApplicationRecord
 
     def pretty_name
       name.gsub(/([^_])_+(?=[^_])/, "\\1 \\2")
-    end
-
-    def update_cache
-      Cache.put("uin:#{id}", name, 4.hours)
-      Cache.put("uni:#{Cache.hash(name)}", id, 4.hours)
     end
   end
 
@@ -299,9 +275,6 @@ class User < ApplicationRecord
         when Levels::ANONYMOUS
           "Anonymous"
 
-        when Levels::BLOCKED
-          "Banned"
-
         when Levels::MEMBER
           "Member"
 
@@ -347,10 +320,6 @@ class User < ApplicationRecord
       Danbooru.config.customize_new_user(self)
     end
 
-    def role
-      level_string.downcase.to_sym
-    end
-
     def level_string_was
       level_string(level_was)
     end
@@ -367,10 +336,6 @@ class User < ApplicationRecord
       level >= Levels::MEMBER
     end
 
-    def is_blocked?
-      is_banned?
-    end
-
     def is_builder?
       level >= Levels::BUILDER
     end
@@ -384,10 +349,6 @@ class User < ApplicationRecord
     end
 
     def is_moderator?
-      level >= Levels::MODERATOR
-    end
-
-    def is_mod?
       level >= Levels::MODERATOR
     end
 
@@ -407,32 +368,10 @@ class User < ApplicationRecord
       if per_page.nil? || !is_gold?
         self.per_page = Danbooru.config.posts_per_page
       end
-      
-      return true
-    end
-
-    def level_class
-      "user-#{level_string.downcase}"
     end
   end
 
   module EmailMethods
-    def is_verified?
-      email_verification_key.blank?
-    end
-
-    def generate_email_verification_key
-      self.email_verification_key = Digest::SHA1.hexdigest("#{Time.now.to_f}--#{name}--#{rand(1_000_000)}--")
-    end
-
-    def verify!(key)
-      if email_verification_key == key
-        self.update_column(:email_verification_key, nil)
-      else
-        raise User::Error.new("Verification key does not match")
-      end
-    end
-
     def normalize_email
       self.email = nil if email.blank?
     end
@@ -463,10 +402,6 @@ class User < ApplicationRecord
       else
         250
       end
-    end
-
-    def show_saved_searches?
-      true
     end
 
     def can_upload?
@@ -526,8 +461,8 @@ end
     end
 
     def used_upload_slots
-      uploaded_count = Post.for_user(id).where("created_at >= ?", 23.hours.ago).count
-      uploaded_comic_count = Post.for_user(id).tag_match("comic").where("created_at >= ?", 23.hours.ago).count / 3
+      uploaded_count = posts.where("created_at >= ?", 23.hours.ago).count
+      uploaded_comic_count = posts.tag_match("comic").where("created_at >= ?", 23.hours.ago).count / 3
       uploaded_count - uploaded_comic_count
     end
     memoize :used_upload_slots
@@ -685,15 +620,15 @@ end
 
   module CountMethods
     def wiki_page_version_count
-      WikiPageVersion.for_user(id).count
+      wiki_page_versions.count
     end
 
     def artist_version_count
-      ArtistVersion.for_user(id).count
+      artist_versions.count
     end
 
     def artist_commentary_version_count
-      ArtistCommentaryVersion.for_user(id).count
+      artist_commentary_versions.count
     end
 
     def pool_version_count
@@ -702,11 +637,11 @@ end
     end
 
     def forum_post_count
-      ForumPost.for_user(id).count
+      forum_posts.count
     end
 
     def comment_count
-      Comment.for_creator(id).count
+      comments.count
     end
 
     def favorite_group_count
@@ -714,11 +649,11 @@ end
     end
 
     def appeal_count
-      PostAppeal.for_creator(id).count
+      post_appeals.count
     end
 
     def flag_count
-      PostFlag.for_creator(id).count
+      post_flags.count
     end
 
     def positive_feedback_count
@@ -736,19 +671,15 @@ end
     def refresh_counts!
       self.class.without_timeout do
         User.where(id: id).update_all(
-          post_upload_count: Post.for_user(id).count,
+          post_upload_count: posts.count,
           post_update_count: PostArchive.for_user(id).count,
-          note_update_count: NoteVersion.where(updater_id: id).count
+          note_update_count: note_versions.count
         )
       end
     end
   end
 
   module SearchMethods
-    def named(name)
-      where("lower(name) = ?", name)
-    end
-
     def admins
       where("level = ?", Levels::ADMIN)
     end
@@ -771,34 +702,16 @@ end
       end
     end
 
-    def find_for_password_reset(name, email)
-      if email.blank?
-        where("FALSE")
-      else
-        where(["name = ? AND email = ?", name, email])
-      end
-    end
-
     def search(params)
       q = super
 
       params = params.dup
       params[:name_matches] = params.delete(:name) if params[:name].present?
 
-      q = q.search_text_attribute(:name, params)
-      q = q.attribute_matches(:level, params[:level])
-      q = q.attribute_matches(:inviter_id, params[:inviter_id])
-      q = q.attribute_matches(:post_upload_count, params[:post_upload_count])
-      q = q.attribute_matches(:post_update_count, params[:post_update_count])
-      q = q.attribute_matches(:note_update_count, params[:note_update_count])
-      q = q.attribute_matches(:favorite_count, params[:favorite_count])
+      q = q.search_attributes(params, :name, :level, :inviter, :post_upload_count, :post_update_count, :note_update_count, :favorite_count)
 
       if params[:name_matches].present?
         q = q.where_ilike(:name, normalize_name(params[:name_matches]))
-      end
-
-      if params[:inviter].present?
-        q = q.where(inviter_id: search(params[:inviter]))
       end
 
       if params[:min_level].present?
@@ -839,9 +752,9 @@ end
       end
 
       if params[:current_user_first].to_s.truthy? && !CurrentUser.is_anonymous?
-        q = q.order("id = #{CurrentUser.user.id.to_i} desc")
+        q = q.order(Arel.sql("id = #{CurrentUser.id} desc"))
       end
-      
+
       case params[:order]
       when "name"
         q = q.order("name")
@@ -874,7 +787,6 @@ end
   end
 
   include BanMethods
-  include NameMethods
   include PasswordMethods
   include AuthenticationMethods
   include LevelMethods
@@ -889,10 +801,6 @@ end
 
   def as_current(&block)
     CurrentUser.as(self, &block)
-  end
-
-  def can_update?(object, foreign_key = :user_id)
-    is_moderator? || is_admin? || object.__send__(foreign_key) == id
   end
 
   def dmail_count

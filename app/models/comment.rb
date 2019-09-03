@@ -2,6 +2,7 @@ class Comment < ApplicationRecord
   include Mentionable
 
   validate :validate_creator_is_not_limited, :on => :create
+  validate :validate_comment_is_not_spam, on: :create
   validates_presence_of :body, :message => "has no content"
   belongs_to :post
   belongs_to_creator
@@ -17,31 +18,11 @@ class Comment < ApplicationRecord
   end
   mentionable(
     :message_field => :body, 
-    :title => ->(user_name) {"#{creator_name} mentioned you in a comment on post ##{post_id}"},
-    :body => ->(user_name) {"@#{creator_name} mentioned you in a \"comment\":/posts/#{post_id}#comment-#{id} on post ##{post_id}:\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n"},
+    :title => ->(user_name) {"#{creator.name} mentioned you in a comment on post ##{post_id}"},
+    :body => ->(user_name) {"@#{creator.name} mentioned you in a \"comment\":/posts/#{post_id}#comment-#{id} on post ##{post_id}:\n\n[quote]\n#{DText.excerpt(body, "@"+user_name)}\n[/quote]\n"},
   )
 
   module SearchMethods
-    def recent
-      reorder("comments.id desc").limit(6)
-    end
-
-    def hidden(user)
-      if user.is_moderator?
-        where("(score < ? and is_sticky = false) or is_deleted = true", user.comment_threshold)
-      else
-        where("score < ? and is_sticky = false", user.comment_threshold)
-      end
-    end
-
-    def visible(user)
-      if user.is_moderator?
-        where("(score >= ? or is_sticky = true) and is_deleted = false", user.comment_threshold)
-      else
-        where("score >= ? or is_sticky = true", user.comment_threshold)
-      end
-    end
-
     def deleted
       where("comments.is_deleted = true")
     end
@@ -50,42 +31,11 @@ class Comment < ApplicationRecord
       where("comments.is_deleted = false")
     end
 
-    def post_tags_match(query)
-      where(post_id: PostQueryBuilder.new(query).build.reorder(""))
-    end
-
-    def for_creator(user_id)
-      user_id.present? ? where("creator_id = ?", user_id) : none
-    end
-
-    def for_creator_name(user_name)
-      for_creator(User.name_to_id(user_name))
-    end
-
     def search(params)
       q = super
 
-      q = q.attribute_matches(:body, params[:body_matches], index_column: :body_index)
-
-      if params[:post_id].present?
-        q = q.where("post_id in (?)", params[:post_id].split(",").map(&:to_i))
-      end
-
-      if params[:post_tags_match].present?
-        q = q.post_tags_match(params[:post_tags_match])
-      end
-
-      if params[:creator_name].present?
-        q = q.for_creator_name(params[:creator_name])
-      end
-
-      if params[:creator_id].present?
-        q = q.for_creator(params[:creator_id].to_i)
-      end
-
-      q = q.attribute_matches(:is_deleted, params[:is_deleted])
-      q = q.attribute_matches(:is_sticky, params[:is_sticky])
-      q = q.attribute_matches(:do_not_bump_post, params[:do_not_bump_post])
+      q = q.search_attributes(params, :post, :creator, :updater, :is_deleted, :is_sticky, :do_not_bump_post, :body, :score)
+      q = q.text_attribute_matches(:body, params[:body_matches], index_column: :body_index)
 
       case params[:order]
       when "post_id", "post_id_desc"
@@ -136,20 +86,16 @@ class Comment < ApplicationRecord
   extend SearchMethods
   include VoteMethods
 
-  def validate_post_exists
-    errors.add(:post, "must exist") unless Post.exists?(post_id)
-  end
-
   def validate_creator_is_not_limited
     if creator.is_comment_limited? && !do_not_bump_post?
       errors.add(:base, "You can only post #{Danbooru.config.member_comment_limit} comments per hour")
-      false
-    elsif creator.can_comment?
-      true
-    else
+    elsif !creator.can_comment?
       errors.add(:base, "You can not post comments within 1 week of sign up")
-      false
     end
+  end
+
+  def validate_comment_is_not_spam
+    errors[:base] << "Failed to create comment" if SpamDetector.new(self).spam?
   end
 
   def update_last_commented_at_on_create
@@ -157,7 +103,6 @@ class Comment < ApplicationRecord
     if Comment.where("post_id = ?", post_id).count <= Danbooru.config.comment_threshold && !do_not_bump_post?
       Post.where(:id => post_id).update_all(:last_comment_bumped_at => created_at)
     end
-    true
   end
 
   def update_last_commented_at_on_destroy
@@ -174,16 +119,30 @@ class Comment < ApplicationRecord
     else
       Post.where(:id => post_id).update_all(:last_comment_bumped_at => other_comments.first.created_at)
     end
-
-    true
-  end
-
-  def below_threshold?(user = CurrentUser.user)
-    score < user.comment_threshold
   end
 
   def editable_by?(user)
     creator_id == user.id || user.is_moderator?
+  end
+
+  def voted_by?(user)
+    return false if user.is_anonymous?
+    user.id.in?(votes.map(&:user_id))
+  end
+
+  def visibility(user)
+    return :invisible if is_deleted? && !user.is_moderator?
+    return :hidden if is_deleted? && user.is_moderator?
+    return :hidden if score < user.comment_threshold && !is_sticky?
+    return :visible
+  end
+
+  def self.hidden(user)
+    select { |comment| comment.visibility(user) == :hidden }
+  end
+
+  def self.visible(user)
+    select { |comment| comment.visibility(user) == :visible }
   end
 
   def hidden_attributes
@@ -192,6 +151,14 @@ class Comment < ApplicationRecord
 
   def method_attributes
     super + [:creator_name, :updater_name]
+  end
+
+  def creator_name
+    creator.name
+  end
+
+  def updater_name
+    updater.name
   end
 
   def delete!
@@ -203,6 +170,6 @@ class Comment < ApplicationRecord
   end
 
   def quoted_response
-    DText.quote(body, creator_name)
+    DText.quote(body, creator.name)
   end
 end

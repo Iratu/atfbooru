@@ -6,7 +6,6 @@ class BulkUpdateRequest < ApplicationRecord
   belongs_to :forum_post, optional: true
   belongs_to :approver, optional: true, class_name: "User"
 
-  validates_presence_of :user
   validates_presence_of :script
   validates_presence_of :title, if: ->(rec) {rec.forum_topic_id.blank?}
   validates_inclusion_of :status, :in => %w(pending approved rejected)
@@ -31,36 +30,13 @@ class BulkUpdateRequest < ApplicationRecord
     def search(params = {})
       q = super
 
-      if params[:user_name].present?
-        q = q.where(user_id: User.name_to_id(params[:user_name]))
-      end
-
-      if params[:user_id].present?
-        q = q.where(user_id: params[:user_id].split(",").map(&:to_i))
-      end
-
-      if params[:approver_name].present?
-        q = q.where(approver_id: User.name_to_id(params[:approver_name]))
-      end
-
-      if params[:approver_id].present?
-        q = q.where(approver_id: params[:approver_id].split(",").map(&:to_i))
-      end
-
-      if params[:forum_topic_id].present?
-        q = q.where(forum_topic_id: params[:forum_topic_id].split(",").map(&:to_i))
-      end
-
-      if params[:forum_post_id].present?
-        q = q.where(forum_post_id: params[:forum_post_id].split(",").map(&:to_i))
-      end
+      q = q.search_attributes(params, :user, :approver, :forum_topic_id, :forum_post_id, :title, :script)
+      q = q.text_attribute_matches(:title, params[:title_matches])
+      q = q.text_attribute_matches(:script, params[:script_matches])
 
       if params[:status].present?
         q = q.where(status: params[:status].split(","))
       end
-
-      q = q.attribute_matches(:title, params[:title_matches])
-      q = q.attribute_matches(:script, params[:script_matches])
 
       params[:order] ||= "status_desc"
       case params[:order]
@@ -142,10 +118,8 @@ class BulkUpdateRequest < ApplicationRecord
   module ValidationMethods
     def script_formatted_correctly
       AliasAndImplicationImporter.tokenize(script)
-      return true
     rescue StandardError => e
       errors[:base] << e.message
-      return false
     end
 
     def forum_topic_id_not_invalid
@@ -158,11 +132,8 @@ class BulkUpdateRequest < ApplicationRecord
       begin
         AliasAndImplicationImporter.new(script, forum_topic_id, "1", skip_secondary_validations).validate!
       rescue RuntimeError => e
-        self.errors[:base] << e.message
-        return false
+        errors[:base] << e.message
       end
-
-      errors.empty?
     end
   end
 

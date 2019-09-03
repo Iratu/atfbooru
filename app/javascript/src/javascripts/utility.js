@@ -1,5 +1,9 @@
 let Utility = {};
 
+Utility.delay = function(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
 Utility.meta = function(key) {
   return $("meta[name=" + key + "]").attr("content");
 }
@@ -106,15 +110,5 @@ $.fn.selectEnd = function() {
     this.setSelectionRange(this.value.length, this.value.length);
   })
 }
-
-$(function() {
-  $(window).on("danbooru:notice", function(event, msg) {
-    Utility.notice(msg);
-  })
-
-  $(window).on("danbooru:error", function(event, msg) {
-    Utility.error(msg);
-  })
-});
 
 export default Utility
