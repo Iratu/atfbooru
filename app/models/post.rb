@@ -30,7 +30,6 @@ class Post < ApplicationRecord
   validate :updater_can_change_rating
   before_save :update_tag_post_counts
   before_save :set_tag_counts
-  before_save :set_pool_category_pseudo_tags
   before_create :autoban
   after_save :create_version
   after_save :update_parent_on_save
@@ -343,6 +342,8 @@ class Post < ApplicationRecord
 
     def normalized_source
       case source
+      when %r{\Ahttps?://twitter.com/[^/]+/status/(\d+)\z}i
+        "https://twitter.com/i/web/status/#{$1}"
       when %r{\Ahttps?://img\d+\.pixiv\.net/img/[^\/]+/(\d+)}i, 
            %r{\Ahttps?://i\d\.pixiv\.net/img\d+/img/[^\/]+/(\d+)}i
         "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=#{$1}"
@@ -1022,11 +1023,7 @@ class Post < ApplicationRecord
 
   module PoolMethods
     def pools
-      @pools ||= begin
-        return Pool.none if pool_string.blank?
-        pool_ids = pool_string.scan(/\d+/)
-        Pool.where(id: pool_ids).series_first
-      end
+      Pool.where("pools.post_ids && array[?]", id).series_first
     end
 
     def has_active_pools?
@@ -1047,7 +1044,6 @@ class Post < ApplicationRecord
 
       with_lock do
         self.pool_string = "#{pool_string} pool:#{pool.id}".strip
-        set_pool_category_pseudo_tags
         update_column(:pool_string, pool_string) unless new_record?
         pool.add!(self)
       end
@@ -1059,7 +1055,6 @@ class Post < ApplicationRecord
 
       with_lock do
         self.pool_string = pool_string.gsub(/(?:\A| )pool:#{pool.id}(?:\Z| )/, " ").strip
-        set_pool_category_pseudo_tags
         update_column(:pool_string, pool_string) unless new_record?
         pool.remove!(self)
       end
@@ -1068,18 +1063,6 @@ class Post < ApplicationRecord
     def remove_from_all_pools
       pools.find_each do |pool|
         pool.remove!(self)
-      end
-    end
-
-    def set_pool_category_pseudo_tags
-      self.pool_string = (pool_string.split - ["pool:series", "pool:collection"]).join(" ")
-
-      pool_categories = pools.undeleted.pluck(:category)
-      if pool_categories.include?("series")
-        self.pool_string = "#{pool_string} pool:series".strip
-      end
-      if pool_categories.include?("collection")
-        self.pool_string = "#{pool_string} pool:collection".strip
       end
     end
   end
@@ -1117,7 +1100,7 @@ class Post < ApplicationRecord
       tags = tags.to_s
       tags += " rating:s" if CurrentUser.safe_mode?
       tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !Tag.has_metatag?(tags, "status", "-status")
-      tags = Tag.normalize_query(tags, normalize_aliases: false)
+      tags = Tag.normalize_query(tags)
 
       # optimize some cases. these are just estimates but at these
       # quantities being off by a few hundred doesn't matter much
@@ -1468,23 +1451,13 @@ class Post < ApplicationRecord
   end
 
   module ApiMethods
-    def hidden_attributes
-      list = super + [:tag_index]
-      unless CurrentUser.is_moderator?
-        list += [:fav_string]
-      end
-      if !visible?
-        list += [:md5, :file_ext]
-      end
-      super + list
-    end
-
-    def method_attributes
-      list = super + [:uploader_name, :has_large, :has_visible_children, :children_ids, :is_favorited?] + TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
-      if visible?
-        list += [:file_url, :large_file_url, :preview_file_url]
-      end
-      list
+    def api_attributes
+      attributes = super
+      attributes += [:uploader_name, :has_large, :has_visible_children, :children_ids, :is_favorited?] + TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
+      attributes += [:file_url, :large_file_url, :preview_file_url] if visible?
+      attributes -= [:md5, :file_ext] if !visible?
+      attributes -= [:fav_string] if !CurrentUser.is_moderator?
+      attributes
     end
 
     def associated_attributes

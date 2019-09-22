@@ -191,5 +191,35 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
       assert_equal(1, response.parsed_body.size)
       assert_equal(tags.first.id, response.parsed_body.first.fetch("id"))
     end
+
+    should "support the expiry parameter" do
+      get posts_path, as: :json, params: { expiry: "1" }
+
+      assert_response :success
+      assert_equal("max-age=#{1.day}, private", response.headers["Cache-Control"])
+    end
+
+    should "support the expires_in parameter" do
+      get posts_path, as: :json, params: { expires_in: "5min" }
+
+      assert_response :success
+      assert_equal("max-age=#{5.minutes}, private", response.headers["Cache-Control"])
+    end
+
+    should "support the only parameter" do
+      create(:post)
+      get posts_path, as: :json, params: { only: "id,rating score" }
+
+      assert_response :success
+      assert_equal(%w[id rating score].sort, response.parsed_body.first.keys.sort)
+    end
+
+    should "return the correct root element name for empty xml responses" do
+      get tags_path, as: :xml
+
+      assert_response :success
+      assert_equal("tags", response.parsed_body.root.name)
+      assert_equal(0, response.parsed_body.root.children.size)
+    end
   end
 end

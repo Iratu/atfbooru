@@ -74,6 +74,8 @@ class Upload < ApplicationRecord
 
   scope :preprocessed, -> { where(status: "preprocessed") }
 
+  api_attributes including: [:uploader_name]
+
   def initialize_attributes
     self.uploader_id = CurrentUser.id
     self.uploader_ip_addr = CurrentUser.ip_addr
@@ -103,7 +105,7 @@ class Upload < ApplicationRecord
 
     def delete_files
       # md5 is blank if the upload errored out before downloading the file.
-      if md5.blank? || Upload.where(md5: md5).exists? || Post.where(md5: md5).exists?
+      if is_completed? || md5.blank? || Upload.where(md5: md5).exists? || Post.where(md5: md5).exists?
         return
       end
 
@@ -229,18 +231,11 @@ class Upload < ApplicationRecord
     end
   end
 
-  module ApiMethods
-    def method_attributes
-      super + [:uploader_name]
-    end
-  end
-
   include FileMethods
   include StatusMethods
   include UploaderMethods
   include VideoMethods
   extend SearchMethods
-  include ApiMethods
   include SourceMethods
 
   def uploader_is_not_limited

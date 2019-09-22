@@ -26,11 +26,7 @@ class ForumPostsController < ApplicationController
   def index
     @query = ForumPost.search(search_params)
     @forum_posts = @query.includes(:topic).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
-    respond_with(@forum_posts) do |format|
-      format.xml do
-        render :xml => @forum_posts.to_xml(:root => "forum-posts")
-      end
-    end
+    respond_with(@forum_posts)
   end
 
   def search
@@ -76,24 +72,7 @@ private
   end
 
   def check_min_level
-    if CurrentUser.user.level < @forum_topic.min_level
-      respond_with(@forum_topic) do |fmt|
-        fmt.html do
-          flash[:notice] = "Access denied"
-          redirect_to forum_topics_path
-        end
-
-        fmt.json do
-          render json: nil, :status => 403
-        end
-
-        fmt.xml do
-          render xml: nil, :status => 403
-        end
-      end
-
-      return false
-    end
+    raise User::PrivilegeError if CurrentUser.user.level < @forum_topic.min_level
   end
 
   def check_privilege(forum_post)

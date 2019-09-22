@@ -2,7 +2,7 @@
   <div id="a-index">
     <h1>Disapprovals</h1>
 
-    <%= simple_form_for(:search, url: moderator_post_disapprovals_path, method: :get, defaults: { required: false }, html: { class: "inline-form" }) do |f| %>
+    <%= search_form_for(moderator_post_disapprovals_path) do |f| %>
       <%= f.input :user_name, label: "Creator", input_html: { value: params[:search][:user_name] } %>
       <%= f.input :post_id, label: "Post ID", input_html: { value: params[:search][:post_id] } %>
       <%= f.input :post_tags_match, label: "Tags", input_html: { value: params[:search][:post_tags_match], data: { autocomplete: "tag-query" } } %>
@@ -29,7 +29,11 @@
               <%= link_to "post ##{post_disapproval.post_id}", post_path(post_disapproval.post_id) %>
               <%= link_to "»", moderator_post_disapprovals_path(search: params[:search].merge(post_id: post_disapproval.post_id)) %>
             </td>
-            <td class="col-expand"><%= format_text(post_disapproval.message) %></td>
+            <td class="col-expand">
+              <div class="prose">
+                <%= format_text(post_disapproval.message) %>
+              </div>
+            </td>
             <td>
               <%= link_to post_disapproval.reason.humanize, moderator_post_disapprovals_path(search: params[:search].merge(reason: post_disapproval.reason)) %>
             </td>

@@ -1,18 +1,18 @@
 @import "../base/000_vars.scss";
 
 a.pool-category-series, .pool-category-series a {
-  color: #A0A;
+  color: var(--series-pool-color);
 
   &:hover {
-    color: #B6B;
+    color: var(--series-pool-hover-color);
   }
 }
 
 a.pool-category-collection, .pool-category-collection a {
-  color: $link_color;
+  color: var(--collection-pool-color);
 
   &:hover {
-    color: $link_hover_color;
+    color: var(--collection-pool-hover-color);
   }
 }
 
@@ -30,10 +30,6 @@ div#add-to-pool-dialog {
 
   h1 {
     font-size: $h3_size;
-  }
-  
-  .hint {
-    display: block;
   }
 }
 
@@ -80,6 +76,12 @@ div#c-pool-orders, div#c-favorite-group-orders {
         background: none;
       }
     }
+  }
+}
+
+div#c-pool-versions {
+  del a, ins a {
+    margin-right: 0.25em;
   }
 }
 

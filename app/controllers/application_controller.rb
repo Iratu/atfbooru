@@ -1,14 +1,16 @@
 class ApplicationController < ActionController::Base
   class ApiLimitError < StandardError; end
 
+  self.responder = ApplicationResponder
+
   skip_forgery_protection if: -> { SessionLoader.new(request).has_api_authentication? }
   before_action :reset_current_user
   before_action :set_current_user
   before_action :normalize_search
   before_action :api_check
   before_action :set_variant
-  before_action :track_only_param
   before_action :enable_cors
+  before_action :cause_error
   after_action :reset_current_user
   layout "default"
 
@@ -24,12 +26,6 @@ class ApplicationController < ActionController::Base
 
   def enable_cors
     response.headers["Access-Control-Allow-Origin"] = "*"
-  end
-
-  def track_only_param
-    if params[:only]
-      RequestStore[:only_param] = params[:only].split(/,/)
-    end
   end
 
   def api_check
@@ -67,9 +63,9 @@ class ApplicationController < ActionController::Base
     when ActionController::UnknownFormat, ActionView::MissingTemplate
       render_error_page(406, exception, message: "#{request.format.to_s} is not a supported format for this page")
     when Danbooru::Paginator::PaginationError
-      render_error_page(410, exception)
+      render_error_page(410, exception, template: "static/pagination_error", message: "You cannot go beyond page #{Danbooru.config.max_numbered_pages}.")
     when Post::SearchError
-      render_error_page(422, exception)
+      render_error_page(422, exception, template: "static/tag_limit_error", message: "You cannot search for more than #{CurrentUser.tag_query_limit} tags at a time.")
     when ApiLimitError
       render_error_page(429, exception)
     when NotImplementedError
@@ -110,6 +106,19 @@ class ApplicationController < ActionController::Base
 
   def set_variant
     request.variant = params[:variant].try(:to_sym)
+  end
+
+  # allow api clients to force errors for testing purposes.
+  def cause_error
+    return unless params[:error].present?
+
+    status = params[:error].to_i
+    raise ArgumentError, "invalid status code" unless status.in?(400..599)
+
+    error = StandardError.new(params[:message])
+    error.set_backtrace(caller)
+
+    render_error_page(status, error)
   end
 
   User::Roles.each do |role|

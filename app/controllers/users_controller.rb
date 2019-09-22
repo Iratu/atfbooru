@@ -19,6 +19,7 @@ class UsersController < ApplicationController
     if @user.is_anonymous?
       redirect_to new_session_path
     else
+      params[:action] = "edit"
       respond_with(@user, template: "users/edit")
     end
   end
@@ -29,15 +30,7 @@ class UsersController < ApplicationController
       redirect_to user_path(@user)
     else
       @users = User.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
-      respond_with(@users) do |format|
-        format.xml do
-          render :xml => @users.to_xml(:root => "users")
-        end
-        format.json do
-          render json: @users.to_json
-          expires_in params[:expiry].to_i.days if params[:expiry]
-        end
-      end
+      respond_with(@users)
     end
   end
 
@@ -53,6 +46,7 @@ class UsersController < ApplicationController
     @user = CurrentUser.user
 
     if @user.is_member?
+      params[:action] = "show"
       respond_with(@user, methods: @user.full_attributes, template: "users/show")
     elsif request.format.html?
       redirect_to new_session_path
@@ -107,7 +101,7 @@ class UsersController < ApplicationController
     permitted_params = %i[
       password old_password password_confirmation email
       comment_threshold default_image_size favorite_tags blacklisted_tags
-      time_zone per_page custom_style
+      time_zone per_page custom_style theme
 
       receive_email_notifications always_resize_images enable_post_navigation
       new_post_navigation_layout enable_privacy_mode

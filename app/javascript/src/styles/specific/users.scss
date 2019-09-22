@@ -1,12 +1,6 @@
-@import "../base/000_vars.scss";
-
 div#c-users {
   div#a-show {
     div.box {
-      h2, h3 {
-        color: #333;
-      }
-
       margin-bottom: 2em;
     }
 
@@ -56,13 +50,8 @@ div#c-users {
       margin-bottom: 2em;
     }
 
-    div.input span.hint {
-      display: block;
-      max-width: 70%;
-    }
-
     .active {
-      color: black;
+      color: var(--text-color);
     }
   }
 

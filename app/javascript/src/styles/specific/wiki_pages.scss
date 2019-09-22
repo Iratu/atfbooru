@@ -1,8 +1,4 @@
 div#c-wiki-pages {
-  form span.hint {
-    display: block;
-  }
-
   #a-new {
     div.notice {
       font-size: 0.8em;
@@ -13,7 +9,7 @@ div#c-wiki-pages {
 }
 
 .wiki-other-name {
-  background-color: #EEE;
+  background-color: var(--wiki-page-other-name-background-color);
   padding: 3px;
   border-radius: 3px;
 }

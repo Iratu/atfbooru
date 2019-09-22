@@ -104,27 +104,6 @@ Autocomplete.initialize_tag_autocomplete = function() {
       }
 
       switch (metatag) {
-      case "md5":
-      case "width":
-      case "height":
-      case "mpixels":
-      case "ratio":
-      case "score":
-      case "favcount":
-      case "filesize":
-      case "source":
-      case "id":
-      case "date":
-      case "age":
-      case "limit":
-      case "tagcount":
-      case "pixiv_id":
-      case "pixiv":
-      <% TagCategory.short_name_list.each do |category| %>
-        case "<%= category %>tags": // eslint-disable-line
-      <% end %>
-        resp([]);
-        return;
       case "order":
       case "status":
       case "rating":
@@ -160,8 +139,11 @@ Autocomplete.initialize_tag_autocomplete = function() {
       case "search":
         Autocomplete.saved_search_source(term, resp);
         break;
-      default:
+      case "tag":
         Autocomplete.normal_source(term, resp);
+        break;
+      default:
+        resp([]);
         break;
       }
     }
@@ -289,6 +271,7 @@ Autocomplete.normal_source = function(term, resp) {
 }
 
 Autocomplete.parse_query = function(text, caret) {
+  var operator = "";
   var metatag = "";
   var term = "";
 
@@ -300,9 +283,14 @@ Autocomplete.parse_query = function(text, caret) {
     return {};
   }
 
+  match = term.match(/^([-~])(.*)$/);
+  if (match) {
+    operator = match[1];
+    term = match[2];
+  }
+
   match = term.match(Autocomplete.TAG_PREFIXES_REGEX);
   if (match) {
-    metatag = match[1].toLowerCase();
     term = match[2];
   }
 
@@ -310,9 +298,11 @@ Autocomplete.parse_query = function(text, caret) {
   if (match) {
     metatag = match[1].toLowerCase();
     term = match[2];
+  } else {
+    metatag = "tag";
   }
 
-  return { metatag: metatag, term: term };
+  return { operator: operator, metatag: metatag, term: term };
 };
 
 // Update the input field with the item currently focused in the
@@ -466,6 +456,7 @@ Autocomplete.pool_source = function(term, resp, metatag) {
     data: {
       "search[order]": "post_count",
       "search[name_matches]": term,
+      "search[is_deleted]": false,
       "limit": 10
     },
     method: "get",

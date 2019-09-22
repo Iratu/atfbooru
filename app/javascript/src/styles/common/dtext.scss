@@ -55,18 +55,30 @@ div.prose {
     font-size: 1.2em;
     margin: 0.5em 0;
     padding: 0.5em 1em;
-    background: #EEE;
+    background: var(--dtext-code-background);
     white-space: pre-wrap;
+  }
+
+  blockquote {
+    margin-bottom: 1em;
+    padding: 1em 1em 0.2em;
+    border: var(--dtext-blockquote-border);
+    background: var(--dtext-blockquote-background);
   }
 
   code {
     font-family: monospace;
-    background: #EEE;
+    background: var(--dtext-code-background);
+  }
+
+  .tn {
+    font-size: 0.8em;
+    color: var(--muted-text-color);
   }
 
   div.expandable {
     margin-bottom: 1em;
-    border: 1px inset #666;
+    border: var(--dtext-expand-border);
   }
 
   div.expandable-header {
@@ -81,7 +93,7 @@ div.prose {
   div.expandable-content {
     display: none;
     padding: 0.4em;
-    border-top: 1px solid #666;
+    border-top: 1px solid var(--dtext-expand-border-color);
 
     > :last-child {
       margin-bottom: 0;
@@ -96,6 +108,11 @@ div.prose {
     padding: 0 0.2em 0 0.3em;
     vertical-align: 1px;
   }
+}
+
+// avoid empty gaps beneath dtext blocks in table rows.
+table td div.prose > *:last-child {
+  margin-bottom: 0;
 }
 
 div.dtext-preview {

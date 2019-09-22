@@ -1,7 +1,8 @@
 @import "../base/000_vars.scss";
 
 body {
-  background-color: #FFF;
+  color: var(--text-color);
+  background-color: var(--body-background-color);
   font-family: $base_font_family;
   font-size: 87.5%;
   line-height: 1.25em;
@@ -9,13 +10,6 @@ body {
 
 abbr[title=required] {
   display: none;
-}
-
-blockquote {
-  margin: 0 0 1em 0;
-  padding: 1em 1em 0.2em;
-  border: 1px solid #666;
-  background: #EEE;
 }
 
 code {
@@ -62,6 +56,39 @@ img {
   vertical-align: middle;
 }
 
+input, select, textarea {
+  background: var(--form-input-background);
+  border: var(--form-input-border);
+  color: var(--form-input-text-color);
+  padding-left: 0.25em;
+}
+
+input[type="button"], input[type="submit"], button {
+  border-radius: 3px;
+  padding: 0.25em 1em;
+
+  background: var(--form-button-background);
+  border: var(--form-button-border);
+  color: var(--form-button-text-color);
+
+  &:hover {
+    box-shadow: var(--form-button-hover-box-shadow);
+    background: var(--form-button-hover-background);
+  }
+
+  &:active {
+    box-shadow: var(--form-button-hover-box-shadow);
+    background: var(--form-button-active-background);
+  }
+}
+
+/* placeholder text in <input type="text"> elements */
+::placeholder {
+  color: var(--form-input-placeholder-text-color);
+  font-size: 0.9em;
+  padding-left: 0.5em;
+}
+
 menu {
   margin: 0;
   padding: 0;
@@ -87,19 +114,8 @@ table tfoot {
   margin-top: 2em;
 }
 
-.hint {
-  color: #666;
+.fineprint {
+  color: var(--muted-text-color);
   font-style: italic;
-  max-width: 70%;
-}
-
-.tn {
   font-size: 0.8em;
-  color: gray;
-}
-
-p.info {
-  color: #AAA;
-  font-style: italic;
-  font-size: 80%;
 }

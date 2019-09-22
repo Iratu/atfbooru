@@ -66,6 +66,20 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
           get posts_path, params: {:tags => "1girl solo"}
           assert_response :success
         end
+
+        should "render an error when searching for too many tags" do
+          get posts_path, params: { tags: "1 2 3" }
+
+          assert_response 422
+          assert_select "h1", "Search Error"
+        end
+
+        should "render an error when exceeding the page limit" do
+          get posts_path, params: { page: 1001 }
+
+          assert_response 410
+          assert_select "h1", "Search Error"
+        end
       end
 
       context "with an md5 param" do
@@ -143,6 +157,16 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         assert_response :success
       end
 
+      context "with pools" do
+        should "render the pool list" do
+          as(@user) { @post.update(tag_string: "newpool:comic") }
+          get post_path(@post)
+
+          assert_response :success
+          assert_select "#pool-nav .pool-name", /Pool: comic/
+        end
+      end
+
       context "with only deleted comments" do
         setup do
           as(@user) { create(:comment, post: @post, is_deleted: true) }
@@ -205,6 +229,19 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         should "not error out" do
           get_auth post_path(@post), @user
           assert_response :success
+        end
+      end
+
+      context "in api responses" do
+        should "not include restricted attributes" do
+          Post.any_instance.stubs(:visible?).returns(false)
+          get_auth post_path(@post), @user, as: :json
+
+          assert_response :success
+          assert_nil(response.parsed_body["md5"])
+          assert_nil(response.parsed_body["file_url"])
+          assert_nil(response.parsed_body["fav_string"])
+          assert_equal(@post.uploader_name, response.parsed_body["uploader_name"])
         end
       end
     end

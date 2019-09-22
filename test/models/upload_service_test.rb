@@ -841,7 +841,7 @@ class UploadServiceTest < ActiveSupport::TestCase
             as_user { @post.replace!(replacement_url: "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=62247350") }
 
             travel_to((PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now) do
-              workoff_active_jobs
+              perform_enqueued_jobs
             end
           rescue Net::OpenTimeout
             skip "Remote connection to Pixiv failed"
@@ -875,6 +875,7 @@ class UploadServiceTest < ActiveSupport::TestCase
         should "not delete the original files" do
           begin
             skip unless PixivUgoiraConverter.enabled?
+            @post.unstub(:queue_delete_files)
 
             # this is called thrice to delete the file for 62247364
             FileUtils.expects(:rm_f).times(3) 
@@ -891,9 +892,9 @@ class UploadServiceTest < ActiveSupport::TestCase
             assert_nothing_raised { @post.file(:original) }
             assert_nothing_raised { @post.file(:preview) }
 
-            travel_to((PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now) do
-              workoff_active_jobs
-            end
+            assert_enqueued_jobs 3, only: DeletePostFilesJob
+            travel PostReplacement::DELETION_GRACE_PERIOD + 1.day
+            assert_raise(Post::DeletionError) { perform_enqueued_jobs }
 
             assert_nothing_raised { @post.file(:original) }
             assert_nothing_raised { @post.file(:preview) }
@@ -937,7 +938,7 @@ class UploadServiceTest < ActiveSupport::TestCase
 
             travel_to (PostReplacement::DELETION_GRACE_PERIOD + 1).days.from_now do
               assert_raise(Post::DeletionError) do
-                workoff_active_jobs
+                perform_enqueued_jobs
               end
             end
 
@@ -1272,6 +1273,23 @@ class UploadServiceTest < ActiveSupport::TestCase
 
       @upload2.destroy!
       refute(File.exists?(Danbooru.config.storage_manager.file_path(@upload2.md5, "jpg", :original)))
+    end
+
+    should "not delete files that were replaced after upload and are still pending deletion" do
+      @upload = as(@user) { UploadService.new(file: upload_file("test/files/test.jpg")).start! }
+      assert(@upload.is_completed?)
+
+      as(@user) { @upload.post.replace!(replacement_file: upload_file("test/files/test.png"), replacement_url: "") }
+      assert_not_equal(@upload.md5, @upload.post.md5)
+
+      # after replacement the uploaded file is no longer in use, but it shouldn't be
+      # deleted yet. it should only be deleted by the replacer after the grace period.
+      @upload.destroy!
+      assert(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
+
+      travel (PostReplacement::DELETION_GRACE_PERIOD + 1).days
+      perform_enqueued_jobs
+      refute(File.exists?(Danbooru.config.storage_manager.file_path(@upload.md5, "jpg", :original)))
     end
 
     should "work on uploads without a file" do

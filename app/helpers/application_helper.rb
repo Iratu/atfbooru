@@ -12,10 +12,6 @@ module ApplicationHelper
     raw(wordbreaked_string)
   end
 
-  def pro_fontawesome_enabled?
-    request.domain =~ /donmai\.us/
-  end
-
   def nav_link_to(text, url, **options)
     klass = options.delete(:class)
 
@@ -84,9 +80,10 @@ module ApplicationHelper
     time_tag(time.strftime("%Y-%m-%d %H:%M"), time)
   end
 
-  def external_link_to(url, truncate: nil, strip_scheme: false, link_options: {})
+  def external_link_to(url, truncate: nil, strip: false, link_options: {})
     text = url
-    text = text.gsub(%r!\Ahttps?://!i, "") if strip_scheme
+    text = text.gsub(%r!\Ahttps?://!i, "") if strip == :scheme
+    text = text.gsub(%r!\Ahttps?://(?:www\.)?!i, "") if strip == :subdomain
     text = text.truncate(truncate) if truncate
 
     if url =~ %r!\Ahttps?://!i
@@ -162,18 +159,23 @@ module ApplicationHelper
     tag.input value: "Preview", type: "button", class: "dtext-preview-button", "data-input-id": input_id, "data-preview-id": preview_id
   end
 
-  def search_field(method, label: method.titleize, hint: nil, value: nil, **attributes)
-    content_tag(:div, class: "input") do
-      label_html = label_tag("search_#{method}", label)
-      input_html = text_field_tag(method, value, id: "search_#{method}", name: "search[#{method}]", **attributes)
-      hint_html = hint.present? ? content_tag(:p, hint, class: "hint") : ""
-
-      label_html + input_html + hint_html
+  def quick_search_form_for(attribute, url, name, autocomplete: nil, &block)
+    tag.li do
+      search_form_for(url, classes: "quick-search-form one-line-form") do |f|
+        f.input attribute, label: false, placeholder: "Search #{name}", input_html: { id: nil, "data-autocomplete": autocomplete }
+      end
     end
   end
 
+  def search_form_for(url, classes: "inline-form", &block)
+    defaults = { required: false }
+    html_options = { autocomplete: "off", class: "search-form #{classes}" }
+
+    simple_form_for(:search, method: :get, url: url, defaults: defaults, html: html_options, &block)
+  end
+
   def body_attributes(user = CurrentUser.user)
-    attributes = [:id, :name, :level, :level_string, :can_approve_posts?, :can_upload_free?]
+    attributes = [:id, :name, :level, :level_string, :theme, :can_approve_posts?, :can_upload_free?]
     attributes += User::Roles.map { |role| :"is_#{role}?" }
 
     controller_param = params[:controller].parameterize.dasherize
@@ -202,18 +204,18 @@ module ApplicationHelper
   def page_title
     if content_for(:page_title).present?
       content_for(:page_title)
-    elsif action_name == "index"
-      "#{controller_name.titleize} - #{Danbooru.config.app_name}"
-    elsif action_name == "show"
-      "#{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
-    elsif action_name == "new"
-      "New #{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
-    elsif action_name == "edit"
-      "Edit #{controller_name.singularize.titleize} - #{Danbooru.config.app_name}"
-    elsif action_name == "search"
-      "Search #{controller_name.titleize} - #{Danbooru.config.app_name}"
+    elsif params[:action] == "index"
+      "#{params[:controller].titleize} - #{Danbooru.config.app_name}"
+    elsif params[:action] == "show"
+      "#{params[:controller].singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif params[:action] == "new"
+      "New #{params[:controller].singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif params[:action] == "edit"
+      "Edit #{params[:controller].singularize.titleize} - #{Danbooru.config.app_name}"
+    elsif params[:action] == "search"
+      "Search #{params[:controller].titleize} - #{Danbooru.config.app_name}"
     else
-      "#{Danbooru.config.app_name}/#{controller_name}"
+      "#{Danbooru.config.app_name}/#{params[:controller]}"
     end
   end
 

@@ -5,6 +5,8 @@ class CommentsController < ApplicationController
   skip_before_action :api_check
 
   def index
+    params[:group_by] ||= "comment" if params[:search].present?
+
     if params[:group_by] == "comment" || request.format == Mime::Type.lookup("application/atom+xml")
       index_by_comment
     elsif request.format == Mime::Type.lookup("text/javascript")
@@ -78,11 +80,7 @@ private
     @posts = @posts.includes(comments: [:creator])
     @posts = @posts.includes(comments: [:votes]) if CurrentUser.is_member?
 
-    respond_with(@posts) do |format|
-      format.xml do
-        render :xml => @posts.to_xml(:root => "posts")
-      end
-    end
+    respond_with(@posts)
   end
 
   def index_by_comment
@@ -90,9 +88,6 @@ private
     respond_with(@comments) do |format|
       format.atom do
         @comments = @comments.includes(:post, :creator).load
-      end
-      format.xml do
-        render :xml => @comments.to_xml(:root => "comments")
       end
     end
   end

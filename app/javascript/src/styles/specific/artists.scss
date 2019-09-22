@@ -3,25 +3,11 @@
 div#c-artists, div#excerpt {
   span.new-artist {
     font-weight: bold;
-    color: #A00;
+    color: var(--new-artist-color);
   }
 
   ul ul {
     margin-left: 1em;
-  }
-
-  div#a-edit, div#a-new {
-    textarea {
-      height: 10em;
-      
-      &#artist_other_names_string {
-        height: 3em;
-      }
-    }
-
-    .hint {
-      display: block;
-    } 
   }
 
   div.recent-posts {

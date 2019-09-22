@@ -59,6 +59,37 @@ class PoolTest < ActiveSupport::TestCase
       assert_equal(@pool.id, Pool.find_by_name("test pool").id)
       assert_equal(@pool.id, Pool.search(name_matches: "test pool").first.id)
     end
+
+    should "find pools by post id" do
+      @pool1 = create(:pool, name: "pool1")
+      @pool2 = create(:pool, name: "pool2")
+      @post1 = create(:post, tag_string: "pool:pool1")
+      @post2 = create(:post, tag_string: "pool:pool2")
+
+      assert_equal([@pool1.id], Pool.search(post_ids_include: @post1.id).pluck(:id))
+      assert_equal([@pool2.id, @pool1.id], Pool.search(post_ids_include: "#{@post1.id} #{@post2.id}").pluck(:id))
+    end
+
+    should "find pools by post id count" do
+      @pool1 = create(:pool, name: "pool1")
+      @pool2 = create(:pool, name: "pool2")
+      @post1 = create(:post, tag_string: "pool:pool1")
+      @post2 = create(:post, tag_string: "pool:pool1")
+
+      assert_equal([@pool1.id], Pool.search(post_id_count: 2).pluck(:id))
+    end
+
+    should "find pools by post tags" do
+      @pool1 = create(:pool, name: "pool1")
+      @pool2 = create(:pool, name: "pool2")
+      @post1 = create(:post, tag_string: "pool:pool1 bkub")
+      @post2 = create(:post, tag_string: "pool:pool1 fumimi")
+      @post3 = create(:post, tag_string: "pool:pool2 bkub fumimi")
+
+      assert_equal([@pool2.id, @pool1.id], Pool.search(post_tags_match: "bkub").pluck(:id))
+      assert_equal([@pool2.id, @pool1.id], Pool.search(post_tags_match: "fumimi").pluck(:id))
+      assert_equal([@pool2.id], Pool.search(post_tags_match: "bkub fumimi").pluck(:id))
+    end
   end
 
   context "Creating a pool" do
@@ -75,7 +106,7 @@ class PoolTest < ActiveSupport::TestCase
       assert_equal(@posts.map(&:id), @pool.post_ids)
 
       @posts.each(&:reload)
-      assert_equal(["pool:#{@pool.id} pool:series"] * @posts.size, @posts.map(&:pool_string))
+      assert_equal(["pool:#{@pool.id}"] * @posts.size, @posts.map(&:pool_string))
     end
   end
 
@@ -130,7 +161,7 @@ class PoolTest < ActiveSupport::TestCase
 
     should "update any new posts that were added" do
       @p1.reload
-      assert_equal("pool:#{@pool.id} pool:series", @p1.pool_string)
+      assert_equal("pool:#{@pool.id}", @p1.pool_string)
     end
   end
 
@@ -163,7 +194,7 @@ class PoolTest < ActiveSupport::TestCase
       end
 
       should "add the pool to the post" do
-        assert_equal("pool:#{@pool.id} pool:series", @p1.pool_string)
+        assert_equal("pool:#{@pool.id}", @p1.pool_string)
       end
 
       should "increment the post count" do
@@ -180,7 +211,7 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "not double add the pool to the post" do
-          assert_equal("pool:#{@pool.id} pool:series", @p1.pool_string)
+          assert_equal("pool:#{@pool.id}", @p1.pool_string)
         end
 
         should "not double increment the post count" do
@@ -248,43 +279,12 @@ class PoolTest < ActiveSupport::TestCase
         end
 
         should "not affect the post" do
-          assert_equal("pool:#{@pool.id} pool:series", @p1.pool_string)
+          assert_equal("pool:#{@pool.id}", @p1.pool_string)
         end
 
         should "not affect the post count" do
           assert_equal(1, @pool.post_count)
         end
-      end
-    end
-
-    context "by changing the category" do
-      setup do
-        Danbooru.config.stubs(:pool_category_change_limit).returns(1)
-        @pool.add!(@p1)
-        @pool.add!(@p2)
-      end
-
-      teardown do
-        Danbooru.config.unstub(:pool_category_change_limit)
-      end
-
-      should "not allow Members to change the category of large pools" do
-        @member = FactoryBot.create(:member_user)
-        as(@member) { @pool.update(category: "collection") }
-
-        assert_equal(["You cannot change the category of pools with greater than 1 posts"], @pool.errors[:base])
-      end
-
-      should "allow Builders to change the category of large pools" do
-        perform_enqueued_jobs do
-          @builder = create(:builder_user)
-          as(@builder) { @pool.update(category: "collection") }
-        end
-
-        assert_equal(true, @pool.valid?)
-        assert_equal("collection", @pool.category)
-        assert_equal("pool:#{@pool.id} pool:collection", @p1.reload.pool_string)
-        assert_equal("pool:#{@pool.id} pool:collection", @p2.reload.pool_string)
       end
     end
 
@@ -375,7 +375,7 @@ class PoolTest < ActiveSupport::TestCase
         @p2.reload
         @p3.reload
         assert_equal("", @p1.pool_string)
-        assert_equal("pool:#{@pool.id} pool:series", @p2.pool_string)
+        assert_equal("pool:#{@pool.id}", @p2.pool_string)
         assert_equal("", @p3.pool_string)
       end
     end
