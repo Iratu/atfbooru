@@ -26,7 +26,6 @@ class SavedSearch < ApplicationRecord
           if redis.exists(redis_key)
             sub_ids = redis.smembers(redis_key).map(&:to_i)
             post_ids.merge(sub_ids)
-            redis.expire(redis_key, REDIS_EXPIRY.to_i)
           else
             PopulateSavedSearchJob.perform_later(query)
           end
@@ -36,14 +35,14 @@ class SavedSearch < ApplicationRecord
     end
 
     def refreshed_at
-      ttl = SavedSearch.redis.ttl("search:#{query}")
+      ttl = SavedSearch.redis.ttl("search:#{normalized_query}")
       return nil if ttl < 0
       (REDIS_EXPIRY.to_i - ttl).seconds.ago
     end
     memoize :refreshed_at
 
     def cached_size
-      SavedSearch.redis.scard("search:#{query}")
+      SavedSearch.redis.scard("search:#{normalized_query}")
     end
     memoize :cached_size
   end

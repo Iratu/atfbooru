@@ -3,7 +3,7 @@
     <h1>Upload</h1>
 
     <% if CurrentUser.can_upload? %>
-      <div id="upload-guide-notice">
+      <div id="upload-guide-notice" class="prose">
         <%= format_text(@upload_notice_wiki.try(&:body)) %>
       </div>
 
@@ -33,6 +33,10 @@
         <div class="input">
           <%= f.label :file %>
           <%= f.file_field :file, :size => 50 %>
+        </div>
+
+        <div class="input" id="filedropzone">
+          <div class="placeholder">Click or drag and drop to upload a file</div>
         </div>
 
         <div class="input">

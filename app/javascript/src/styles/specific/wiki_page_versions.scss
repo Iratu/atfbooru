@@ -1,12 +1,12 @@
 div#c-wiki-page-versions {
   #a-diff {
     del {
-      background: #FCC;
+      background: var(--wiki-page-versions-diff-del-background);
       text-decoration: none;
     }
 
     ins {
-      background: #CFC;
+      background: var(--wiki-page-versions-diff-ins-background);
       text-decoration: none;
     }
   }
@@ -14,12 +14,6 @@ div#c-wiki-page-versions {
   #a-index {
     table {
       margin-bottom: 1em;
-    }
-  }
-
-  #a-show {
-    span.version {
-      color: #AAA;
     }
   }
 }

@@ -64,21 +64,6 @@ class ArtistTest < ActiveSupport::TestCase
       should_not allow_value("").for(:name)
     end
 
-    context "with a matching tag alias" do
-      setup do
-        @tag_alias = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
-        @artist = FactoryBot.create(:artist, :name => "aaa")
-      end
-
-      should "know it has an alias" do
-        assert_equal(true, @artist.has_tag_alias?)
-      end
-
-      should "know its alias" do
-        assert_equal("bbb", @artist.tag_alias_name)
-      end
-    end
-
     context "that has been banned" do
       setup do
         @post = FactoryBot.create(:post, :tag_string => "aaa")
@@ -108,7 +93,7 @@ class ArtistTest < ActiveSupport::TestCase
       end
 
       should "create a new tag implication" do
-        workoff_active_jobs
+        perform_enqueued_jobs
         assert_equal(1, TagImplication.where(:antecedent_name => "aaa", :consequent_name => "banned_artist").count)
         assert_equal("aaa banned_artist", @post.reload.tag_string)
       end
@@ -423,7 +408,6 @@ class ArtistTest < ActiveSupport::TestCase
       cat_or_fish = FactoryBot.create(:artist, :name => "cat_or_fish")
       yuu = FactoryBot.create(:artist, :name => "yuu", :group_name => "cat_or_fish")
 
-      assert_equal("yuu", cat_or_fish.member_names)
       assert_not_nil(Artist.search(:group_name => "cat_or_fish").first)
       assert_not_nil(Artist.search(:any_name_matches => "cat_or_fish").first)
       assert_not_nil(Artist.search(:any_name_matches => "/cat/").first)

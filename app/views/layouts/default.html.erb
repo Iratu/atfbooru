@@ -100,7 +100,7 @@
 <%= tag.body **body_attributes(CurrentUser.user) do %>
   <%= render "news_updates/listing" %>
   <header id="top">
-    <h1><a href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
+    <h1 id="app-name-header"><a href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
     <a href="https://www.caramelthecalf.com/" target="_blank"><img src="/banners/CTC1.png" id="artistadv" style="height: 250px;float: right;"></a>
     </h1>
 
@@ -112,7 +112,11 @@
     
     <nav id="nav">
       <%= render "layouts/main_links" %>
-      <%= yield :secondary_links %>
+      <% if content_for(:secondary_links).present? %>
+        <menu id="subnav-menu">
+          <%= yield :secondary_links %>
+        </menu>
+      <% end %>
     </nav>
   </header>
 
@@ -133,7 +137,7 @@
     <% end %>
 
     <div class="ui-corner-all ui-state-highlight" id="notice" style="<%= "display: none;" unless flash[:notice] %>">
-      <span><%= format_text(flash[:notice], inline: true) %>.</span>
+      <span class="prose"><%= format_text(flash[:notice], inline: true) %>.</span>
       <a href="#" id="close-notice-link">close</a>
     </div>
 

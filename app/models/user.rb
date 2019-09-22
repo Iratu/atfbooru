@@ -73,7 +73,7 @@ class User < ApplicationRecord
   validates_uniqueness_of :email, :case_sensitive => false, :if => ->(rec) { rec.email.present? && rec.saved_change_to_email? }
   validates_length_of :password, :minimum => 5, :if => ->(rec) { rec.new_record? || rec.password.present?}
   validates_inclusion_of :default_image_size, :in => %w(large original)
-  validates_inclusion_of :per_page, :in => 1..100
+  validates_inclusion_of :per_page, in: (1..PostSets::Post::MAX_PER_PAGE)
   validates_confirmation_of :password
   validates_presence_of :comment_threshold
   validate :validate_ip_addr_is_not_banned, :on => :create
@@ -113,6 +113,8 @@ class User < ApplicationRecord
   has_many :favorites, ->(rec) {where("user_id % 100 = #{rec.id % 100} and user_id = #{rec.id}").order("id desc")}
   belongs_to :inviter, class_name: "User", optional: true
   accepts_nested_attributes_for :dmail_filter
+
+  enum theme: { light: 0, dark: 100 }, _suffix: true
 
   module BanMethods
     def validate_ip_addr_is_not_banned
@@ -311,12 +313,11 @@ class User < ApplicationRecord
         self.can_approve_posts = true
         self.can_upload_free = true
         self.is_super_voter = true
-      else
-        self.level = Levels::MEMBER
       end
     end
 
     def customize_new_user
+      self.level = User::Levels::MEMBER
       Danbooru.config.customize_new_user(self)
     end
 
@@ -567,33 +568,28 @@ end
   end
 
   module ApiMethods
-    # blacklist all attributes by default. whitelist only safe attributes.
-    def hidden_attributes
-      super + attributes.keys.map(&:to_sym)
-    end
-
-    def method_attributes
-      list = super + [
+    def api_attributes
+      attributes = [
         :id, :created_at, :name, :inviter_id, :level, :base_upload_limit,
-        :post_upload_count, :post_update_count, :note_update_count,
-        :is_banned, :can_approve_posts, :can_upload_free, :is_super_voter,
-        :level_string,
+        :post_upload_count, :post_update_count, :note_update_count, :is_banned,
+        :can_approve_posts, :can_upload_free, :is_super_voter, :level_string,
       ]
 
       if id == CurrentUser.user.id
-        list += BOOLEAN_ATTRIBUTES + [
+        attributes += BOOLEAN_ATTRIBUTES
+        attributes += [
           :updated_at, :email, :last_logged_in_at, :last_forum_read_at,
           :recent_tags, :comment_threshold, :default_image_size,
           :favorite_tags, :blacklisted_tags, :time_zone, :per_page,
-          :custom_style, :favorite_count,
-          :api_regen_multiplier, :api_burst_limit, :remaining_api_limit,
-          :statement_timeout, :favorite_group_limit, :favorite_limit,
-          :tag_query_limit, :can_comment_vote?, :can_remove_from_pools?,
-          :is_comment_limited?, :can_comment?, :can_upload?, :max_saved_searches,
+          :custom_style, :favorite_count, :api_regen_multiplier,
+          :api_burst_limit, :remaining_api_limit, :statement_timeout,
+          :favorite_group_limit, :favorite_limit, :tag_query_limit,
+          :can_comment_vote?, :can_remove_from_pools?, :is_comment_limited?,
+          :can_comment?, :can_upload?, :max_saved_searches, :theme
         ]
       end
 
-      list
+      attributes
     end
 
     # extra attributes returned for /users/:id.json but not for /users.json.

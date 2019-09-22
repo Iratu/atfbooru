@@ -122,7 +122,7 @@ class PostQueryBuilder
     relation = read_only ? PostReadOnly.all : Post.all
 
     if q[:tag_count].to_i > Danbooru.config.tag_query_limit
-      raise ::Post::SearchError.new("You cannot search for more than #{Danbooru.config.tag_query_limit} tags at a time")
+      raise ::Post::SearchError
     end
 
     if CurrentUser.safe_mode?
@@ -211,10 +211,38 @@ class PostQueryBuilder
       end
     end
 
-    if q[:pool] == "none"
-      relation = relation.where("posts.pool_string = ''")
-    elsif q[:pool] == "any"
-      relation = relation.where("posts.pool_string != ''")
+    q[:pool].to_a.each do |pool_name|
+      case pool_name
+      when "none"
+        relation = relation.where.not(id: Pool.select("unnest(post_ids)"))
+      when "any"
+        relation = relation.where(id: Pool.select("unnest(post_ids)"))
+      when "series"
+        relation = relation.where(id: Pool.series.select("unnest(post_ids)"))
+      when "collection"
+        relation = relation.where(id: Pool.collection.select("unnest(post_ids)"))
+      when /\*/
+        relation = relation.where(id: Pool.name_matches(pool_name).select("unnest(post_ids)"))
+      else
+        relation = relation.where(id: Pool.named(pool_name).select("unnest(post_ids)"))
+      end
+    end
+
+    q[:pool_neg].to_a.each do |pool_name|
+      case pool_name
+      when "none"
+        relation = relation.where(id: Pool.select("unnest(post_ids)"))
+      when "any"
+        relation = relation.where.not(id: Pool.select("unnest(post_ids)"))
+      when "series"
+        relation = relation.where.not(id: Pool.series.select("unnest(post_ids)"))
+      when "collection"
+        relation = relation.where.not(id: Pool.collection.select("unnest(post_ids)"))
+      when /\*/
+        relation = relation.where.not(id: Pool.name_matches(pool_name).select("unnest(post_ids)"))
+      else
+        relation = relation.where.not(id: Pool.named(pool_name).select("unnest(post_ids)"))
+      end
     end
 
     if q[:saved_searches]

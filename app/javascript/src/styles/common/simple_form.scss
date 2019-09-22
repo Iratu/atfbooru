@@ -1,3 +1,5 @@
+@import "../base/020_base.scss";
+
 form.simple_form {
   margin: 0 0 1em 0;
 
@@ -20,9 +22,16 @@ form.simple_form {
       max-width: 20em;
     }
 
-    span.hint {
-      display: block;
-      font-size: 70%;
+    .hint {
+      @extend .fineprint;
+      padding-left: 1em;
+    }
+
+    &.text {
+      .hint {
+        padding-left: 0em;
+        display: block;
+      }
     }
 
     textarea {
@@ -68,6 +77,14 @@ form.inline-form {
       padding-right: 1em;
       white-space: nowrap;
     }
+  }
+}
+
+form.quick-search-form {
+  margin: 0;
+
+  input {
+    background: var(--quick-search-form-background);
   }
 }
 

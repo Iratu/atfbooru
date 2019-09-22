@@ -35,6 +35,18 @@ class ApplicationRecord < ActiveRecord::Base
         where.not("#{qualified_column_for(attr)} ~ ?", "(?e)" + value)
       end
 
+      def where_array_includes(attr, values)
+        where("#{qualified_column_for(attr)} && ARRAY[?]", values)
+      end
+
+      def where_array_count(attr, value)
+        relation = all
+        qualified_column = "cardinality(#{qualified_column_for(attr)})"
+        parsed_range = Tag.parse_helper(value, :integer)
+
+        PostQueryBuilder.new(nil).add_range_relation(parsed_range, qualified_column, relation)
+      end
+
       def search_boolean_attribute(attribute, params)
         return all unless params[attribute]
 
@@ -81,7 +93,8 @@ class ApplicationRecord < ActiveRecord::Base
       end
 
       def search_attribute(name, params)
-        type = type_for_attribute(name).type || reflect_on_association(name)&.class_name
+        column = column_for_attribute(name)
+        type = column.type || reflect_on_association(name)&.class_name
 
         case type
         when "User"
@@ -93,7 +106,11 @@ class ApplicationRecord < ActiveRecord::Base
         when :boolean
           search_boolean_attribute(name, params)
         when :integer, :datetime
-          numeric_attribute_matches(name, params[name])
+          if column.array?
+            search_array_attribute(name, type, params)
+          else
+            numeric_attribute_matches(name, params[name])
+          end
         else
           raise NotImplementedError, "unhandled attribute type"
         end
@@ -149,6 +166,21 @@ class ApplicationRecord < ActiveRecord::Base
         relation
       end
 
+      def search_array_attribute(name, type, params)
+        relation = all
+
+        if params[:"#{name}_include"] && type == :integer
+          items = params[:"#{name}_include"].to_s.scan(/\d+/).map(&:to_i)
+          relation = relation.where_array_includes(name, items)
+        end
+
+        if params[:"#{name.to_s.singularize}_count"]
+          relation = relation.where_array_count(name, params[:"#{name.to_s.singularize}_count"])
+        end
+
+        relation
+      end
+
       def apply_default_order(params)
         if params[:order] == "custom"
           parse_ids = Tag.parse_helper(params[:id])
@@ -183,73 +215,47 @@ class ApplicationRecord < ActiveRecord::Base
   module ApiMethods
     extend ActiveSupport::Concern
 
-    def as_json(options = {})
-      options ||= {}
+    class_methods do
+      def api_attributes(*attributes, including: [])
+        return @api_attributes if @api_attributes
 
-      options[:include] ||= []
+        if attributes.present?
+          @api_attributes = attributes
+        else
+          @api_attributes = attribute_types.reject { |name, attr| attr.type.in?([:inet, :tsvector]) }.keys.map(&:to_sym)
+        end
 
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-
-      if !options.key?(:only) && RequestStore.exist?(:only_param)
-        options[:only] = RequestStore[:only_param]
+        @api_attributes += including
+        @api_attributes
       end
-
-      if options[:only].is_a?(String)
-        options[:only] = options[:only].split(/,/)
-      end
-
-      if options[:only]
-        options[:methods] = options[:methods] & options[:only].map(&:to_sym)
-        options[:include] = options[:include] & options[:only].map(&:to_sym)
-      end
-
-      super(options)
     end
 
-    def to_xml(options = {}, &block)
-      options ||= {}
-
-      options[:include] ||= []
-
-      options[:except] ||= []
-      options[:except] += hidden_attributes
-
-      options[:methods] ||= []
-      options[:methods] += method_attributes
-
-      if !options.key?(:only) && RequestStore.exist?(:only_param)
-        options[:only] = RequestStore[:only_param]
-      end
-
-      if options[:only].is_a?(String)
-        options[:only] = options[:only].split(/,/)
-      end
-
-      if options[:only]
-        options[:methods] = options[:methods] & options[:only]
-        options[:include] = options[:include] & options[:only]
-      end
-
-      super(options, &block)
+    def api_attributes
+      self.class.api_attributes
     end
 
-    def serializable_hash(*args)
-      hash = super(*args)
+    def serializable_hash(options = {})
+      options ||= {}
+      options[:only] ||= []
+      options[:include] ||= []
+      options[:methods] ||= []
+
+      attributes, methods = api_attributes.partition { |attr| has_attribute?(attr) }
+      methods += options[:methods]
+      includes = options[:include]
+
+      if options[:only].present?
+        attributes &= options[:only]
+        methods &= options[:only]
+        includes &= options[:only]
+      end
+
+      options[:only] = attributes
+      options[:methods] = methods
+      options[:include] = includes
+
+      hash = super(options)
       hash.transform_keys { |key| key.delete("?") }
-    end
-
-    protected
-
-    def hidden_attributes
-      [:uploader_ip_addr, :updater_ip_addr, :creator_ip_addr]
-    end
-
-    def method_attributes
-      []
     end
   end
 

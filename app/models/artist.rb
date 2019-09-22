@@ -246,12 +246,6 @@ class Artist < ApplicationRecord
     end
   end
 
-  module GroupMethods
-    def member_names
-      members.map(&:name).join(", ")
-    end
-  end
-
   module VersionMethods
     def create_version(force=false)
       if saved_change_to_name? || url_string_changed || saved_change_to_is_active? || saved_change_to_is_banned? || saved_change_to_other_names? || saved_change_to_group_name? || saved_change_to_notes? || force
@@ -386,14 +380,6 @@ class Artist < ApplicationRecord
   end
 
   module TagMethods
-    def has_tag_alias?
-      TagAlias.active.exists?(["antecedent_name = ?", name])
-    end
-
-    def tag_alias_name
-      TagAlias.active.find_by_antecedent_name(name).consequent_name
-    end
-
     def category_name
       Tag.category_for(name)
     end
@@ -532,7 +518,6 @@ class Artist < ApplicationRecord
 
   include UrlMethods
   include NameMethods
-  include GroupMethods
   include VersionMethods
   extend FactoryMethods
   include NoteMethods

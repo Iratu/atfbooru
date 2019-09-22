@@ -863,7 +863,7 @@ class PostTest < ActiveSupport::TestCase
               @post.reload
               @pool.reload
               assert_equal([@post.id], @pool.post_ids)
-              assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
+              assert_equal("pool:#{@pool.id}", @post.pool_string)
             end
           end
 
@@ -894,7 +894,7 @@ class PostTest < ActiveSupport::TestCase
               @post.reload
               @pool.reload
               assert_equal([@post.id], @pool.post_ids)
-              assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
+              assert_equal("pool:#{@pool.id}", @post.pool_string)
             end
           end
 
@@ -909,7 +909,7 @@ class PostTest < ActiveSupport::TestCase
                 @post.reload
                 @pool.reload
                 assert_equal([@post.id], @pool.post_ids)
-                assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
+                assert_equal("pool:#{@pool.id}", @post.pool_string)
               end
             end
 
@@ -920,7 +920,7 @@ class PostTest < ActiveSupport::TestCase
                 @post.reload
                 assert_not_nil(@pool)
                 assert_equal([@post.id], @pool.post_ids)
-                assert_equal("pool:#{@pool.id} pool:series", @post.pool_string)
+                assert_equal("pool:#{@pool.id}", @post.pool_string)
               end
             end
 
@@ -1768,10 +1768,10 @@ class PostTest < ActiveSupport::TestCase
         pool = FactoryBot.create(:pool)
         post.add_pool!(pool)
         post.reload
-        assert_equal("pool:#{pool.id} pool:series", post.pool_string)
+        assert_equal("pool:#{pool.id}", post.pool_string)
         post.add_pool!(pool)
         post.reload
-        assert_equal("pool:#{pool.id} pool:series", post.pool_string)
+        assert_equal("pool:#{pool.id}", post.pool_string)
         post.remove_pool!(pool)
         post.reload
         assert_equal("", post.pool_string)
@@ -1948,17 +1948,28 @@ class PostTest < ActiveSupport::TestCase
     should "return posts for the pool:<name> metatag" do
       SqsService.any_instance.stubs(:send_message)
 
-      FactoryBot.create(:pool, name: "test_a", category: "series")
-      FactoryBot.create(:pool, name: "test_b", category: "collection")
-      post1 = FactoryBot.create(:post, tag_string: "pool:test_a")
-      post2 = FactoryBot.create(:post, tag_string: "pool:test_b")
+      pool1 = create(:pool, name: "test_a", category: "series")
+      pool2 = create(:pool, name: "test_b", category: "collection")
+      post1 = create(:post, tag_string: "pool:test_a")
+      post2 = create(:post, tag_string: "pool:test_b")
+
+      assert_tag_match([post1], "pool:#{pool1.id}")
+      assert_tag_match([post2], "pool:#{pool2.id}")
+
+      assert_tag_match([post1], "pool:TEST_A")
+      assert_tag_match([post2], "pool:Test_B")
 
       assert_tag_match([post1], "pool:test_a")
       assert_tag_match([post2], "-pool:test_a")
+
+      assert_tag_match([], "pool:test_a pool:test_b")
       assert_tag_match([], "-pool:test_a -pool:test_b")
+
       assert_tag_match([post2, post1], "pool:test*")
 
       assert_tag_match([post2, post1], "pool:any")
+      assert_tag_match([post2, post1], "-pool:none")
+      assert_tag_match([], "-pool:any")
       assert_tag_match([], "pool:none")
 
       assert_tag_match([post1], "pool:series")
@@ -2547,6 +2558,12 @@ class PostTest < ActiveSupport::TestCase
         should "return the cached count" do
           Tag.find_or_create_by_name("aaa").update_columns(post_count: 100)
           assert_equal(100, Post.fast_count("aaa"))
+        end
+      end
+
+      context "an aliased tag" do
+        should "return the count of the consequent tag" do
+          assert_equal(Post.fast_count("aaa"), Post.fast_count("alias"))
         end
       end
 

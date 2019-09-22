@@ -21,7 +21,7 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
 
       should "not allow users to see the topic" do
         get_auth forum_topic_path(@forum_topic), @user
-        assert_redirected_to forum_topics_path
+        assert_response 403
       end
 
       should "not bump the forum for users without access" do
@@ -78,6 +78,13 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
       should "render for atom feed" do
         get forum_topic_path(@forum_topic), params: {:format => :atom}
         assert_response :success
+      end
+
+      should "raise an error if the user doesn't have permission to view the topic" do
+        as(@user) { @forum_topic.update(min_level: User::Levels::ADMIN) }
+        get_auth forum_topic_path(@forum_topic), @user
+
+        assert_response 403
       end
     end
 

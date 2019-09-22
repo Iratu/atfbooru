@@ -3,9 +3,9 @@
     <h1>MetaSearch Tags</h1>
 
     <section>
-      <%= form_tag(meta_searches_tags_path, :method => :get) do %>
-        <%= text_field_tag "name", params[:name], :data => { :autocomplete => "tag" } %>
-        <%= submit_tag "Go" %>
+      <%= search_form_for(meta_searches_tags_path) do |f| %>
+        <%= f.input :name, input_html: { value: params.dig(:search, :name), "data-autocomplete": "tag" } %>
+        <%= f.submit "Search" %>
       <% end %>
     </section>
 
@@ -69,10 +69,6 @@
 
                   <% if CurrentUser.is_admin? && tag_alias.is_pending? %>
                     | <%= link_to "Approve", approve_tag_alias_path(tag_alias), :remote => true, :method => :post %>
-                  <% end %>
-
-                  <% if CurrentUser.is_builder? %>
-                    | <%= link_to "Fix", tag_alias_correction_path(:tag_alias_id => tag_alias.id) %>
                   <% end %>
                 </td>
               </tr>
