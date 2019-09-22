@@ -1,16 +1,17 @@
 # this is used in config/environments/production.rb.
+#don't wanna use NewRelic -Iratu
 env "RAILS_LOG_TO_STDOUT", "true"
 
 set :output, "log/whenever.log"
 
 every 1.hour do
-  rake "maintenance:hourly"
+  runner "Maintenance.hourly"
 end
 
 every 1.day do
-  rake "maintenance:daily"
+  runner "Maintenance.daily"
 end
 
 every 1.week, :at => "1:30 am" do
-  rake "maintenance:weekly"
+  runner "Maintenance.weekly"
 end
