@@ -85,11 +85,11 @@ module Automod
     end
 
     def perform
-      #post = Post.find(post_id)
-      #data = build_hash(post)
-     # dynamo_db_client.put_item(table_name: "automod_events_#{Rails.env}", item: data)
-    #rescue ActiveRecord::RecordNotFound
-      # do nothing
+      post = Post.find(post_id)
+      data = build_hash(post)
+      dynamo_db_client.put_item(table_name: "automod_events_#{Rails.env}", item: data)
+    rescue ActiveRecord::RecordNotFound
+       do nothing
     end
 
     def dynamo_db_client
