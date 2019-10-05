@@ -17,9 +17,6 @@
   }
 
   &.sidebar-blacklist ul li {
-    list-style-type: disc;
-    list-style-position: inside;
-
     a {
       max-width: 75%;
     }
@@ -44,5 +41,5 @@
 }
 
 .post-preview.blacklisted-active, #image-container.blacklisted-active, #c-comments .post.blacklisted-active {
-  display: none;
+  display: none !important;
 }

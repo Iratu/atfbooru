@@ -1,6 +1,6 @@
 <% if CurrentUser.is_moderator? || (params[:search] && params[:search][:is_deleted] =~ /t/) || !comment.is_deleted? %>
   <a name="comment-<%= comment.id %>"></a>
-  <article class="comment"
+  <article id="comment_<%= comment.id %>" class="comment message"
            data-id="<%= comment.id %>"
            data-post-id="<%= comment.post_id %>"
            data-creator-id="<%= comment.creator_id %>"
@@ -12,22 +12,19 @@
            data-below-threshold="<%= comment.score < CurrentUser.user.comment_threshold %>"
            data-is-voted="<%= comment.voted_by?(CurrentUser.user) %>">
     <div class="author">
-      <h1>
+      <h4>
         <%= link_to_user comment.creator %>
         <% if comment.is_deleted? %>
           (deleted)
         <% end %>
-      </h1>
-      <p>
-        <%= time_ago_in_words_tagged(comment.created_at) %>
-      </p>
+      </h4>
+      <%= link_to time_ago_in_words_tagged(comment.created_at), post_path(comment.post, anchor: "comment_#{comment.id}"), class: "message-timestamp" %>
     </div>
     <div class="content">
       <div class="body prose">
         <%= format_text(comment.body) %>
-
-        <%= render "application/update_notice", record: comment %>
       </div>
+      <%= render "application/update_notice", record: comment %>
       
       <% if CurrentUser.is_member? %>
         <menu>
@@ -64,6 +61,5 @@
         <% end %>
       <% end %>
     </div>
-    <div class="clearfix"></div>
   </article>
 <% end %>

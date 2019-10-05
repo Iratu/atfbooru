@@ -3,15 +3,15 @@
     <%= render "comments/partials/index/header", :post => post %>
   <% end %>
 
-  <div class="row notices">
-    <% if post.comments.hidden(CurrentUser.user).any? || (page == :comments && post.comments.size > 6) %>
+  <% if post.comments.hidden(CurrentUser.user).any? || (page == :comments && post.comments.size > 6) %>
+    <div class="row hidden-comments-notice">
       <span class="info" id="threshold-comments-notice-for-<%= post.id %>">
         <%= link_to "Show #{pluralize post.comments.hidden(CurrentUser.user).size, "hidden comment"}", comments_path(post_id: post.id), id: "show-all-comments-link", remote: true %>
       </span>
-    <% end %>
-  </div>
+    </div>
+  <% end %>
 
-  <div class="list-of-comments">
+  <div class="list-of-comments list-of-messages">
     <% if comments.present? %>
       <%= render partial: "comments/partials/show/comment", collection: comments %>
     <% elsif post.last_commented_at.present? %>
@@ -20,8 +20,6 @@
       <p>There are no comments.</p>
     <% end %>
   </div>
-
-  <div class="clearfix"></div>
 
   <% if CurrentUser.is_member? %>
     <div class="new-comment">

@@ -95,11 +95,9 @@ class TagAlias < TagRelationship
   def move_saved_searches
     escaped = Regexp.escape(antecedent_name)
 
-    if SavedSearch.enabled?
-      SavedSearch.where("query like ?", "%#{antecedent_name}%").find_each do |ss|
-        ss.query = ss.query.sub(/(?:^| )#{escaped}(?:$| )/, " #{consequent_name} ").strip.gsub(/  /, " ")
-        ss.save
-      end
+    SavedSearch.where("query like ?", "%#{antecedent_name}%").find_each do |ss|
+      ss.query = ss.query.sub(/(?:^| )#{escaped}(?:$| )/, " #{consequent_name} ").strip.gsub(/  /, " ")
+      ss.save
     end
   end
 
@@ -147,9 +145,6 @@ class TagAlias < TagRelationship
           post.update(tag_string: fixed_tags)
         end
       end
-
-      antecedent_tag.fix_post_count if antecedent_tag
-      consequent_tag.fix_post_count if consequent_tag
     end
   end
 
@@ -189,9 +184,7 @@ class TagAlias < TagRelationship
   end
 
   def self.update_cached_post_counts_for_all
-    TagAlias.without_timeout do
-      execute_sql("UPDATE tag_aliases SET post_count = tags.post_count FROM tags WHERE tags.name = tag_aliases.consequent_name")
-    end
+    execute_sql("UPDATE tag_aliases SET post_count = tags.post_count FROM tags WHERE tags.name = tag_aliases.consequent_name")
   end
 
   def create_mod_action

@@ -10,7 +10,6 @@ class TagAliasTest < ActiveSupport::TestCase
         CurrentUser.user = user
       end
       CurrentUser.ip_addr = "127.0.0.1"
-      mock_saved_search_service!
     end
 
     teardown do
@@ -126,10 +125,6 @@ class TagAliasTest < ActiveSupport::TestCase
     end
 
     context "saved searches" do
-      setup do
-        SavedSearch.stubs(:enabled?).returns(true)
-      end
-
       should "move saved searches" do
         tag1 = FactoryBot.create(:tag, :name => "...")
         tag2 = FactoryBot.create(:tag, :name => "bbb")

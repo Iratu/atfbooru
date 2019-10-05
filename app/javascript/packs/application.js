@@ -1,5 +1,4 @@
 /* eslint no-console:0 */
-/* global require */
 
 function importAll(r) {
   r.keys().forEach(r);
@@ -7,8 +6,6 @@ function importAll(r) {
 
 require('jquery-ujs');
 require('hammerjs');
-require('dropzone');
-require('spark-md5');
 require('stupid-table-plugin');
 require('jquery-hotkeys');
 
@@ -34,15 +31,15 @@ importAll(require.context('../src/styles', true, /\.s?css(?:\.erb)?$/));
 export { default as Autocomplete } from '../src/javascripts/autocomplete.js.erb';
 export { default as Blacklist } from '../src/javascripts/blacklists.js';
 export { default as Comment } from '../src/javascripts/comments.js';
+export { default as CurrentUser } from '../src/javascripts/current_user.js';
 export { default as Dtext } from '../src/javascripts/dtext.js';
 export { default as Note } from '../src/javascripts/notes.js';
 export { default as Post } from '../src/javascripts/posts.js.erb';
 export { default as PostModeMenu } from '../src/javascripts/post_mode_menu.js';
 export { default as PostTooltip } from '../src/javascripts/post_tooltips.js';
+export { default as PostVersion } from '../src/javascripts/post_version.js';
 export { default as RelatedTag } from '../src/javascripts/related_tag.js';
 export { default as Shortcuts } from '../src/javascripts/shortcuts.js';
-export { default as Upload } from '../src/javascripts/uploads.js';
+export { default as Upload } from '../src/javascripts/uploads.js.erb';
 export { default as Utility } from '../src/javascripts/utility.js';
 export { default as Ugoira } from '../src/javascripts/ugoira.js';
-export { default as Dropzone } from 'dropzone';
-export { default as SparkMD5 } from 'spark-md5';

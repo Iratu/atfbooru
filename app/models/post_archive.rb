@@ -1,4 +1,5 @@
 class PostArchive < ApplicationRecord
+  class RevertError < Exception ; end
   extend Memoist
 
   belongs_to :post
@@ -18,36 +19,26 @@ class PostArchive < ApplicationRecord
   end
 
   module SearchMethods
-    def for_user(user_id)
-      if user_id
-        where("updater_id = ?", user_id)
-      else
-        none
-      end
+    def changed_tags_include(tag)
+      where_array_includes_all(:added_tags, [tag]).or(where_array_includes_all(:removed_tags, [tag]))
     end
 
-    def for_user_name(name)
-      user_id = User.name_to_id(name)
-      for_user(user_id)
+    def changed_tags_include_all(tags)
+      tags.reduce(all) do |relation, tag|
+        relation.changed_tags_include(tag)
+      end
     end
 
     def search(params)
       q = super
+      q = q.search_attributes(params, :updater_id, :post_id, :tags, :added_tags, :removed_tags, :rating, :rating_changed, :parent_id, :parent_changed, :source, :source_changed, :version)
+
+      if params[:changed_tags]
+        q = q.changed_tags_include_all(params[:changed_tags].scan(/[^[:space:]]+/))
+      end
 
       if params[:updater_name].present?
-        q = q.for_user_name(params[:updater_name])
-      end
-
-      if params[:updater_id].present?
-        q = q.where(updater_id: params[:updater_id].split(",").map(&:to_i))
-      end
-
-      if params[:post_id].present?
-        q = q.where(post_id: params[:post_id].split(",").map(&:to_i))
-      end
-
-      if params[:start_id].present?
-        q = q.where("id <= ?", params[:start_id].to_i)
+        q = q.where(updater_id: User.name_to_id(params[:updater_name]))
       end
 
       q.apply_default_order(params)
@@ -228,7 +219,9 @@ class PostArchive < ApplicationRecord
     source.gsub(/^http:\/\//, "").sub(/\/.+/, "")
   end
 
-  def undo
+  def undo!
+    raise RevertError unless post.visible?
+
     added = changes[:added_tags] - changes[:obsolete_added_tags]
     removed = changes[:removed_tags] - changes[:obsolete_removed_tags]
 
@@ -249,11 +242,16 @@ class PostArchive < ApplicationRecord
         post.tag_string = "#{post.tag_string} #{tag}".strip
       end
     end
+
+    post.save!
   end
 
-  def undo!
-    undo
-    post.save!
+  def can_undo?(user)
+    version > 1 && post&.visible? && user.is_member?
+  end
+
+  def can_revert_to?(user)
+    post&.visible? && user.is_member?
   end
 
   def updater_name

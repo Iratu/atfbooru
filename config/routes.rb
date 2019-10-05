@@ -6,7 +6,6 @@ Rails.application.routes.draw do
     resource  :dashboard, :only => [:show]
   end
   namespace :moderator do
-    resource :bulk_revert, :only => [:new, :create]
     resource :dashboard, :only => [:show]
     resources :ip_addrs, :only => [:index] do
       collection do
@@ -245,8 +244,6 @@ Rails.application.routes.draw do
   resource :related_tag, :only => [:show, :update]
   get "reports/uploads" => "reports#uploads"
   get "reports/upload_tags" => "reports#upload_tags"
-  get "reports/post_versions" => "reports#post_versions"
-  post "reports/post_versions_create" => "reports#post_versions_create"
   get "reports/down_voting_post" => "reports#down_voting_post"
   post "reports/down_voting_post_create" => "reports#down_voting_post_create"
   resource :recommended_posts, only: [:show]
@@ -260,7 +257,6 @@ Rails.application.routes.draw do
   end
   resource :source, :only => [:show]
   resources :tags do
-    resource :correction, :only => [:new, :create, :show], :controller => "tag_corrections"
     collection do
       get :autocomplete
     end
@@ -301,13 +297,7 @@ Rails.application.routes.draw do
       get :search
     end
   end
-  resources :user_name_change_requests do
-    member do
-      post :approve
-      post :reject
-    end
-  end
-  resource :user_revert, :only => [:new, :create]
+  resources :user_name_change_requests, only: [:new, :create, :show, :index]
   resources :wiki_pages do
     member do
       put :revert

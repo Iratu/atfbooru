@@ -99,23 +99,25 @@ class Tag < ApplicationRecord
         Tag.where(:name => tag_names).update_all("post_count = post_count - 1")
       end
 
-      def clean_up_negative_post_counts!
-        Tag.where("post_count < 0").find_each do |tag|
-          tag_alias = TagAlias.where("status in ('active', 'processing') and antecedent_name = ?", tag.name).first
-          tag.fix_post_count
-          if tag_alias
-            tag_alias.consequent_tag.fix_post_count
-          end
-        end
+      def regenerate_post_counts!
+        sql = <<~SQL
+          UPDATE tags
+          SET post_count = true_count
+          FROM (
+            SELECT tag, COUNT(*) AS true_count
+            FROM posts, unnest(string_to_array(tag_string, ' ')) AS tag
+            GROUP BY tag
+          ) true_counts, tags AS old_tags
+          WHERE
+            tags.name = tag
+            AND tags.post_count != true_count
+            AND old_tags.id = tags.id
+          RETURNING tags.*, old_tags.post_count AS old_post_count
+        SQL
+
+        updated_tags = Tag.find_by_sql(sql)
+        updated_tags
       end
-    end
-
-    def real_post_count
-      @real_post_count ||= Post.raw_tag_match(name).where("true /* Tag#real_post_count */").count
-    end
-
-    def fix_post_count
-      update_column(:post_count, real_post_count)
     end
   end
 
@@ -814,7 +816,7 @@ class Tag < ApplicationRecord
     def order_similarity(name)
       # trunc(3 * sim) reduces the similarity score from a range of 0.0 -> 1.0 to just 0, 1, or 2.
       # This groups tags first by approximate similarity, then by largest tags within groups of similar tags.
-      order("trunc(3 * similarity(name, #{connection.quote(name)})) DESC", "post_count DESC", "name DESC")
+      order(Arel.sql("trunc(3 * similarity(name, #{connection.quote(name)})) DESC"), "post_count DESC", "name DESC")
     end
 
     # ref: https://www.postgresql.org/docs/current/static/pgtrgm.html#idm46428634524336

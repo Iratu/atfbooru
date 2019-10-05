@@ -23,7 +23,6 @@ class PostTest < ActiveSupport::TestCase
     end
     CurrentUser.user = @user
     CurrentUser.ip_addr = "127.0.0.1"
-    mock_saved_search_service!
     mock_pool_archive_service!
   end
 
@@ -37,15 +36,10 @@ class PostTest < ActiveSupport::TestCase
   context "Deletion:" do
     context "Expunging a post" do
       setup do
-        Delayed::Worker.delay_jobs = true
         @upload = UploadService.new(FactoryBot.attributes_for(:jpg_upload)).start!
         @post = @upload.post
         Favorite.add(post: @post, user: @user)
         create(:favorite_group).add!(@post.id)
-      end
-
-      teardown do
-        Delayed::Worker.delay_jobs = false
       end
 
       should "delete the files" do
@@ -1467,20 +1461,20 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "normalize pixiv links" do
-          @post.source = "http://i2.pixiv.net/img12/img/zenze/39749565.png"
-          assert_equal("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=39749565", @post.normalized_source)
+          @post.update!(source: "http://i2.pixiv.net/img12/img/zenze/39749565.png")
+          assert_equal("https://www.pixiv.net/artworks/39749565", @post.normalized_source)
 
-          @post.source = "http://i1.pixiv.net/img53/img/themare/39735353_big_p1.jpg"
-          assert_equal("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=39735353", @post.normalized_source)
+          @post.update!(source: "http://i1.pixiv.net/img53/img/themare/39735353_big_p1.jpg")
+          assert_equal("https://www.pixiv.net/artworks/39735353", @post.normalized_source)
 
-          @post.source = "http://i1.pixiv.net/c/150x150/img-master/img/2010/11/30/08/39/58/14901720_p0_master1200.jpg"
-          assert_equal("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=14901720", @post.normalized_source)
+          @post.update!(source: "http://i1.pixiv.net/c/150x150/img-master/img/2010/11/30/08/39/58/14901720_p0_master1200.jpg")
+          assert_equal("https://www.pixiv.net/artworks/14901720", @post.normalized_source)
 
-          @post.source = "http://i1.pixiv.net/img-original/img/2010/11/30/08/39/58/14901720_p0.png"
-          assert_equal("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=14901720", @post.normalized_source)
+          @post.update!(source: "http://i1.pixiv.net/img-original/img/2010/11/30/08/39/58/14901720_p0.png")
+          assert_equal("https://www.pixiv.net/artworks/14901720", @post.normalized_source)
 
-          @post.source = "http://i2.pixiv.net/img-zip-ugoira/img/2014/08/05/06/01/10/44524589_ugoira1920x1080.zip"
-          assert_equal("https://www.pixiv.net/member_illust.php?mode=medium&illust_id=44524589", @post.normalized_source)
+          @post.update!(source: "http://i2.pixiv.net/img-zip-ugoira/img/2014/08/05/06/01/10/44524589_ugoira1920x1080.zip")
+          assert_equal("https://www.pixiv.net/artworks/44524589", @post.normalized_source)
         end
 
         should "normalize nicoseiga links" do
@@ -2256,7 +2250,6 @@ class PostTest < ActiveSupport::TestCase
 
     context "saved searches" do
       setup do
-        SavedSearch.stubs(:enabled?).returns(true)
         @post1 = FactoryBot.create(:post, tag_string: "aaa")
         @post2 = FactoryBot.create(:post, tag_string: "bbb")
         FactoryBot.create(:saved_search, query: "aaa", labels: ["zzz"], user: CurrentUser.user)

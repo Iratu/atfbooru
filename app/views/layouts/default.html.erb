@@ -105,7 +105,7 @@
     </h1>
 
     
-    <div id="maintoggle">
+    <div id="maintoggle" class="mobile-only">
       <a href="#"><i id="maintoggle-on" class="fas fa-bars"></i></a>
       <a href="#"><i id="maintoggle-off" class="fas fa-times" style="display: none;"></i></a>
     </div>
@@ -136,7 +136,7 @@
       <%= render "moderator/post/queues/notice" %>
     <% end %>
 
-    <div class="ui-corner-all ui-state-highlight" id="notice" style="<%= "display: none;" unless flash[:notice] %>">
+    <div class="notice notice-info" id="notice" style="<%= "display: none;" unless flash[:notice] %>">
       <span class="prose"><%= format_text(flash[:notice], inline: true) %>.</span>
       <a href="#" id="close-notice-link">close</a>
     </div>

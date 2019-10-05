@@ -9,14 +9,14 @@
 
   --error-background-color: hsl(0, 100%, 95%); /* light red */
   --success-background-color: hsl(120, 100%, 95%); /* light green */
-  --warning-background-color: hsl(50, 100%, 95%); /* light yellow */
+  --warning-background-color: hsl(50, 100%, 93%); /* light yellow */
+  --target-background: #FFC;
 
   --subnav-menu-background-color: #F5F5FF;
 
   --responsive-menu-background-color: var(--link-hover-color);
   --responsive-sidebar-submit-button-background-color: #EEE;
   --responsive-sidebar-submit-button-border: 1px solid rgb(197, 197, 197);
-  --responsive-form-input-border: 1px solid #c5c5c5;
 
   --form-input-text-color: var(--text-color);
   --form-input-background: var(--body-background-color);
@@ -26,7 +26,7 @@
   --form-button-background: #EEE;
   --form-button-border: var(--form-input-border);
   --form-button-hover-background: #F5F5F5;
-  --form-button-hover-box-shadow: 0px 0px 2px grey;
+  --form-button-hover-box-shadow: 0 0 2px grey;
   --form-button-active-background: #DDD;
   --form-button-active-border: var(--form-button-border);
   --form-button-active-color: var(--form-button-text-color);
@@ -65,9 +65,6 @@
   --forum-vote-up-color: green;
   --forum-vote-meh-color: goldrenrod;
   --forum-vote-down-color: red;
-  --forum-post-border: 1px solid #DDD;
-  --forum-post-author-background: #EEE;
-  --forum-post-highlight-background-color: #FFC;
 
   --comment-sticky-background-color: var(--subnav-menu-background-color);
 
@@ -75,12 +72,11 @@
   --post-tooltip-border-color: #767676;
   --post-tooltip-header-background-color: var(--subnav-menu-background-color);
   --post-tooltip-info-color: #555;
-  --post-tooltip-inactive-color: #777;
   --post-tooltip-scrollbar-background: #999999;
-  --post-tooltip-scrollbar-border: 0px none white;
+  --post-tooltip-scrollbar-border: 0 none white;
   --post-tooltip-scrollbar-thumb-color: #AAAAAA;
   --post-tooltip-scrollbar-track-background: #EEEEEE;
-  --post-tooltip-scrollbar-track-border: 0px none white;
+  --post-tooltip-scrollbar-track-border: 0 none white;
 
   --preview-current-post-background: rgba(0, 0, 0, 0.1);
 
@@ -130,7 +126,6 @@
 
   --fetch-source-data-border: 1px solid #666;
 
-  --post-mode-menu-view-background: white;
   --post-mode-menu-edit-background: #5C5;
   --post-mode-menu-tag-script-background: #D6D;
   --post-mode-menu-add-fav-background: #FFA;
@@ -165,22 +160,17 @@
   --bulk-update-request-approved-color: green;
   --bulk-update-request-failed-color: red;
 
-  --notice-text-color: var(--text-color);
-  --notice-background: #FFFBBF;
-  --notice-border: 1px solid #CCC999;
-
   --sign-in-link-color: #E00;
   --footer-border: 1px solid #EEE;
 
   --jquery-ui-widget-content-background: var(--body-background-color);
   --jquery-ui-widget-content-text-color: var(--text-color);
-  --jquery-ui-state-error-background: #FDDFDE;
-  --jquery-ui-state-error-border: 1px solid #FBC7C6;
-  --jquery-ui-state-error-text-color: var(--text-color);
-  --jquery-ui-state-highlight-background: #FDF5D9;
-  --jquery-ui-state-highlight-border: 1px solid #FCEEC1;
-  --jquery-ui-state-highlight-text-color: var(--text-color);
   --jquery-ui-dialog-box-shadow: 2px 2px 1px grey;
+
+  --notice-error-background: var(--error-background-color);
+  --notice-error-border: 1px solid #FBC7C6;
+  --notice-info-background: var(--warning-background-color);
+  --notice-info-border: 1px solid #CCC999;
 
   --dtext-blockquote-border: 1px solid #666;
   --dtext-blockquote-background: #EEE;
@@ -221,9 +211,6 @@
   --related-tags-container-background: #EEE;
   --selected-related-tag-background-color: var(--link-color);
   --selected-related-tag-color: white;
-}
-
-body[data-user-theme="light"] {
 }
 
 /* variables that aren't defined in the dark theme fall back to the :root theme */
@@ -334,7 +321,7 @@ body[data-user-theme="dark"] {
   --form-button-background: var(--grey-5);
   --form-button-border: 1px solid var(--grey-4);
   --form-button-hover-background: white;
-  --form-button-hover-box-shadow: 0px 0px 2px var(--grey-5);
+  --form-button-hover-box-shadow: 0 0 2px var(--grey-5);
   --form-button-active-background: var(--grey-5);
   --form-button-active-border: 1px solid var(--grey-5);
   --form-button-active-color: white;
@@ -344,19 +331,10 @@ body[data-user-theme="dark"] {
   --forum-vote-up-color: var(--green-1);
   --forum-vote-meh-color: var(--yellow-1);
   --forum-vote-down-color: var(--red-1);
-  --forum-post-border: 1px solid var(--grey-3);
-  --forum-post-author-background: var(--grey-3);
-  --forum-post-highlight-background-color: var(--blue-0);
 
   --jquery-ui-widget-content-text-color: var(--text-color);
   --jquery-ui-widget-content-background: var(--grey-2);
-  --jquery-ui-dialog-box-shadow: 0px 0px 8px var(--grey-1);
-  --jquery-ui-state-error-background: var(--red-0);
-  --jquery-ui-state-error-border: 1px solid var(--grey-4);
-  --jquery-ui-state-error-text-color: var(--text-color);
-  --jquery-ui-state-highlight-background: var(--blue-0);
-  --jquery-ui-state-highlight-border: 1px solid var(--blue-1);
-  --jquery-ui-state-highlight-text-color: var(--text-color);
+  --jquery-ui-dialog-box-shadow: 0 0 8px var(--grey-1);
 
   --keyboard-shortcut-color: var(--text-color);
   --keyboard-shortcut-background-color: var(--grey-2);
@@ -381,9 +359,10 @@ body[data-user-theme="dark"] {
   --note-highlight-color: var(--blue-1);
   --note-tn-color: var(--muted-text-color);
 
-  --notice-text-color: var(--grey-5);
-  --notice-background: var(--blue-0);
-  --notice-border: 1px solid var(--blue-1);
+  --notice-error-background: var(--red-0);
+  --notice-error-border: 1px solid var(--grey-4);
+  --notice-info-background: var(--blue-0);
+  --notice-info-border: 1px solid var(--blue-1);
 
   --paginator-arrow-background-color: white;
   --paginator-arrow-color: var(--link-color);
@@ -392,7 +371,6 @@ body[data-user-theme="dark"] {
   --post-artist-commentary-container-background: var(--grey-3);
   --post-artist-commentary-container-border: 1px solid var(--grey-3);
 
-  --post-mode-menu-view-background: var(--body-background-color);
   --post-mode-menu-edit-background: var(--green-0);
   --post-mode-menu-tag-script-background: var(--indigo-0);
   --post-mode-menu-add-fav-background: var(--yellow-0);
@@ -420,7 +398,6 @@ body[data-user-theme="dark"] {
   --post-tooltip-border-color: var(--grey-4);
   --post-tooltip-header-background-color: var(--grey-3);
   --post-tooltip-info-color: var(--grey-5);
-  --post-tooltip-inactive-color: var(--grey-4);
   --post-tooltip-scrollbar-background: var(--grey-4);
   --post-tooltip-scrollbar-border: none;
   --post-tooltip-scrollbar-thumb-color: var(--grey-5);
@@ -436,6 +413,8 @@ body[data-user-theme="dark"] {
   --related-tags-container-background: var(--grey-3);
   --selected-related-tag-background-color: var(--link-color);
   --selected-related-tag-color: white;
+
+  --target-background: var(--blue-0);
 
   --tag-count-indicator-frown-color: var(--red-1);
   --tag-count-indicator-meh-color: var(--yellow-1);
