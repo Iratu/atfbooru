@@ -2,10 +2,6 @@ class SavedSearch < ApplicationRecord
   REDIS_EXPIRY = 1.hour
   QUERY_LIMIT = 1000
 
-  def self.enabled?
-    Danbooru.config.redis_url.present?
-  end
-
   concerning :Redis do
     extend Memoist
 
@@ -108,7 +104,16 @@ class SavedSearch < ApplicationRecord
           q = q.labeled(params[:label])
         end
 
-        q.apply_default_order(params)
+        case params[:order]
+        when "query"
+          q = q.order(:query).order(id: :desc)
+        when "label"
+          q = q.order(:labels).order(id: :desc)
+        else
+          q = q.apply_default_order(params)
+        end
+
+        q
       end
 
       def populate(query, timeout: 10_000)
@@ -155,8 +160,6 @@ class SavedSearch < ApplicationRecord
   belongs_to :user
   validates :query, presence: true
   validate :validate_count
-  before_create :update_user_on_create
-  after_destroy :update_user_on_destroy
   before_validation :normalize_query
   before_validation :normalize_labels
   scope :labeled, ->(label) { label.present? ? where("labels @> string_to_array(?, '~~~~')", label) : where("true") }
@@ -164,18 +167,6 @@ class SavedSearch < ApplicationRecord
   def validate_count
     if user.saved_searches.count + 1 > user.max_saved_searches
       self.errors[:user] << "can only have up to #{user.max_saved_searches} " + "saved search".pluralize(user.max_saved_searches)
-    end
-  end
-
-  def update_user_on_create
-    if !user.has_saved_searches?
-      user.update(has_saved_searches: true)
-    end
-  end
-
-  def update_user_on_destroy
-    if user.saved_searches.count == 0
-      user.update(has_saved_searches: false)
     end
   end
 

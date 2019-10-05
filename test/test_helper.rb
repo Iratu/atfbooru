@@ -61,7 +61,6 @@ class ActiveSupport::TestCase
   include ReportbooruHelper
   include DownloadTestHelper
   include IqdbTestHelper
-  include SavedSearchTestHelper
   include UploadTestHelper
   include TestHelpers
 
@@ -122,7 +121,5 @@ class ActionDispatch::IntegrationTest
     Cache.clear
   end
 end
-
-Delayed::Worker.delay_jobs = false
 
 Rails.application.load_seed

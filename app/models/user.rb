@@ -32,6 +32,7 @@ class User < ApplicationRecord
   # - disable_tagged_filenames (enabled by 387)
   # - enable_recent_searches (enabled by 499)
   # - disable_cropped_thumbnails (enabled by 22)
+  # - has_saved_searches
   BOOLEAN_ATTRIBUTES = %w(
     is_banned
     has_mail
@@ -96,7 +97,7 @@ class User < ApplicationRecord
   has_many :post_disapprovals, :dependent => :destroy
   has_many :post_flags, foreign_key: :creator_id
   has_many :post_votes
-  has_many :post_archives
+  has_many :post_versions, class_name: "PostArchive", foreign_key: :updater_id
   has_many :bans, -> {order("bans.id desc")}
   has_one :recent_ban, -> {order("bans.id desc")}, :class_name => "Ban"
 
@@ -141,7 +142,7 @@ class User < ApplicationRecord
 
       # XXX downcasing is the wrong way to do case-insensitive comparison for unicode (should use casefolding).
       def find_by_name(name)
-        where_ilike(:name, normalize_name(name)).first
+        where_iequals(:name, normalize_name(name)).first
       end
 
       def normalize_name(name)
@@ -256,7 +257,7 @@ class User < ApplicationRecord
       end
 
       def anonymous
-        user = User.new(name: "Anonymous", created_at: Time.now)
+        user = User.new(name: "Anonymous", level: Levels::ANONYMOUS, created_at: Time.now)
         user.freeze.readonly!
         user
       end
@@ -317,7 +318,6 @@ class User < ApplicationRecord
     end
 
     def customize_new_user
-      self.level = User::Levels::MEMBER
       Danbooru.config.customize_new_user(self)
     end
 
@@ -668,7 +668,7 @@ end
       self.class.without_timeout do
         User.where(id: id).update_all(
           post_upload_count: posts.count,
-          post_update_count: PostArchive.for_user(id).count,
+          post_update_count: post_versions.count,
           note_update_count: note_versions.count
         )
       end

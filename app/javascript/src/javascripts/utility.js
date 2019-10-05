@@ -1,3 +1,5 @@
+import CurrentUser from "./current_user";
+
 let Utility = {};
 
 Utility.delay = function(milliseconds) {
@@ -19,7 +21,7 @@ Utility.test_max_width = function(width) {
 Utility.notice_timeout_id = undefined;
 
 Utility.notice = function(msg, permanent) {
-  $('#notice').addClass("ui-state-highlight").removeClass("ui-state-error").fadeIn("fast").children("span").html(msg);
+  $('#notice').addClass("notice-info").removeClass("notice-error").fadeIn("fast").children("span").html(msg);
 
   if (Utility.notice_timeout_id !== undefined) {
     clearTimeout(Utility.notice_timeout_id)
@@ -33,7 +35,7 @@ Utility.notice = function(msg, permanent) {
 }
 
 Utility.error = function(msg) {
-  $('#notice').removeClass("ui-state-highlight").addClass("ui-state-error").fadeIn("fast").children("span").html(msg);
+  $('#notice').removeClass("notice-info").addClass("notice-error").fadeIn("fast").children("span").html(msg);
 
   if (Utility.notice_timeout_id !== undefined) {
     clearTimeout(Utility.notice_timeout_id)
@@ -66,7 +68,7 @@ Utility.dialog = function(title, html) {
 }
 
 Utility.keydown = function(keys, namespace, handler) {
-  if (Utility.meta("enable-js-navigation") === "true") {
+  if (CurrentUser.data("enable-post-navigation")) {
     $(document).on("keydown.danbooru." + namespace, null, keys, handler);
   }
 };

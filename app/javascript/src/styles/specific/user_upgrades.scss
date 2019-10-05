@@ -1,8 +1,5 @@
 div#c-user-upgrades {
   div#a-new {
-    max-width: 40em;
-    font-size: 1.2em;
-
     form.stripe {
       display: inline;
     }
@@ -22,10 +19,7 @@ div#c-user-upgrades {
           width: 10em;
         }
 
-        colgroup#basic {
-        }
-
-        colgroup#gold  {
+        colgroup#gold {
           background-color: var(--user-upgrade-gold-background-color);
         }
 

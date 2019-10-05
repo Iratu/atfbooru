@@ -89,6 +89,11 @@ input[type="button"], input[type="submit"], button {
   padding-left: 0.5em;
 }
 
+/* Highlight link anchor targets (e.g. /forum_topics/123#forum_post_456). Use !important to override even table row backgrounds. */
+:target {
+  background: var(--target-background) !important;
+}
+
 menu {
   margin: 0;
   padding: 0;
@@ -101,7 +106,6 @@ menu {
   li {
     margin: 0;
     padding: 0 0.2em;
-    list-style-type: none;
     display: inline;
   }
 }
@@ -118,4 +122,35 @@ table tfoot {
   color: var(--muted-text-color);
   font-style: italic;
   font-size: 0.8em;
+}
+
+.fixed-width-container {
+  max-width: 70em;
+}
+
+.column-container {
+  display: flex;
+
+  .column-expand { flex: 1; }
+  .column-shrink { flex: 0; }
+  @media (max-width: 660px) { display: block; }
+}
+
+ul.list-bulleted {
+  list-style: inside disc;
+}
+
+ul.list-inline {
+  &, li {
+    display: inline;
+  }
+}
+
+.mobile-only {
+  display: none;
+  @media (max-width: 660px) { display: initial; }
+}
+
+.desktop-only {
+  @media (max-width: 660px) { display: none; }
 }
