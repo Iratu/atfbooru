@@ -1,7 +1,6 @@
 class WikiPagesController < ApplicationController
   respond_to :html, :xml, :json, :js
   before_action :member_only, :except => [:index, :search, :show, :show_or_new]
-  before_action :builder_only, :only => [:destroy]
   before_action :normalize_search_params, :only => [:index]
   layout "sidebar"
 
@@ -11,22 +10,17 @@ class WikiPagesController < ApplicationController
   end
 
   def edit
-    @wiki_page = WikiPage.find(params[:id])
+    @wiki_page, _found_by = WikiPage.find_by_id_or_title(params[:id])
     respond_with(@wiki_page)
   end
 
   def index
-    @wiki_pages = WikiPage.includes(:creator).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
-    respond_with(@wiki_pages) do |format|
-      format.html do
-        if params[:page].nil? || params[:page].to_i == 1
-          if @wiki_pages.length == 1
-            redirect_to(wiki_page_path(@wiki_pages.first))
-          elsif @wiki_pages.length == 0 && params[:search][:title].present? && params[:search][:title] !~ /\*/
-            redirect_to(wiki_pages_path(:search => {:title => "*#{params[:search][:title]}*"}))
-          end
-        end
-      end
+    @wiki_pages = WikiPage.paginated_search(params)
+
+    if params[:redirect].to_s.truthy? && @wiki_pages.one? && @wiki_pages.first.title == WikiPage.normalize_title(params[:search][:title])
+      redirect_to @wiki_pages.first
+    else
+      respond_with(@wiki_pages)
     end
   end
 
@@ -35,18 +29,17 @@ class WikiPagesController < ApplicationController
   end
 
   def show
-    if params[:id] =~ /\A\d+\z/
-      @wiki_page = WikiPage.find(params[:id])
-    else
-      @wiki_page = WikiPage.titled(params[:id]).first
-    end
+    @wiki_page, found_by = WikiPage.find_by_id_or_title(params[:id])
 
-    if @wiki_page.present?
-      respond_with(@wiki_page)
-    elsif request.format.html?
-      redirect_to show_or_new_wiki_pages_path(title: params[:id])
-    else
+    if request.format.html? && @wiki_page.blank? && found_by == :title
+      @wiki_page = WikiPage.new(title: params[:id])
+      respond_with @wiki_page, status: 404
+    elsif request.format.html? && @wiki_page.present? && found_by == :id
+      redirect_to @wiki_page
+    elsif @wiki_page.blank?
       raise ActiveRecord::RecordNotFound
+    else
+      respond_with(@wiki_page)
     end
   end
 
@@ -56,19 +49,21 @@ class WikiPagesController < ApplicationController
   end
 
   def update
-    @wiki_page = WikiPage.find(params[:id])
+    @wiki_page, _found_by = WikiPage.find_by_id_or_title(params[:id])
     @wiki_page.update(wiki_page_params(:update))
+    flash[:notice] = @wiki_page.warnings.full_messages.join(".\n \n") if @wiki_page.warnings.any?
+
     respond_with(@wiki_page)
   end
 
   def destroy
-    @wiki_page = WikiPage.find(params[:id])
+    @wiki_page, _found_by = WikiPage.find_by_id_or_title(params[:id])
     @wiki_page.update(is_deleted: true)
     respond_with(@wiki_page)
   end
 
   def revert
-    @wiki_page = WikiPage.find(params[:id])
+    @wiki_page, _found_by = WikiPage.find_by_id_or_title(params[:id])
     @version = @wiki_page.versions.find(params[:version_id])
     @wiki_page.revert_to!(@version)
     flash[:notice] = "Page was reverted"
@@ -76,15 +71,10 @@ class WikiPagesController < ApplicationController
   end
 
   def show_or_new
-    @wiki_page = WikiPage.find_by_title(params[:title])
-
     if params[:title].blank?
       redirect_to new_wiki_page_path(wiki_page_params(:create))
-    elsif @wiki_page.present?
-      redirect_to wiki_page_path(@wiki_page)
     else
-      @wiki_page = WikiPage.new(:title => params[:title])
-      respond_with(@wiki_page)
+      redirect_to wiki_page_path(params[:title])
     end
   end
 
@@ -98,9 +88,8 @@ class WikiPagesController < ApplicationController
   end
 
   def wiki_page_params(context)
-    permitted_params = %i[body other_names other_names_string skip_secondary_validations]
-    permitted_params += %i[is_locked is_deleted] if CurrentUser.is_builder?
-    permitted_params += %i[title] if context == :create || CurrentUser.is_builder?
+    permitted_params = %i[title body other_names other_names_string is_deleted]
+    permitted_params += %i[is_locked] if CurrentUser.is_builder?
 
     params.fetch(:wiki_page, {}).permit(permitted_params)
   end

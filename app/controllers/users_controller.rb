@@ -17,7 +17,7 @@ class UsersController < ApplicationController
     @user = CurrentUser.user
 
     if @user.is_anonymous?
-      redirect_to new_session_path
+      redirect_to login_path(url: settings_path)
     else
       params[:action] = "edit"
       respond_with(@user, template: "users/edit")
@@ -28,9 +28,14 @@ class UsersController < ApplicationController
     if params[:name].present?
       @user = User.find_by_name!(params[:name])
       redirect_to user_path(@user)
+      return
+    end
+
+    @users = User.paginated_search(params)
+    if params[:redirect].to_s.truthy? && @users.one? && User.normalize_name(@users.first.name) == User.normalize_name(params[:search][:name_matches])
+      redirect_to @users.first
     else
-      @users = User.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
-      respond_with(@users)
+      respond_with @users
     end
   end
 
@@ -49,7 +54,7 @@ class UsersController < ApplicationController
       params[:action] = "show"
       respond_with(@user, methods: @user.full_attributes, template: "users/show")
     elsif request.format.html?
-      redirect_to new_session_path
+      redirect_to login_path(url: profile_path)
     else
       raise ActiveRecord::RecordNotFound
     end
@@ -94,7 +99,7 @@ class UsersController < ApplicationController
   private
 
   def check_privilege(user)
-    raise User::PrivilegeError unless (user.id == CurrentUser.id || CurrentUser.is_admin?)
+    raise User::PrivilegeError unless user.id == CurrentUser.id || CurrentUser.is_admin?
   end
 
   def user_params(context)

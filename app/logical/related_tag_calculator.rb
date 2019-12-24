@@ -1,13 +1,15 @@
 module RelatedTagCalculator
   def self.similar_tags_for_search(tag_query, search_sample_size: 1000, tag_sample_size: 250, category: nil)
     search_count = Post.fast_count(tag_query)
+    return [] if search_count.nil?
+
     search_sample_size = [search_count, search_sample_size].min
     return [] if search_sample_size <= 0
 
     tags = frequent_tags_for_search(tag_query, search_sample_size: search_sample_size, category: category).limit(tag_sample_size)
     tags = tags.sort_by do |tag|
       # cosine distance(tag1, tag2) = 1 - {{tag1 tag2}} / sqrt({{tag1}} * {{tag2}})
-      1 - tag.overlap_count / (Math.sqrt(tag.post_count * search_count.to_f))
+      1 - tag.overlap_count / Math.sqrt(tag.post_count * search_count.to_f)
     end
 
     tags

@@ -95,7 +95,7 @@ class UploadService
       upload = preprocessor.finish!(upload)
       raise Error, upload.status if upload.is_errored?
       md5_changed = upload.md5 != post.md5
-      
+
       replacement.replacement_url = find_replacement_url(replacement, upload)
 
       if md5_changed
@@ -123,12 +123,26 @@ class UploadService
         CurrentUser.as(User.system) do
           post.comments.create!(body: comment_replacement_message(post, replacement), do_not_bump_post: true)
         end
+      else
+        purge_cached_urls(post)
       end
 
       replacement.save!
       post.save!
 
       post.update_iqdb_async
+    end
+
+    def purge_cached_urls(post)
+      urls = [
+        post.preview_file_url,
+        post.large_file_url,
+        post.file_url,
+        post.tagged_large_file_url,
+        post.tagged_file_url
+      ]
+
+      CloudflareService.new.purge_cache(urls)
     end
 
     def rescale_notes(post)

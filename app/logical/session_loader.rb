@@ -1,5 +1,5 @@
 class SessionLoader
-  class AuthenticationFailure < Exception ; end
+  class AuthenticationFailure < Exception; end
 
   attr_reader :session, :cookies, :request, :params
 
@@ -27,7 +27,7 @@ class SessionLoader
     update_last_ip_addr
     set_time_zone
     set_safe_mode
-    set_started_at_session
+    initialize_session_cookies
     CurrentUser.user.unban! if CurrentUser.user.ban_expired?
   ensure
     DanbooruLogger.add_session_attributes(request, session, CurrentUser.user)
@@ -37,7 +37,7 @@ class SessionLoader
     request.authorization.present? || params[:login].present? || params[:api_key].present? || params[:password_hash].present?
   end
 
-private
+  private
 
   def set_statement_timeout
     timeout = CurrentUser.user.statement_timeout
@@ -114,9 +114,12 @@ private
     CurrentUser.safe_mode = safe_mode
   end
 
-  def set_started_at_session
-    if session[:started_at].blank?
-      session[:started_at] = Time.now.utc.to_s
-    end
+  def initialize_session_cookies
+    session.options[:expire_after] = 20.years
+    session[:started_at] ||= Time.now.utc.to_s
+
+    # clear out legacy login cookies if present
+    cookies.delete(:user_name)
+    cookies.delete(:password_hash)
   end
 end

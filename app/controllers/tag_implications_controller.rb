@@ -22,7 +22,7 @@ class TagImplicationsController < ApplicationController
   end
 
   def index
-    @tag_implications = TagImplication.includes(:antecedent_tag, :consequent_tag, :approver).search(search_params).paginate(params[:page], :limit => params[:limit])
+    @tag_implications = TagImplication.includes(:antecedent_tag, :consequent_tag, :approver).paginated_search(params, count_pages: true)
     respond_with(@tag_implications)
   end
 
@@ -40,7 +40,7 @@ class TagImplicationsController < ApplicationController
     respond_with(@tag_implication, :location => tag_implication_path(@tag_implication))
   end
 
-private
+  private
 
   def tag_implication_params
     params.require(:tag_implication).permit(%i[antecedent_name consequent_name forum_topic_id skip_secondary_validations])

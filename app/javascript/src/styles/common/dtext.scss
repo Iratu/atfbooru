@@ -100,13 +100,29 @@ div.prose {
     }
   }
 
-  a.dtext-external-link::after {
+  a.dtext-named-external-link::after {
     // https://fontawesome.com/icons/external-link-alt?style=solid
     @include fa-solid-icon("\f35d");
 
     font-size: 0.6em;
     padding: 0 0.2em 0 0.3em;
     vertical-align: 1px;
+  }
+
+  a.dtext-wiki-does-not-exist, a.dtext-tag-does-not-exist {
+    text-decoration: dotted underline;
+  }
+
+  .spoiler:not(:hover), .spoiler:not(:hover) * {
+    color: transparent !important;
+  }
+
+  .spoiler:hover {
+    color: var(--dtext-spoiler-hover-color);
+  }
+
+  .spoiler {
+    background: var(--dtext-spoiler-background-color);
   }
 }
 
@@ -120,5 +136,21 @@ div.dtext-preview {
 
   ul {
     margin-left: 1em;
+  }
+}
+
+div#dtext-help {
+  td {
+    > *, div.spoiler p {
+      margin: 0;
+    }
+
+    h1, h6 {
+      padding: 0;
+    }
+  }
+
+  #dtext-help-footnote {
+    margin: 1em 0 0 0;
   }
 }

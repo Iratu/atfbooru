@@ -1,14 +1,19 @@
 import Post from './posts.js.erb'
+import Shortcuts from './shortcuts.js';
+import Utility from './utility.js';
 import Dropzone from 'dropzone';
 import SparkMD5 from 'spark-md5';
 
 let Upload = {};
 
 Upload.MAX_FILE_SIZE = <%= Danbooru.config.max_file_size.to_json %> / (1024 * 1024);
+Upload.IQDB_LIMIT = 5;
+Upload.IQDB_MIN_SIMILARITY = 50;
+Upload.IQDB_HIGH_SIMILARITY = 70;
 
 Upload.initialize_all = function() {
   if ($("#c-uploads,#c-posts").length) {
-    this.initialize_enter_on_tags();
+    Utility.keydown("return", "submit", Shortcuts.submit_form, "#upload_tag_string, #post_tag_string");
     $("#upload_source").on("change.danbooru", Upload.fetch_data_manual);
     $(document).on("click.danbooru", "#fetch-data-manual", Upload.fetch_data_manual);
   }
@@ -26,6 +31,7 @@ Upload.initialize_all = function() {
     }
     this.initialize_similar();
     this.initialize_submit();
+    $("#similar-button").click();
 
     $("#toggle-artist-commentary").on("click.danbooru", function(e) {
       Upload.toggle_commentary();
@@ -35,10 +41,6 @@ Upload.initialize_all = function() {
 
   if ($("#c-uploads #a-new").length) {
     this.initialize_dropzone();
-  }
-
-  if ($("#iqdb-similar").length) {
-    this.initialize_iqdb_source();
   }
 }
 
@@ -66,26 +68,21 @@ Upload.validate_upload = function (e) {
   }
 }
 
-Upload.initialize_iqdb_source = function() {
-  if (/^https?:\/\//.test($("#upload_source").val())) {
-    $.get("/iqdb_queries", {"url": $("#upload_source").val()}).done(function(html) {$("#iqdb-similar").html(html)});
-  }
-}
-
-Upload.initialize_enter_on_tags = function() {
-  var $textarea = $("#upload_tag_string, #post_tag_string");
-  var $submit = $textarea.parents("form").find('input[type="submit"]');
-
-  $textarea.on("keydown.danbooru.submit", null, "return", function(e) {
-    $submit.click();
-    e.preventDefault();
-  });
-}
-
 Upload.initialize_similar = function() {
   $("#similar-button").on("click.danbooru", function(e) {
-    $.get("/iqdb_queries", {"url": $("#upload_source").val()}).done(function(html) {$("#iqdb-similar").html(html).show()});
     e.preventDefault();
+
+    let source = $("#upload_source").val();
+    if (/^https?:\/\//.test(source)) {
+      $.get("/iqdb_queries.js", {
+        limit: Upload.IQDB_LIMIT,
+        search: {
+          url: source,
+          similarity: Upload.IQDB_MIN_SIMILARITY,
+          high_similarity: Upload.IQDB_HIGH_SIMILARITY
+        }
+      });
+    }
   });
 }
 

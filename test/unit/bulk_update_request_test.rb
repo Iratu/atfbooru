@@ -64,11 +64,11 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
     context "on approval" do
       setup do
         @post = create(:post, tag_string: "foo aaa")
-        @script = %q(
+        @script = '
           create alias foo -> bar
           create implication bar -> baz
           mass update aaa -> bbb
-        )
+        '
 
         @bur = FactoryBot.create(:bulk_update_request, :script => @script)
         @bur.approve!(@admin)
@@ -159,6 +159,14 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
         bur.approve!(@admin)
 
         assert_equal(Tag.categories.meta, tag.reload.category)
+      end
+
+      should "work for a new tag" do
+        bur = FactoryBot.create(:bulk_update_request, :script => "category new_tag -> meta")
+        bur.approve!(@admin)
+
+        assert_not_nil(Tag.find_by_name("new_tag"))
+        assert_equal(Tag.categories.meta, Tag.find_by_name("new_tag").category)
       end
     end
 

@@ -1,7 +1,9 @@
+require 'resolv'
+
 module Downloads
   class File
     include ActiveModel::Validations
-    class Error < Exception ; end
+    class Error < Exception; end
 
     RETRIABLE_ERRORS = [Errno::ECONNRESET, Errno::ETIMEDOUT, Errno::EIO, Errno::EHOSTUNREACH, Errno::ECONNREFUSED, Timeout::Error, IOError]
 
@@ -10,7 +12,7 @@ module Downloads
 
     validate :validate_url
 
-    def initialize(url, referer=nil)
+    def initialize(url, referer = nil)
       @url = Addressable::URI.parse(url) rescue nil
       @referer = referer
       validate!
@@ -26,9 +28,9 @@ module Downloads
       end
     end
 
-    def download!(tries: 3, **options)
+    def download!(url: uncached_url, tries: 3, **options)
       Retriable.retriable(on: RETRIABLE_ERRORS, tries: tries, base_interval: 0) do
-        file = http_get_streaming(uncached_url, headers: strategy.headers, **options)
+        file = http_get_streaming(url, headers: strategy.headers, **options)
         return [file, strategy]
       end
     end
@@ -43,6 +45,8 @@ module Downloads
       size = 0
 
       res = HTTParty.get(url, httparty_options) do |chunk|
+        next if chunk.code == 302
+
         size += chunk.size
         raise Error.new("File is too large (max size: #{max_size})") if size > max_size && max_size > 0
 
@@ -55,7 +59,7 @@ module Downloads
       else
         raise Error.new("HTTP error code: #{res.code} #{res.message}")
       end
-    end # def
+    end
 
     # Prevent Cloudflare from potentially mangling the image. See issue #3528.
     def uncached_url
@@ -64,6 +68,10 @@ module Downloads
       url = file_url.dup
       url.query_values = url.query_values.to_h.merge(danbooru_no_cache: SecureRandom.uuid)
       url
+    end
+
+    def preview_url
+      @preview_url ||= Addressable::URI.parse(strategy.preview_url)
     end
 
     def file_url
@@ -79,7 +87,7 @@ module Downloads
         timeout: 10,
         stream_body: true,
         headers: strategy.headers,
-        connection_adapter: ValidatingConnectionAdapter,
+        connection_adapter: ValidatingConnectionAdapter
       }.deep_merge(Danbooru.config.httparty_options)
     end
 
@@ -95,7 +103,7 @@ module Downloads
   # https://www.rubydoc.info/github/jnunemaker/httparty/HTTParty/ConnectionAdapter
   class ValidatingConnectionAdapter < HTTParty::ConnectionAdapter
     def self.call(uri, options)
-      ip_addr = IPAddr.new(Resolv.getaddress(uri.hostname))
+      ip_addr = IPAddr.new(::Resolv.getaddress(uri.hostname))
 
       if Danbooru.config.banned_ip_for_download?(ip_addr)
         raise Downloads::File::Error, "Downloads from #{ip_addr} are not allowed"

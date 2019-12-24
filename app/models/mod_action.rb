@@ -4,17 +4,17 @@ class ModAction < ApplicationRecord
 
   api_attributes including: [:category_id]
 
-  #####DIVISIONS#####
-  #Groups:     0-999
-  #Individual: 1000-1999
-  #####Actions#####
-  #Create:   0
-  #Update:   1
-  #Delete:   2
-  #Undelete: 3
-  #Ban:      4
-  #Unban:    5
-  #Misc:     6-19
+  # ####DIVISIONS#####
+  # Groups:     0-999
+  # Individual: 1000-1999
+  # ####Actions#####
+  # Create:   0
+  # Update:   1
+  # Delete:   2
+  # Undelete: 3
+  # Ban:      4
+  # Unban:    5
+  # Misc:     6-19
   enum category: {
     user_delete: 2,
     user_ban: 4,
@@ -54,33 +54,30 @@ class ModAction < ApplicationRecord
     other: 2000
   }
 
+  def self.permitted(user)
+    if user.is_moderator?
+      all
+    else
+      where.not(category: [:ip_ban_create, :ip_ban_delete])
+    end
+  end
+
   def self.search(params)
     q = super
 
+    q = q.permitted(CurrentUser.user)
     q = q.search_attributes(params, :creator, :category, :description)
     q = q.text_attribute_matches(:description, params[:description_matches])
 
     q.apply_default_order(params)
   end
 
-  def filtered_description
-    if (ip_ban_create? || ip_ban_delete?) && !CurrentUser.user.is_moderator?
-      description.gsub(/(created|deleted) ip ban for .*/, "\\1 ip ban")
-    else
-      description
-    end
-  end
-
   def category_id
     self.class.categories[category]
   end
 
-  def serializable_hash(*args)
-    super(*args).merge("description" => filtered_description)
-  end
-
   def self.log(desc, cat = :other)
-    create(:description => desc,:category => categories[cat])
+    create(:description => desc, :category => categories[cat])
   end
 
   def initialize_creator

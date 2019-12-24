@@ -21,9 +21,9 @@ class TagAlias < TagRelationship
           nil
         end
         ForumUpdater.new(
-          forum_topic, 
+          forum_topic,
           forum_post: post,
-          expected_title: TagAliasRequest.topic_title(antecedent_name, consequent_name),
+          expected_title: "Tag alias: #{antecedent_name} -> #{consequent_name}",
           skip_update: !TagRelationship::SUPPORT_HARD_CODED
         )
       end
@@ -56,20 +56,20 @@ class TagAlias < TagRelationship
     tries = 0
 
     begin
-      CurrentUser.scoped(approver) do
-        update(status: "processing")
+      CurrentUser.scoped(User.system) do
+        update!(status: "processing")
         move_aliases_and_implications
         move_saved_searches
         ensure_category_consistency
         update_posts
         forum_updater.update(approval_message(approver), "APPROVED") if update_topic
         rename_wiki_and_artist
-        update(status: "active", post_count: consequent_tag.post_count)
+        update!(status: "active")
       end
     rescue Exception => e
       if tries < 5
         tries += 1
-        sleep 2 ** tries
+        sleep 2**tries
         retry
       end
 
@@ -141,20 +141,16 @@ class TagAlias < TagRelationship
       Post.raw_tag_match(antecedent_name).find_each do |post|
         escaped_antecedent_name = Regexp.escape(antecedent_name)
         fixed_tags = post.tag_string.sub(/(?:\A| )#{escaped_antecedent_name}(?:\Z| )/, " #{consequent_name} ").strip
-        CurrentUser.scoped(creator, creator_ip_addr) do
-          post.update(tag_string: fixed_tags)
-        end
+        post.update(tag_string: fixed_tags)
       end
     end
   end
 
   def rename_wiki_and_artist
     antecedent_wiki = WikiPage.titled(antecedent_name).first
-    if antecedent_wiki.present? 
+    if antecedent_wiki.present?
       if WikiPage.titled(consequent_name).blank?
-        CurrentUser.scoped(creator, creator_ip_addr) do
-          antecedent_wiki.update(title: consequent_name, skip_secondary_validations: true)
-        end
+        antecedent_wiki.update!(title: consequent_name, skip_secondary_validations: true)
       else
         forum_updater.update(conflict_message)
       end
@@ -162,9 +158,7 @@ class TagAlias < TagRelationship
 
     if antecedent_tag.category == Tag.categories.artist
       if antecedent_tag.artist.present? && consequent_tag.artist.blank?
-        CurrentUser.scoped(creator, creator_ip_addr) do
-          antecedent_tag.artist.update!(name: consequent_name)
-        end
+        antecedent_tag.artist.update!(name: consequent_name)
       end
     end
   end
@@ -183,27 +177,23 @@ class TagAlias < TagRelationship
     end
   end
 
-  def self.update_cached_post_counts_for_all
-    execute_sql("UPDATE tag_aliases SET post_count = tags.post_count FROM tags WHERE tags.name = tag_aliases.consequent_name")
-  end
-
   def create_mod_action
-    alias_desc = %Q("tag alias ##{id}":[#{Rails.application.routes.url_helpers.tag_alias_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
+    alias_desc = %("tag alias ##{id}":[#{Rails.application.routes.url_helpers.tag_alias_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
 
     if saved_change_to_id?
-      ModAction.log("created #{status} #{alias_desc}",:tag_alias_create)
+      ModAction.log("created #{status} #{alias_desc}", :tag_alias_create)
     else
       # format the changes hash more nicely.
       change_desc = saved_changes.except(:updated_at).map do |attribute, values|
         old, new = values[0], values[1]
         if old.nil?
-          %Q(set #{attribute} to "#{new}")
+          %(set #{attribute} to "#{new}")
         else
-          %Q(changed #{attribute} from "#{old}" to "#{new}")
+          %(changed #{attribute} from "#{old}" to "#{new}")
         end
       end.join(", ")
 
-      ModAction.log("updated #{alias_desc}\n#{change_desc}",:tag_alias_update)
+      ModAction.log("updated #{alias_desc}\n#{change_desc}", :tag_alias_update)
     end
   end
 end

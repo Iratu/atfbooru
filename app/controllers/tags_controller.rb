@@ -9,7 +9,7 @@ class TagsController < ApplicationController
   end
 
   def index
-    @tags = Tag.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @tags = Tag.paginated_search(params)
     respond_with(@tags)
   end
 
@@ -18,7 +18,7 @@ class TagsController < ApplicationController
       # limit rollout
       @tags = TagAutocomplete.search(params[:search][:name_matches])
     else
-      @tags = Tag.names_matches_with_aliases(params[:search][:name_matches])
+      @tags = Tag.names_matches_with_aliases(params[:search][:name_matches], params.fetch(:limit, 10).to_i)
     end
 
     # XXX
@@ -37,7 +37,8 @@ class TagsController < ApplicationController
     respond_with(@tag)
   end
 
-private
+  private
+
   def check_privilege(tag)
     raise User::PrivilegeError unless tag.editable_by?(CurrentUser.user)
   end

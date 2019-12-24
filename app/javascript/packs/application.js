@@ -25,6 +25,10 @@ require("jquery-ui/themes/base/draggable.css");
 require("jquery-ui/themes/base/resizable.css");
 require("jquery-ui/themes/base/theme.css");
 
+require("@fortawesome/fontawesome-free/css/fontawesome.css");
+require("@fortawesome/fontawesome-free/css/solid.css");
+require("@fortawesome/fontawesome-free/css/regular.css");
+
 importAll(require.context('../src/javascripts', true, /\.js(\.erb)?$/));
 importAll(require.context('../src/styles', true, /\.s?css(?:\.erb)?$/));
 
@@ -33,6 +37,7 @@ export { default as Blacklist } from '../src/javascripts/blacklists.js';
 export { default as Comment } from '../src/javascripts/comments.js';
 export { default as CurrentUser } from '../src/javascripts/current_user.js';
 export { default as Dtext } from '../src/javascripts/dtext.js';
+export { default as IqdbQuery } from '../src/javascripts/iqdb_queries.js';
 export { default as Note } from '../src/javascripts/notes.js';
 export { default as Post } from '../src/javascripts/posts.js.erb';
 export { default as PostModeMenu } from '../src/javascripts/post_mode_menu.js';

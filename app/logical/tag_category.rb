@@ -2,46 +2,42 @@ class TagCategory
   module Mappings
     # Returns a hash mapping various tag categories to a numerical value.
     def mapping
-      @@mapping ||= Hash[
-          Danbooru.config.full_tag_config_info.map {|k,v|  v["extra"].map {|y| [y,v["category"]]}}
-          .reduce([],:+)]
-        .update(Hash[Danbooru.config.full_tag_config_info.map {|k,v|  [v["short"],v["category"]]}])
-        .update( Hash[Danbooru.config.full_tag_config_info.map {|k,v| [k,v["category"]]}])
+      @@mapping ||=
+        Hash[
+          Danbooru.config.full_tag_config_info.map { |k, v| v["extra"].map { |y| [y, v["category"]] }}.reduce([], :+)
+        ]
+        .update(Hash[Danbooru.config.full_tag_config_info.map { |k, v| [v["short"], v["category"]] }])
+        .update(Hash[Danbooru.config.full_tag_config_info.map { |k, v| [k, v["category"]] }])
     end
 
     # Returns a hash mapping more suited for views
     def canonical_mapping
-      @@canonical_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [k.capitalize,v["category"]]}]
+      @@canonical_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [k.capitalize, v["category"]] }]
     end
 
     # Returns a hash mapping numerical category values to their string equivalent.
     def reverse_mapping
-      @@reverse_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [v["category"],k]}]
+      @@reverse_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [v["category"], k] }]
     end
 
     # Returns a hash mapping for the short name usage in metatags
     def short_name_mapping
-      @@short_name_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [v["short"],k]}]
-    end
-
-    # Returns a hash mapping for humanized_essential_tag_string (models/post.rb)
-    def humanized_mapping
-      @@humanized_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [k,v["humanized"]]}]
+      @@short_name_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [v["short"], k] }]
     end
 
     # Returns a hash mapping for split_tag_list_html (presenters/tag_set_presenter.rb)
     def header_mapping
-      @@header_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [k,v["header"]]}]
+      @@header_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [k, v["header"]] }]
     end
 
     # Returns a hash mapping for related tag buttons (javascripts/related_tag.js.erb)
     def related_button_mapping
-      @@related_button_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [k,v["relatedbutton"]]}]
+      @@related_button_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [k, v["relatedbutton"]] }]
     end
 
     # Returns a hash mapping for CSS (stylesheets/posts.scss.erb)
     def css_mapping
-      @@css_mapping ||= Hash[Danbooru.config.full_tag_config_info.map {|k,v| [v["category"],v["css"]]}]
+      @@css_mapping ||= Hash[Danbooru.config.full_tag_config_info.map { |k, v| [v["category"], v["css"]] }]
     end
   end
 
@@ -56,10 +52,6 @@ class TagCategory
 
     def short_name_list
       @@short_name_list ||= short_name_mapping.keys
-    end
-
-    def humanized_list
-      Danbooru.config.humanized_tag_category_list
     end
 
     def split_header_list

@@ -42,6 +42,11 @@ article.post-preview {
     vertical-align: text-top;
   }
 
+  &.post-preview-compact {
+    width: auto;
+    height: auto;
+  }
+
   .desc {
     font-size: 80%;
     margin-bottom: 0;
@@ -289,6 +294,10 @@ div#c-posts {
 
   aside#sidebar > section > ul {
     margin-bottom: 1em;
+
+    a.wiki-link {
+      margin-right: 0.3em;
+    }
   }
 
   aside#sidebar > section > ul ul li {
@@ -300,6 +309,7 @@ div#c-posts {
 
     input {
       min-width: 0;
+      flex: 1;
     }
 
     #search-box-submit {
@@ -327,6 +337,10 @@ div#c-posts {
   div#a-show {
     .active, .pool-selected-true {
       font-weight: bold;
+    }
+
+    #post-info-source {
+      word-break: break-all;
     }
 
     .recommended-posts {
@@ -369,6 +383,11 @@ div#c-posts {
 
     #search-seq-nav + #pool-nav, #search-seq-nav + #favgroup-nav, #pool-nav + #favgroup-nav {
       margin-top: 0.5em;
+    }
+
+    #recommended.loading-recommended-posts {
+      pointer-events: none;
+      opacity: 0.5;
     }
 
     #pool-nav, #search-seq-nav, #favgroup-nav {

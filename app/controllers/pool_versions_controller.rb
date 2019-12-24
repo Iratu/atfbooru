@@ -8,7 +8,7 @@ class PoolVersionsController < ApplicationController
       @pool = Pool.find(params[:search][:pool_id])
     end
 
-    @pool_versions = PoolArchive.search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @pool_versions = PoolArchive.paginated_search(params)
     respond_with(@pool_versions)
   end
 
@@ -22,7 +22,7 @@ class PoolVersionsController < ApplicationController
     end
   end
 
-private
+  private
 
   def set_timeout
     PoolArchive.connection.execute("SET statement_timeout = #{CurrentUser.user.statement_timeout}")

@@ -22,9 +22,9 @@ class ForumTopicsController < ApplicationController
   def index
     params[:search] ||= {}
     params[:search][:order] ||= "sticky" if request.format == Mime::Type.lookup("text/html")
+    params[:limit] ||= 40
 
-    @query = ForumTopic.active.search(search_params)
-    @forum_topics = @query.paginate(params[:page], :limit => per_page, :search_count => params[:search])
+    @forum_topics = ForumTopic.active.paginated_search(params)
     @forum_topics = @forum_topics.includes(:creator, :updater).load if request.format.html?
     @forum_topics = @forum_topics.includes(:creator, :original_post).load if request.format.atom?
 
@@ -93,16 +93,11 @@ class ForumTopicsController < ApplicationController
 
   def unsubscribe
     subscription = ForumSubscription.where(:forum_topic_id => @forum_topic.id, :user_id => CurrentUser.user.id).first
-    if subscription
-      subscription.destroy
-    end
+    subscription&.destroy
     respond_with(@forum_topic)
   end
 
-private
-  def per_page
-    params[:limit] || 40
-  end
+  private
 
   def normalize_search
     if params[:title_matches]

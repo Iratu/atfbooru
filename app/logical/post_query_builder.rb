@@ -1,9 +1,8 @@
 class PostQueryBuilder
-  attr_accessor :query_string, :read_only
+  attr_accessor :query_string
 
-  def initialize(query_string, read_only: false)
+  def initialize(query_string)
     @query_string = query_string
-    @read_only = read_only
   end
 
   def add_range_relation(arr, field, relation)
@@ -117,7 +116,7 @@ class PostQueryBuilder
       q = Tag.parse_query(query_string)
     end
 
-    relation = read_only ? PostReadOnly.all : Post.all
+    relation = Post.all
 
     if q[:tag_count].to_i > Danbooru.config.tag_query_limit
       raise ::Post::SearchError
@@ -300,7 +299,7 @@ class PostQueryBuilder
     if q[:flagger_ids_neg]
       q[:flagger_ids_neg].each do |flagger_id|
         if CurrentUser.can_view_flagger?(flagger_id)
-          post_ids = PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
+          post_ids = PostFlag.unscoped.search(:creator_id => flagger_id, :category => "normal").reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
           if post_ids.any?
             relation = relation.where.not("posts.id": post_ids)
           end
@@ -311,11 +310,11 @@ class PostQueryBuilder
     if q[:flagger_ids]
       q[:flagger_ids].each do |flagger_id|
         if flagger_id == "any"
-          relation = relation.where('EXISTS (' + PostFlag.unscoped.search({:category => "normal"}).where('post_id = posts.id').reorder('').select('1').to_sql + ')')
+          relation = relation.where('EXISTS (' + PostFlag.unscoped.search(:category => "normal").where('post_id = posts.id').reorder('').select('1').to_sql + ')')
         elsif flagger_id == "none"
-          relation = relation.where('NOT EXISTS (' + PostFlag.unscoped.search({:category => "normal"}).where('post_id = posts.id').reorder('').select('1').to_sql + ')')
+          relation = relation.where('NOT EXISTS (' + PostFlag.unscoped.search(:category => "normal").where('post_id = posts.id').reorder('').select('1').to_sql + ')')
         elsif CurrentUser.can_view_flagger?(flagger_id)
-          post_ids = PostFlag.unscoped.search({:creator_id => flagger_id, :category => "normal"}).reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
+          post_ids = PostFlag.unscoped.search(:creator_id => flagger_id, :category => "normal").reorder("").select {|flag| flag.not_uploaded_by?(CurrentUser.id)}.map {|flag| flag.post_id}.uniq
           relation = relation.where("posts.id": post_ids)
         end
       end
@@ -323,7 +322,7 @@ class PostQueryBuilder
 
     if q[:appealer_ids_neg]
       q[:appealer_ids_neg].each do |appealer_id|
-        relation = relation.where.not("posts.id":  PostAppeal.unscoped.where(creator_id: appealer_id).select(:post_id).distinct)
+        relation = relation.where.not("posts.id": PostAppeal.unscoped.where(creator_id: appealer_id).select(:post_id).distinct)
       end
     end
 
@@ -474,14 +473,12 @@ class PostQueryBuilder
     end
 
     if q[:upvote].present?
-      user_id = q[:upvote]
-      post_ids = PostVote.where(:user_id => user_id).where("score > 0").limit(400).pluck(:post_id)
+      post_ids = PostVote.where(user: q[:upvote]).where("score > 0").select(:post_id)
       relation = relation.where("posts.id": post_ids)
     end
 
     if q[:downvote].present?
-      user_id = q[:downvote]
-      post_ids = PostVote.where(:user_id => user_id).where("score < 0").limit(400).pluck(:post_id)
+      post_ids = PostVote.where(user: q[:downvote]).where("score < 0").select(:post_id)
       relation = relation.where("posts.id": post_ids)
     end
 

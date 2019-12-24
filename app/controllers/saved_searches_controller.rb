@@ -1,13 +1,13 @@
 class SavedSearchesController < ApplicationController
   respond_to :html, :xml, :json, :js
-  
+
   def index
-    @saved_searches = saved_searches.search(search_params).paginate(params[:page], limit: params[:limit])
+    @saved_searches = saved_searches.paginated_search(params, count_pages: true)
     respond_with(@saved_searches)
   end
 
   def labels
-    @labels = SavedSearch.search_labels(CurrentUser.id, params[:search])
+    @labels = SavedSearch.search_labels(CurrentUser.id, params[:search]).take(params[:limit].to_i || 10)
     respond_with(@labels)
   end
 

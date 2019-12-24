@@ -21,6 +21,7 @@ class PostPresenter < Presenter
     end
 
     locals = {}
+    locals[:post] = post
 
     locals[:article_attrs] = {
       "id" => "post_#{post.id}",
@@ -63,8 +64,18 @@ class PostPresenter < Presenter
     locals[:width] = post.image_width
     locals[:height] = post.image_height
 
+    # XXX work around ancient bad posts with null or zero dimensions.
+    if post.image_width.to_i > 0 && post.image_height.to_i > 0
+      downscale_ratio = Danbooru.config.small_image_width.to_f / [post.image_width, post.image_height].max
+      locals[:preview_width] = [(downscale_ratio * post.image_width).floor, post.image_width].min
+      locals[:preview_height] = [(downscale_ratio * post.image_height).floor, post.image_height].min
+    else
+      locals[:preview_width] = 0
+      locals[:preview_height] = 0
+    end
+
     if options[:similarity]
-      locals[:similarity] = options[:similarity].round
+      locals[:similarity] = options[:similarity].round(1)
     else
       locals[:similarity] = nil
     end
@@ -75,13 +86,19 @@ class PostPresenter < Presenter
       locals[:size] = nil
     end
 
+    if options[:recommended]
+      locals[:recommended] = options[:recommended].round(1)
+    else
+      locals[:recommended] = nil
+    end
+
     ApplicationController.render(partial: "posts/partials/index/preview", locals: locals)
   end
 
-  def self.preview_class(post, highlight_score: nil, pool: nil, size: nil, similarity: nil, **options)
+  def self.preview_class(post, highlight_score: nil, pool: nil, size: nil, similarity: nil, recommended: nil, compact: nil, **options)
     klass = ["post-preview"]
     # klass << " large-cropped" if post.has_cropped? && options[:show_cropped]
-    klass << "captioned" if pool || size || similarity
+    klass << "captioned" if pool || size || similarity || recommended
     klass << "post-status-pending" if post.is_pending?
     klass << "post-status-flagged" if post.is_flagged?
     klass << "post-status-deleted" if post.is_deleted?
@@ -89,6 +106,7 @@ class PostPresenter < Presenter
     klass << "post-status-has-children" if post.has_visible_children?
     klass << "post-pos-score" if highlight_score && post.score >= 3
     klass << "post-neg-score" if highlight_score && post.score <= -3
+    klass << "post-preview-compact" if compact
     klass
   end
 
@@ -155,12 +173,12 @@ class PostPresenter < Presenter
   end
 
   def has_nav_links?(template)
-    has_sequential_navigation?(template.params) || @post.pools.undeleted.any? || @post.favorite_groups(active_id=template.params[:favgroup_id]).any?
+    has_sequential_navigation?(template.params) || @post.pools.undeleted.any? || @post.favorite_groups(active_id = template.params[:favgroup_id]).any?
   end
 
   def has_sequential_navigation?(params)
     return false if Tag.has_metatag?(params[:q], :order, :ordfav, :ordpool)
     return false if params[:pool_id].present? || params[:favgroup_id].present?
-    return CurrentUser.user.enable_sequential_post_navigation 
+    return CurrentUser.user.enable_sequential_post_navigation
   end
 end

@@ -11,6 +11,8 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
     subject { RelatedTagQuery.new(query: "copyright") }
 
     setup do
+      create(:tag, name: "alpha", post_count: 1)
+      create(:tag, name: "beta", post_count: 1)
       @copyright = FactoryBot.create(:copyright_tag, name: "copyright")
       @wiki = FactoryBot.create(:wiki_page, title: "copyright", body: "[[list_of_hoges]]")
       @list_of_hoges = FactoryBot.create(:wiki_page, title: "list_of_hoges", body: "[[alpha]] and [[beta]]")
@@ -55,13 +57,14 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
 
     context "for an aliased tag" do
       setup do
+        create(:tag, name: "foo", post_count: 42)
         @ta = FactoryBot.create(:tag_alias, antecedent_name: "xyz", consequent_name: "aaa")
-        @wp = FactoryBot.create(:wiki_page, title: "aaa", body: "blah [[foo|blah]] [[FOO]] [[bar]] blah")
+        @wp = FactoryBot.create(:wiki_page, title: "aaa", body: "blah [[foo|blah]] [[FOO]] [[does not exist]] blah")
         @query = RelatedTagQuery.new(query: "xyz")
       end
 
       should "take wiki tags from the consequent's wiki" do
-        assert_equal(%w[foo bar], @query.wiki_page_tags)
+        assert_equal(%w[foo], @query.wiki_page_tags)
       end
 
       should "take related tags from the consequent tag" do
@@ -88,6 +91,21 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
       should "find any tags embedded in the wiki page" do
         assert_equal(["bbb", "ccc"], @query.wiki_page_tags)
       end
+
+      should "return the tags in the same order as given by the wiki" do
+        create(:wiki_page, title: "wiki", body: "[[ccc]] [[bbb]] [[ccc]] [[bbb]] [[aaa]]")
+
+        query = RelatedTagQuery.new(query: "wiki")
+        assert_equal(%w[ccc bbb aaa], query.wiki_page_tags)
+      end
+
+      should "return aliased tags" do
+        create(:tag_alias, antecedent_name: "kitten", consequent_name: "cat", status: "active")
+        create(:wiki_page, title: "wiki", body: "[[kitten]]")
+
+        query = RelatedTagQuery.new(query: "wiki")
+        assert_equal(%w[cat], query.wiki_page_tags)
+      end
     end
   end
 
@@ -104,4 +122,3 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
     end
   end
 end
-

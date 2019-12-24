@@ -38,7 +38,7 @@ class PostFlagTest < ActiveSupport::TestCase
       should "not be able to flag a post more than twice" do
         assert_difference(-> { PostFlag.count }, 1) do
           as(@bob) do
-            @post_flag = PostFlag.create(post: @post, reason: "aaa", is_resolved: false) 
+            @post_flag = PostFlag.create(post: @post, reason: "aaa", is_resolved: false)
           end
         end
 
@@ -140,7 +140,6 @@ class PostFlagTest < ActiveSupport::TestCase
           PostFlag.create(:post => @post, :reason => "aaa", :is_resolved => false)
         end
         assert_equal(@alice.id, @post_flag.creator_id)
-        assert_equal(IPAddr.new("127.0.0.1"), @post_flag.creator_ip_addr)
       end
     end
 
