@@ -10,6 +10,21 @@
         <th>Join Date</th>
         <td><%= presenter.join_date %></td>
       </tr>
+      <% if CurrentUser.is_moderator? %>
+        <tr>
+          <th>Last IP</th>
+          <td>
+            <% if user.last_ip_addr.present? %>
+              <%= link_to user.last_ip_addr, ip_addresses_path(search: { ip_addr: user.last_ip_addr }) %>
+              (<%= link_to "users", ip_addresses_path(search: { ip_addr: user.last_ip_addr, group_by: "user" }) %>,
+              <%= link_to "IPs", ip_addresses_path(search: { user_id: user.id, group_by: "ip_addr" }) %>)
+            <% else %>
+              <em>unknown</em>
+              (<%= link_to "IPs", ip_addresses_path(search: { user_id: user.id, group_by: "ip_addr" }) %>)
+            <% end %>
+          </td>
+        </tr>
+      <% end %>
 
       <tr>
         <th>Inviter</th>
@@ -39,16 +54,16 @@
         <tr>
           <th>Ban reason</th>
           <td>
-            <div class="prose">
-              <%= format_text presenter.ban_reason %>
-            </div>
+            <span class="prose">
+              <%= format_text presenter.ban_reason, inline: true %>
+            </span>
           </td>
         </tr>
       <% end %>
 
       <tr>
         <th>Upload Limit</th>
-        <td><%= presenter.upload_limit(self) %> (<%= link_to "help", wiki_pages_path(title: "about:upload_limits") %>)</td>
+        <td><%= presenter.upload_limit(self) %> (<%= link_to_wiki "help", "about:upload_limits" %>)</td>
       </tr>
 
       <tr>
@@ -84,6 +99,17 @@
           <% end %>
         </td>
       </tr>
+
+      <% if CurrentUser.user == user || CurrentUser.user.is_admin? %>
+        <tr>
+          <th>Votes</th>
+          <td>
+            <%= link_to user.post_votes.count, post_votes_path(search: { user_name: user.name }) %> posts,
+            <%= link_to user.comment_votes.count, comment_votes_path(search: { user_name: user.name }) %> comments,
+            <%= link_to user.forum_post_votes.count, forum_post_votes_path(search: { creator_name: user.name }) %> forum posts 
+          </td>
+        </tr>
+      <% end %>
 
       <tr>
         <th>Favorite Groups</th>
@@ -182,7 +208,7 @@
           <th>API Key</th>
           <td>
             <%= link_to (CurrentUser.api_key ? "View" : "Generate"), user_api_key_path(CurrentUser.user) %>
-            (<%= link_to "help", wiki_pages_path(title: "help:api") %>)
+            (<%= link_to_wiki "help", "help:api" %>)
           </td>
         </tr>
 

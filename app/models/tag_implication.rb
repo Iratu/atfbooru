@@ -13,8 +13,6 @@ class TagImplication < TagRelationship
   validate :antecedent_is_not_aliased
   validate :consequent_is_not_aliased
   validate :wiki_pages_present, on: :create, unless: :skip_secondary_validations
-  scope :old, ->{where("created_at between ? and ?", 2.months.ago, 1.month.ago)}
-  scope :pending, ->{where(status: "pending")}
 
   module DescendantMethods
     extend ActiveSupport::Concern
@@ -136,7 +134,7 @@ class TagImplication < TagRelationship
       tries = 0
 
       begin
-        CurrentUser.scoped(approver) do
+        CurrentUser.scoped(User.system) do
           update(status: "processing")
           update_posts
           update(status: "active")
@@ -146,7 +144,7 @@ class TagImplication < TagRelationship
       rescue Exception => e
         if tries < 5
           tries += 1
-          sleep 2 ** tries
+          sleep 2**tries
           retry
         end
 
@@ -161,9 +159,7 @@ class TagImplication < TagRelationship
       Post.without_timeout do
         Post.raw_tag_match(antecedent_name).where("true /* TagImplication#update_posts */").find_each do |post|
           fixed_tags = "#{post.tag_string} #{descendant_names_string}".strip
-          CurrentUser.scoped(creator, creator_ip_addr) do
-            post.update(tag_string: fixed_tags)
-          end
+          post.update(tag_string: fixed_tags)
         end
       end
     end
@@ -174,22 +170,22 @@ class TagImplication < TagRelationship
     end
 
     def create_mod_action
-      implication = %Q("tag implication ##{id}":[#{Rails.application.routes.url_helpers.tag_implication_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
+      implication = %("tag implication ##{id}":[#{Rails.application.routes.url_helpers.tag_implication_path(self)}]: [[#{antecedent_name}]] -> [[#{consequent_name}]])
 
       if saved_change_to_id?
-        ModAction.log("created #{status} #{implication}",:tag_implication_create)
+        ModAction.log("created #{status} #{implication}", :tag_implication_create)
       else
         # format the changes hash more nicely.
         change_desc = saved_changes.except(:updated_at).map do |attribute, values|
           old, new = values[0], values[1]
           if old.nil?
-            %Q(set #{attribute} to "#{new}")
+            %(set #{attribute} to "#{new}")
           else
-            %Q(changed #{attribute} from "#{old}" to "#{new}")
+            %(changed #{attribute} from "#{old}" to "#{new}")
           end
         end.join(", ")
 
-        ModAction.log("updated #{implication}\n#{change_desc}",:tag_implication_update)
+        ModAction.log("updated #{implication}\n#{change_desc}", :tag_implication_update)
       end
     end
 
@@ -200,9 +196,9 @@ class TagImplication < TagRelationship
         nil
       end
       ForumUpdater.new(
-        forum_topic, 
-        forum_post: post, 
-        expected_title: TagImplicationRequest.topic_title(antecedent_name, consequent_name),
+        forum_topic,
+        forum_post: post,
+        expected_title: "Tag implication: #{antecedent_name} -> #{consequent_name}",
         skip_update: !TagRelationship::SUPPORT_HARD_CODED
       )
     end

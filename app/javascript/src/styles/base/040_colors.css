@@ -3,6 +3,7 @@
 
   --text-color: hsl(0, 0%, 15%);
   --muted-text-color: hsl(0, 0%, 55%);
+  --header-color: hsl(0, 0%, 15%);
 
   --link-color: hsl(213, 100%, 50%);
   --link-hover-color: hsl(213, 100%, 75%);
@@ -63,7 +64,7 @@
   --forum-new-topic-color: red;
   --forum-level-restricted-topic-color: #F66;
   --forum-vote-up-color: green;
-  --forum-vote-meh-color: goldrenrod;
+  --forum-vote-meh-color: goldenrod;
   --forum-vote-down-color: red;
 
   --comment-sticky-background-color: var(--subnav-menu-background-color);
@@ -160,7 +161,7 @@
   --bulk-update-request-approved-color: green;
   --bulk-update-request-failed-color: red;
 
-  --sign-in-link-color: #E00;
+  --login-link-color: #E00;
   --footer-border: 1px solid #EEE;
 
   --jquery-ui-widget-content-background: var(--body-background-color);
@@ -176,7 +177,6 @@
   --dtext-blockquote-background: #EEE;
   --dtext-code-background: #EEE;
   --dtext-expand-border: 1px inset #666;
-  --dtext-spoiler-color: black;
   --dtext-spoiler-background-color: black;
   --dtext-spoiler-hover-color: white;
 
@@ -220,6 +220,7 @@ body[data-user-theme="dark"] {
   --grey-3:   #393a4d; /* hsluv(265, 15, 25.00); */
   --grey-4:   #9596a8; /* hsluv(265, 15, 62.50); */
   --grey-5:   #c9c9d2; /* hsluv(265, 15, 81.25); */
+  --grey-6:   #e4e4e8; /* hsluv(265, 15, 90.625); */
   --red-0:    #652828; /* hsluv(12, 50, 25); */
   --red-3:    #af4a4b; /* hsluv(12, 50, 45); */
   --red-1:    #f07a7b; /* hsluv(12, 80, 65); */
@@ -263,6 +264,7 @@ body[data-user-theme="dark"] {
   /* main text colors */
   --text-color: var(--grey-5);
   --muted-text-color: var(--grey-4);
+  --header-color: var(--grey-6);
 
   --link-color: var(--blue-1);
   --link-hover-color: var(--blue-2);
@@ -309,7 +311,6 @@ body[data-user-theme="dark"] {
   --dtext-blockquote-border: 1px solid var(--grey-4);
   --dtext-code-background: var(--grey-2);
   --dtext-expand-border: 1px inset var(--grey-4);
-  --dtext-spoiler-color: black;
   --dtext-spoiler-background-color: black;
   --dtext-spoiler-hover-color: var(--text-color);
 
@@ -433,7 +434,7 @@ body[data-user-theme="dark"] {
   --wiki-page-versions-diff-ins-background: var(--green-0);
 
   --low-post-count-color: var(--red-1);
-  --sign-in-link-color: var(--red-1);
+  --login-link-color: var(--red-1);
   --new-artist-color: var(--red-1);
   --remove-favorite-button: var(--red-1);
   --fetch-source-data-border: 1px solid var(--grey-4);

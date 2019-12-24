@@ -40,9 +40,9 @@ class Tag < ApplicationRecord
     random
     custom
   ] +
-  COUNT_METATAGS +
-  COUNT_METATAG_SYNONYMS.flat_map { |str| [str, "#{str}_asc"] } +
-  TagCategory.short_name_list.flat_map { |str| ["#{str}tags", "#{str}tags_asc"] }
+    COUNT_METATAGS +
+    COUNT_METATAG_SYNONYMS.flat_map { |str| [str, "#{str}_asc"] } +
+    TagCategory.short_name_list.flat_map { |str| ["#{str}tags", "#{str}tags_asc"] }
 
   has_one :wiki_page, :foreign_key => "title", :primary_key => "name"
   has_one :artist, :foreign_key => "name", :primary_key => "name"
@@ -91,28 +91,34 @@ class Tag < ApplicationRecord
     extend ActiveSupport::Concern
 
     module ClassMethods
+      # Lock the tags first in alphabetical order to avoid deadlocks under concurrent updates.
+      #
+      # https://stackoverflow.com/questions/44660368/postgres-update-with-order-by-how-to-do-it
+      # https://www.postgresql.org/message-id/flat/freemail.20070030161126.43285%40fm10.freemail.hu
+      # https://www.postgresql.org/message-id/flat/CAKOSWNkb3Zy_YFQzwyRw3MRrU10LrMj04%2BHdByfQu6M1S5B7mg%40mail.gmail.com#9dc514507357472bdf22d3109d9c7957
       def increment_post_counts(tag_names)
-        Tag.where(:name => tag_names).update_all("post_count = post_count + 1")
+        Tag.where(name: tag_names).order(:name).lock("FOR UPDATE").pluck(1)
+        Tag.where(name: tag_names).update_all("post_count = post_count + 1")
       end
 
       def decrement_post_counts(tag_names)
-        Tag.where(:name => tag_names).update_all("post_count = post_count - 1")
+        Tag.where(name: tag_names).order(:name).lock("FOR UPDATE").pluck(1)
+        Tag.where(name: tag_names).update_all("post_count = post_count - 1")
       end
 
       def regenerate_post_counts!
         sql = <<~SQL
           UPDATE tags
-          SET post_count = true_count
+          SET post_count = COALESCE(true_count, 0)
           FROM (
             SELECT tag, COUNT(*) AS true_count
             FROM posts, unnest(string_to_array(tag_string, ' ')) AS tag
             GROUP BY tag
-          ) true_counts, tags AS old_tags
+          ) true_counts
           WHERE
-            tags.name = tag
-            AND tags.post_count != true_count
-            AND old_tags.id = tags.id
-          RETURNING tags.*, old_tags.post_count AS old_post_count
+            (tags.name = tag AND tags.post_count != true_count)
+            OR tags.post_count < 0
+          RETURNING tags.*
         SQL
 
         updated_tags = Tag.find_by_sql(sql)
@@ -124,7 +130,7 @@ class Tag < ApplicationRecord
   module CategoryMethods
     module ClassMethods
       def categories
-        @category_mapping ||= CategoryMapping.new
+        @categories ||= CategoryMapping.new
       end
 
       def select_category_for(tag_name)
@@ -164,11 +170,11 @@ class Tag < ApplicationRecord
     end
 
     def update_category_post_counts
-      Post.with_timeout(30_000, nil, {:tags => name}) do
+      Post.with_timeout(30_000, nil, :tags => name) do
         Post.raw_tag_match(name).where("true /* Tag#update_category_post_counts */").find_each do |post|
           post.reload
           post.set_tag_counts(false)
-          args = TagCategory.categories.map {|x| ["tag_count_#{x}",post.send("tag_count_#{x}")]}.to_h.update(:tag_count => post.tag_count)
+          args = TagCategory.categories.map {|x| ["tag_count_#{x}", post.send("tag_count_#{x}")]}.to_h.update(:tag_count => post.tag_count)
           Post.where(:id => post.id).update_all(args)
         end
       end
@@ -218,46 +224,52 @@ class Tag < ApplicationRecord
     end
   end
 
-  module NameMethods
-    def normalize_name(name)
-      name.to_s.mb_chars.downcase.strip.tr(" ", "_").to_s
+  concerning :NameMethods do
+    def unqualified_name
+      name.gsub(/_\(.*\)\z/, "").tr("_", " ")
     end
 
-    def create_for_list(names)
-      names.map {|x| find_or_create_by_name(x).name}
-    end
-
-    def find_or_create_by_name(name, creator: CurrentUser.user)
-      name = normalize_name(name)
-      category = nil
-
-      if name =~ /\A(#{categories.regexp}):(.+)\Z/
-        category = $1
-        name = $2
+    class_methods do
+      def normalize_name(name)
+        name.to_s.mb_chars.downcase.strip.tr(" ", "_").to_s
       end
 
-      tag = find_by_name(name)
+      def create_for_list(names)
+        names.map {|x| find_or_create_by_name(x).name}
+      end
 
-      if tag
-        if category
-          category_id = categories.value_for(category)
+      def find_or_create_by_name(name, creator: CurrentUser.user)
+        name = normalize_name(name)
+        category = nil
 
-          # in case a category change hasn't propagated to this server yet,
-          # force an update the local cache. This may get overwritten in the
-          # next few lines if the category is changed.
-          tag.update_category_cache
-
-          if tag.editable_by?(creator)
-            tag.update(category: category_id)
-          end
+        if name =~ /\A(#{categories.regexp}):(.+)\Z/
+          category = $1
+          name = $2
         end
 
-        tag
-      else
-        Tag.new.tap do |t|
-          t.name = name
-          t.category = categories.value_for(category)
-          t.save
+        tag = find_by_name(name)
+
+        if tag
+          if category
+            category_id = categories.value_for(category)
+
+            # in case a category change hasn't propagated to this server yet,
+            # force an update the local cache. This may get overwritten in the
+            # next few lines if the category is changed.
+            tag.update_category_cache
+
+            if tag.editable_by?(creator)
+              tag.update(category: category_id)
+            end
+          end
+
+          tag
+        else
+          Tag.new.tap do |t|
+            t.name = name
+            t.category = categories.value_for(category)
+            t.save
+          end
         end
       end
     end
@@ -302,11 +314,7 @@ class Tag < ApplicationRecord
         object.to_f
 
       when :date, :datetime
-        begin
-          Time.zone.parse(object)
-        rescue Exception
-          nil
-        end
+        Time.zone.parse(object) rescue nil
 
       when :age
         DurationParser.parse(object).ago
@@ -315,7 +323,7 @@ class Tag < ApplicationRecord
         object =~ /\A(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)\Z/i
 
         if $1 && $2.to_f != 0.0
-         ($1.to_f / $2.to_f).round(2)
+          ($1.to_f / $2.to_f).round(2)
         else
           object.to_f.round(2)
         end
@@ -358,8 +366,8 @@ class Tag < ApplicationRecord
       when /\A>(.+)/
         return [:gt, parse_cast($1, type)]
 
-      when /,/
-        return [:in, range.split(/,/).map {|x| parse_cast(x, type)}]
+      when /[, ]/
+        return [:in, range.split(/[, ]+/).map {|x| parse_cast(x, type)}]
 
       else
         return [:eq, parse_cast(range, type)]
@@ -738,7 +746,7 @@ class Tag < ApplicationRecord
           when "order"
             g2 = g2.downcase
 
-            order, suffix, _ = g2.partition(/_(asc|desc)\z/i)
+            order, suffix, _tail = g2.partition(/_(asc|desc)\z/i)
             if order.in?(COUNT_METATAG_SYNONYMS)
               g2 = order.singularize + "_count" + suffix
             end
@@ -768,13 +776,17 @@ class Tag < ApplicationRecord
             end
 
           when "upvote"
-            if CurrentUser.user.is_moderator?
-              q[:upvote] = User.name_to_id(g2)
+            if CurrentUser.user.is_admin?
+              q[:upvote] = User.find_by_name(g2)
+            elsif CurrentUser.user.is_voter?
+              q[:upvote] = CurrentUser.user
             end
 
           when "downvote"
-            if CurrentUser.user.is_moderator?
-              q[:downvote] = User.name_to_id(g2)
+            if CurrentUser.user.is_admin?
+              q[:downvote] = User.find_by_name(g2)
+            elsif CurrentUser.user.is_voter?
+              q[:downvote] = CurrentUser.user
             end
 
           when *COUNT_METATAGS
@@ -878,27 +890,31 @@ class Tag < ApplicationRecord
       q
     end
 
-    def names_matches_with_aliases(name)
+    def names_matches_with_aliases(name, limit)
       name = normalize_name(name)
       wildcard_name = name + '*'
 
-      query1 = Tag.select("tags.name, tags.post_count, tags.category, null AS antecedent_name")
-        .search(:name_matches => wildcard_name, :order => "count").limit(10)
+      query1 =
+        Tag
+        .select("tags.name, tags.post_count, tags.category, null AS antecedent_name")
+        .search(:name_matches => wildcard_name, :order => "count").limit(limit)
 
-      query2 = TagAlias.select("tags.name, tags.post_count, tags.category, tag_aliases.antecedent_name")
+      query2 =
+        TagAlias
+        .select("tags.name, tags.post_count, tags.category, tag_aliases.antecedent_name")
         .joins("INNER JOIN tags ON tags.name = tag_aliases.consequent_name")
         .where("tag_aliases.antecedent_name LIKE ? ESCAPE E'\\\\'", wildcard_name.to_escaped_for_sql_like)
         .active
         .where("tags.name NOT LIKE ? ESCAPE E'\\\\'", wildcard_name.to_escaped_for_sql_like)
-        .where("tag_aliases.post_count > 0")
-        .order("tag_aliases.post_count desc")
-        .limit(20) # Get 20 records even though only 10 will be displayed in case some duplicates get filtered out.
+        .where("tags.post_count > 0")
+        .order("tags.post_count desc")
+        .limit(limit * 2) # Get extra records in case some duplicates get filtered out.
 
       sql_query = "((#{query1.to_sql}) UNION ALL (#{query2.to_sql})) AS unioned_query"
-      tags = Tag.select("DISTINCT ON (name, post_count) *").from(sql_query).order("post_count desc").limit(10)
+      tags = Tag.select("DISTINCT ON (name, post_count) *").from(sql_query).order("post_count desc").limit(limit)
 
       if tags.empty?
-        tags = Tag.select("tags.name, tags.post_count, tags.category, null AS antecedent_name").fuzzy_name_matches(name).order_similarity(name).nonempty.limit(10)
+        tags = Tag.select("tags.name, tags.post_count, tags.category, null AS antecedent_name").fuzzy_name_matches(name).order_similarity(name).nonempty.limit(limit)
       end
 
       tags
@@ -906,7 +922,7 @@ class Tag < ApplicationRecord
   end
 
   def self.convert_cosplay_tags(tags)
-    cosplay_tags,other_tags = tags.partition {|tag| tag.match(/\A(.+)_\(cosplay\)\Z/) }
+    cosplay_tags, other_tags = tags.partition {|tag| tag.match(/\A(.+)_\(cosplay\)\Z/) }
     cosplay_tags.grep(/\A(.+)_\(cosplay\)\Z/) { "#{TagAlias.to_aliased([$1]).first}_(cosplay)" } + other_tags
   end
 
@@ -921,7 +937,6 @@ class Tag < ApplicationRecord
   include CountMethods
   include CategoryMethods
   extend StatisticsMethods
-  extend NameMethods
   extend ParseMethods
   extend SearchMethods
 end

@@ -42,17 +42,13 @@ class RelatedTagQuery
   end
 
   def wiki_page_tags
-    results = wiki_page.try(:tags) || []
-    results.reject! do |name|
-      name =~ /^(?:list_of_|tag_group|pool_group|howto:|about:|help:|template:)/
-    end
-    results
+    wiki_page.try(:tags) || []
   end
 
   def other_wiki_pages
     return [] unless Tag.category_for(query) == Tag.categories.copyright
 
-    other_wikis = wiki_page&.tags.to_a.grep(/^list_of_/i)
+    other_wikis = DText.parse_wiki_titles(wiki_page&.body&.to_s).grep(/\Alist_of_/i)
     other_wikis = other_wikis.map { |name| WikiPage.titled(name).first }
     other_wikis = other_wikis.select { |wiki| wiki.tags.present? }
     other_wikis
@@ -72,7 +68,7 @@ class RelatedTagQuery
     }
   end
 
-protected
+  protected
 
   def tags_with_categories(list_of_tag_names)
     Tag.categories_for(list_of_tag_names).to_a

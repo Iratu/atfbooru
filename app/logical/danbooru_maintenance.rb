@@ -2,9 +2,6 @@ module DanbooruMaintenance
   module_function
 
   def hourly
-    UploadErrorChecker.new.check!
-  rescue Exception => exception
-    rescue_exception(exception)
   end
 
   def daily
@@ -14,7 +11,6 @@ module DanbooruMaintenance
     Delayed::Job.where('created_at < ?', 45.days.ago).delete_all
     PostDisapproval.prune!
     ForumSubscription.process_all!
-    TagAlias.update_cached_post_counts_for_all
     PostDisapproval.dmail_messages!
     regenerate_post_counts!
     SuperVoter.init!
@@ -22,6 +18,7 @@ module DanbooruMaintenance
     TagChangeRequestPruner.warn_all
     TagChangeRequestPruner.reject_all
     Ban.prune!
+    CuratedPoolUpdater.update_pool!
 
     ActiveRecord::Base.connection.execute("vacuum analyze") unless Rails.env.test?
   rescue Exception => exception

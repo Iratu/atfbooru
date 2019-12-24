@@ -2,7 +2,7 @@ module Moderator
   module Post
     class QueuesController < ApplicationController
       RANDOM_COUNT = 12
-      
+
       respond_to :html, :json
       before_action :approver_only
       skip_before_action :api_check
@@ -38,11 +38,7 @@ module Moderator
         respond_with(@posts)
       end
 
-    protected
-
-      def show_moderation_notice?
-        false
-      end
+      protected
 
       def per_page
         cookies["mq_per_page"] || search_params[:per_page] || 25

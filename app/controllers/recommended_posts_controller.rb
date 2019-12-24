@@ -1,23 +1,11 @@
 class RecommendedPostsController < ApplicationController
-  before_action :member_only
-  respond_to :html
+  respond_to :html, :json, :xml, :js
 
-  def show
-    @posts = load_posts()
+  def index
+    limit = params.fetch(:limit, 100).to_i.clamp(0, 200)
+    @recs = RecommenderService.search(search_params).take(limit)
+    @posts = @recs.map { |rec| rec[:post] }
 
-    if request.xhr?
-      render partial: "show", layout: false
-    end
-  end
-
-private
-
-  def load_posts
-    if params[:context] == "post"
-      @posts = RecommenderService.recommend(post_id: params[:post_id].to_i)
-
-    elsif params[:context] == "user"
-      @posts = RecommenderService.recommend(user_id: CurrentUser.id)
-    end
+    respond_with(@recs)
   end
 end

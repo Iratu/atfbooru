@@ -22,12 +22,14 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
       should "list all wiki_pages (with search)" do
         get wiki_pages_path, params: {:search => {:title => "abc"}}
-        assert_redirected_to(wiki_page_path(@wiki_page_abc))
+        assert_response :success
+        assert_select "tr td:first-child", text: "abc"
       end
 
       should "list wiki_pages without tags with order=post_count" do
         get wiki_pages_path, params: {:search => {:title => "abc", :order => "post_count"}}
-        assert_redirected_to(wiki_page_path(@wiki_page_abc))
+        assert_response :success
+        assert_select "tr td:first-child", text: "abc"
       end
     end
 
@@ -38,19 +40,37 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         end
       end
 
-      should "render" do
-        get wiki_page_path(@wiki_page)
+      should "redirect to the title for an id" do
+        get wiki_page_path(@wiki_page.id)
+        assert_redirected_to wiki_page_path(@wiki_page.title)
+
+        get wiki_page_path(@wiki_page.id), as: :json
         assert_response :success
+      end
+
+      should "distinguish between an id and a title" do
+        as(@user) { @wiki_page.update(title: "2019") }
+
+        get wiki_page_path("~2019")
+        assert_response :success
+
+        get wiki_page_path(@wiki_page.id)
+        assert_redirected_to wiki_page_path("~2019")
+
+        get wiki_page_path("2019")
+        assert_response 404
       end
 
       should "render for a title" do
-        get wiki_page_path(:id => @wiki_page.title)
+        get wiki_page_path(@wiki_page.title)
         assert_response :success
       end
 
-      should "redirect html requests for a nonexistent title" do
+      should "show the 'does not exist' page for a nonexistent title" do
         get wiki_page_path("what")
-        assert_redirected_to(show_or_new_wiki_pages_path(title: "what"))
+
+        assert_response 404
+        assert_select "#wiki-page-body", text: /This wiki page does not exist/
       end
 
       should "return 404 to api requests for a nonexistent title" do
@@ -62,7 +82,21 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         as_user do
           @wiki_page.update(title: "-aaa")
         end
-        get wiki_page_path(:id => @wiki_page.id)
+
+        get wiki_page_path(@wiki_page.id)
+        assert_redirected_to wiki_page_path(@wiki_page.title)
+      end
+
+      should "work for a title containing dots" do
+        as(@user) { create(:wiki_page, title: "...") }
+
+        get wiki_page_path("...")
+        assert_response :success
+
+        get wiki_page_path("....json")
+        assert_response :success
+
+        get wiki_page_path("....xml")
         assert_response :success
       end
     end
@@ -79,15 +113,20 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         assert_redirected_to(@wiki_page)
       end
 
-      should "render when given a nonexistent title" do
+      should "redirect when given a nonexistent title" do
         get show_or_new_wiki_pages_path, params: { title: "what" }
-        assert_response :success
+        assert_redirected_to wiki_page_path("what")
       end
     end
 
     context "new action" do
       should "render" do
         get_auth new_wiki_page_path, @mod, params: { wiki_page: { title: "test" }}
+        assert_response :success
+      end
+
+      should "render without a title" do
+        get_auth new_wiki_page_path, @mod
         assert_response :success
       end
     end
@@ -125,19 +164,9 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         assert_equal("xyz", @wiki_page.body)
       end
 
-      should "not rename a wiki page with a non-empty tag" do
-        put_auth wiki_page_path(@wiki_page), @user, params: {:wiki_page => {:title => "bar"}}
-        assert_equal("foo", @wiki_page.reload.title)
-      end
-
-      should "rename a wiki page with a non-empty tag if secondary validations are skipped" do
-        put_auth wiki_page_path(@wiki_page), @mod, params: {:wiki_page => {:title => "bar", :skip_secondary_validations => "1"}}
-        assert_equal("bar", @wiki_page.reload.title)
-      end
-
-      should "not allow non-Builders to delete wiki pages" do
-        put_auth wiki_page_path(@wiki_page), @user, params: {wiki_page: { is_deleted: true }}
-        assert_equal(false, @wiki_page.reload.is_deleted?)
+      should "warn about renaming a wiki page with a non-empty tag" do
+        put_auth wiki_page_path(@wiki_page), @mod, params: { wiki_page: { title: "bar" }}
+        assert_match(/still has 42 posts/, flash[:notice])
       end
     end
 
@@ -154,24 +183,16 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         @wiki_page.reload
         assert_equal(true, @wiki_page.is_deleted?)
       end
-
-      should "record the deleter" do
-        delete_auth wiki_page_path(@wiki_page), @mod
-        @wiki_page.reload
-        assert_equal(@mod.id, @wiki_page.updater_id)
-      end
     end
 
     context "revert action" do
       setup do
         as_user do
-          @wiki_page = create(:wiki_page, :body => "1")
-        end
-        travel(1.day) do
-          @wiki_page.update(:body => "1 2")
-        end
-        travel(2.days) do
-          @wiki_page.update(:body => "1 2 3")
+          @wiki_page = create(:wiki_page, body: "1")
+          travel(1.day)
+          @wiki_page.update(body: "1 2")
+          travel(2.days)
+          @wiki_page.update(body: "1 2 3")
         end
       end
 

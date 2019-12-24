@@ -57,8 +57,6 @@ module Sources
       PATH_PROFILE = %r{\Ahttps?://(www\.)?deviantart\.com/#{ARTIST}/?\z}i
       SUBDOMAIN_PROFILE = %r{\Ahttps?://#{ARTIST}\.deviantart\.com/?\z}i
 
-      attr_accessor :api_client
-
       def domains
         ["deviantart.net", "deviantart.com"]
       end
@@ -91,8 +89,16 @@ module Sources
         elsif api_deviation[:isDownloadable]
           api_client.download_url
         else
-          file = api_deviation[:files].find { |data| data[:type] == "fullview" }
-          src = file[:src]
+          media = api_deviation[:media]
+          token = media[:token].first
+          fullview = media[:types].find { |data| data[:t] == "fullview" && data[:c].present? }
+
+          if fullview.present?
+            op = fullview[:c].gsub('<prettyName>', media[:prettyName])
+            src = "#{media[:baseUri]}/#{op}?token=#{token}"
+          else
+            src = "#{media[:baseUri]}?token=#{token}"
+          end
 
           if deviation_id && deviation_id.to_i <= 790677560 && src =~ /\Ahttps:\/\/images-wixmp-/i
             src = src.gsub(%r!(/f/[a-f0-9-]+/[a-f0-9-]+)!, '/intermediary\1')
@@ -202,8 +208,6 @@ module Sources
           end
         end.gsub(/\A[[:space:]]+|[[:space:]]+\z/, "")
       end
-
-    public
 
       def self.deviation_id_from_url(url)
         if url =~ ASSET

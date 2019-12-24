@@ -1,8 +1,11 @@
 class WikiPage < ApplicationRecord
-  class RevertError < Exception ; end
+  class RevertError < Exception; end
+
+  META_WIKIS = ["list_of_", "tag_group:", "pool_group:", "howto:", "about:", "help:", "template:"]
 
   before_save :normalize_title
   before_save :normalize_other_names
+  before_save :update_dtext_links, if: :dtext_links_changed?
   after_save :create_version
   validates_uniqueness_of :title, :case_sensitive => false
   validates_presence_of :title
@@ -10,19 +13,25 @@ class WikiPage < ApplicationRecord
   validate :validate_rename
   validate :validate_not_locked
 
-  attr_accessor :skip_secondary_validations
   array_attribute :other_names
-  belongs_to_creator
-  belongs_to_updater
   has_one :tag, :foreign_key => "name", :primary_key => "title"
   has_one :artist, -> {where(:is_active => true)}, :foreign_key => "name", :primary_key => "title"
   has_many :versions, -> {order("wiki_page_versions.id ASC")}, :class_name => "WikiPageVersion", :dependent => :destroy
+  has_many :dtext_links, as: :model, dependent: :destroy
 
-  api_attributes including: [:creator_name, :category_name]
+  api_attributes including: [:category_name]
 
   module SearchMethods
+    def find_by_id_or_title(id)
+      if id =~ /\A\d+\z/
+        [find_by_id(id), :id]
+      else
+        [find_by_title(normalize_title(id)), :title]
+      end
+    end
+
     def titled(title)
-      where("title = ?", title.mb_chars.downcase.tr(" ", "_"))
+      where(title: normalize_title(title))
     end
 
     def active
@@ -48,6 +57,14 @@ class WikiPage < ApplicationRecord
       end
     end
 
+    def tag_matches(params)
+      where(title: Tag.search(params).select(:name).reorder(nil))
+    end
+
+    def linked_to(title)
+      where(id: DtextLink.wiki_page.wiki_link.where(link_target: title).select(:model_id))
+    end
+
     def default_order
       order(updated_at: :desc)
     end
@@ -55,15 +72,23 @@ class WikiPage < ApplicationRecord
     def search(params = {})
       q = super
 
-      q = q.search_attributes(params, :creator, :updater, :is_locked, :is_deleted, :body)
+      q = q.search_attributes(params, :is_locked, :is_deleted, :body)
       q = q.text_attribute_matches(:body, params[:body_matches], index_column: :body_index, ts_config: "danbooru")
 
       if params[:title].present?
-        q = q.where("title LIKE ? ESCAPE E'\\\\'", params[:title].mb_chars.downcase.strip.tr(" ", "_").to_escaped_for_sql_like)
+        q = q.where_like(:title, normalize_title(params[:title]))
       end
 
       if params[:other_names_match].present?
         q = q.other_names_match(params[:other_names_match])
+      end
+
+      if params[:tag].present?
+        q = q.tag_matches(params[:tag])
+      end
+
+      if params[:linked_to].present?
+        q = q.linked_to(params[:linked_to])
       end
 
       if params[:hide_deleted].to_s.truthy?
@@ -90,10 +115,6 @@ class WikiPage < ApplicationRecord
     end
   end
 
-  def creator_name
-    creator.name
-  end
-
   extend SearchMethods
 
   def validate_not_locked
@@ -103,11 +124,17 @@ class WikiPage < ApplicationRecord
   end
 
   def validate_rename
-    return if !will_save_change_to_title? || skip_secondary_validations
+    return unless title_changed?
 
     tag_was = Tag.find_by_name(Tag.normalize_name(title_was))
     if tag_was.present? && tag_was.post_count > 0
-      errors.add(:title, "cannot be changed: '#{tag_was.name}' still has #{tag_was.post_count} posts. Move the posts and update any wikis linking to this page first.")
+      warnings[:base] << %!Warning: {{#{title_was}}} still has #{tag_was.post_count} #{"post".pluralize(tag_was.post_count)}. Be sure to move the posts!
+    end
+
+    broken_wikis = WikiPage.linked_to(title_was)
+    if broken_wikis.count > 0
+      broken_wiki_search = Rails.application.routes.url_helpers.wiki_pages_path(search: { linked_to: title_was })
+      warnings[:base] << %!Warning: [[#{title_was}]] is still linked from "#{broken_wikis.count} #{"other wiki page".pluralize(broken_wikis.count)}":[#{broken_wiki_search}]. Update #{(broken_wikis.count > 1) ? "these wikis" : "this wiki"} to link to [[#{title}]] instead!
     end
   end
 
@@ -127,8 +154,12 @@ class WikiPage < ApplicationRecord
     save!
   end
 
+  def self.normalize_title(title)
+    title.downcase.delete_prefix("~").gsub(/[[:space:]]+/, "_").gsub(/__/, "_").gsub(/\A_|_\z/, "")
+  end
+
   def normalize_title
-    self.title = title.mb_chars.downcase.tr(" ", "_")
+    self.title = WikiPage.normalize_title(title)
   end
 
   def normalize_other_names
@@ -139,16 +170,20 @@ class WikiPage < ApplicationRecord
     name.unicode_normalize(:nfkc).gsub(/[[:space:]]+/, " ").strip.tr(" ", "_")
   end
 
-  def skip_secondary_validations=(value)
-    @skip_secondary_validations = value.to_s.truthy?
-  end
-
   def category_name
     Tag.category_for(title)
   end
 
   def pretty_title
     title.tr("_", " ")
+  end
+
+  def self.is_meta_wiki?(title)
+    title.present? && title.starts_with?(*META_WIKIS)
+  end
+
+  def is_meta_wiki?
+    WikiPage.is_meta_wiki?(title)
   end
 
   def wiki_page_changed?
@@ -187,6 +222,14 @@ class WikiPage < ApplicationRecord
     end
   end
 
+  def dtext_links_changed?
+    body_changed? && DText.dtext_links_differ?(body, body_was)
+  end
+
+  def update_dtext_links
+    self.dtext_links = DtextLink.new_from_dtext(body)
+  end
+
   def post_set
     @post_set ||= PostSets::WikiPage.new(title, 1, 4)
   end
@@ -196,16 +239,21 @@ class WikiPage < ApplicationRecord
   end
 
   def tags
-    body.scan(/\[\[(.+?)\]\]/).flatten.map do |match|
-      if match =~ /^(.+?)\|(.+)/
-        $1
-      else
-        match
-      end
-    end.map {|x| x.mb_chars.downcase.tr(" ", "_").to_s}.uniq
+    titles = DText.parse_wiki_titles(body).uniq
+    tags = Tag.nonempty.where(name: titles).pluck(:name)
+    tags += TagAlias.active.where(antecedent_name: titles).pluck(:antecedent_name)
+    TagAlias.to_aliased(titles & tags)
   end
 
   def visible?
     artist.blank? || !artist.is_banned? || CurrentUser.is_builder?
+  end
+
+  def to_param
+    if title =~ /\A\d+\z/
+      "~#{title}"
+    else
+      title
+    end
   end
 end

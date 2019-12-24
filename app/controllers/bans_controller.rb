@@ -12,7 +12,7 @@ class BansController < ApplicationController
   end
 
   def index
-    @bans = Ban.search(search_params).paginate(params[:page], :limit => params[:limit])
+    @bans = Ban.paginated_search(params, count_pages: true)
     respond_with(@bans) do |fmt|
       fmt.html { @bans = @bans.includes(:user, :banner) }
     end

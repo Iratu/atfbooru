@@ -1,7 +1,18 @@
 class ApplicationRecord < ActiveRecord::Base
   self.abstract_class = true
 
-  include Danbooru::Paginator::ActiveRecordExtension
+  concerning :PaginationMethods do
+    class_methods do
+      def paginate(*options)
+        extending(PaginationExtension).paginate(*options)
+      end
+
+      def paginated_search(params, count_pages: params[:search].present?)
+        search_params = params.fetch(:search, {}).permit!
+        search(search_params).paginate(params[:page], limit: params[:limit], search_count: count_pages)
+      end
+    end
+  end
 
   concerning :SearchMethods do
     class_methods do
@@ -39,6 +50,16 @@ class ApplicationRecord < ActiveRecord::Base
         where.not("#{qualified_column_for(attr)} ~ ?", "(?e)" + value)
       end
 
+      def where_inet_matches(attr, value)
+        if value.match?(/[, ]/)
+          ips = value.split(/[, ]+/).map { |ip| IPAddress.parse(ip).to_string }
+          where("#{qualified_column_for(attr)} = ANY(ARRAY[?]::inet[])", ips)
+        else
+          ip = IPAddress.parse(value)
+          where("#{qualified_column_for(attr)} <<= ?", ip.to_string)
+        end
+      end
+
       def where_array_includes_any(attr, values)
         where("#{qualified_column_for(attr)} && ARRAY[?]", values)
       end
@@ -65,6 +86,14 @@ class ApplicationRecord < ActiveRecord::Base
           where(attribute => false)
         else
           raise ArgumentError, "value must be truthy or falsy"
+        end
+      end
+
+      def search_inet_attribute(attr, params)
+        if params[attr].present?
+          where_inet_matches(attr, params[attr])
+        else
+          all
         end
       end
 
@@ -119,6 +148,8 @@ class ApplicationRecord < ActiveRecord::Base
           search_boolean_attribute(name, params)
         when :integer, :datetime
           numeric_attribute_matches(name, params[name])
+        when :inet
+          search_inet_attribute(name, params)
         else
           raise NotImplementedError, "unhandled attribute type"
         end
@@ -325,7 +356,7 @@ class ApplicationRecord < ActiveRecord::Base
       def belongs_to_creator(options = {})
         class_eval do
           belongs_to :creator, options.merge(class_name: "User")
-          before_validation(on: :create) do |rec| 
+          before_validation(on: :create) do |rec|
             if rec.creator_id.nil?
               rec.creator_id = CurrentUser.id
               rec.creator_ip_addr = CurrentUser.ip_addr if rec.respond_to?(:creator_ip_addr=)

@@ -1,6 +1,6 @@
 require "test_helper"
 
-class DTextTest < ActiveSupport::TestCase
+class APNGInspectorTest < ActiveSupport::TestCase
   def inspect(filename)
     apng = APNGInspector.new("#{Rails.root}/test/files/apng/#{filename}")
     apng.inspect!
@@ -59,6 +59,5 @@ class DTextTest < ActiveSupport::TestCase
       assert_equal(false, apng.animated?)
       assert_equal(true, apng.corrupted?)
     end
-
   end
 end

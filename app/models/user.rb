@@ -2,8 +2,8 @@ require 'digest/sha1'
 require 'danbooru/has_bit_flags'
 
 class User < ApplicationRecord
-  class Error < Exception ; end
-  class PrivilegeError < Exception ; end
+  class Error < Exception; end
+  class PrivilegeError < Exception; end
 
   module Levels
     ANONYMOUS = 0
@@ -20,7 +20,7 @@ class User < ApplicationRecord
     :banned,
     :approver,
     :voter,
-    :super_voter,
+    :super_voter
   ]
 
   # candidates for removal:
@@ -89,8 +89,10 @@ class User < ApplicationRecord
   has_many :artist_versions, foreign_key: :updater_id
   has_many :artist_commentary_versions, foreign_key: :updater_id
   has_many :comments, foreign_key: :creator_id
+  has_many :comment_votes, dependent: :destroy
   has_many :wiki_page_versions, foreign_key: :updater_id
   has_many :feedback, :class_name => "UserFeedback", :dependent => :destroy
+  has_many :forum_post_votes, dependent: :destroy, foreign_key: :creator_id
   has_many :posts, :foreign_key => "uploader_id"
   has_many :post_appeals, foreign_key: :creator_id
   has_many :post_approvals, :dependent => :destroy
@@ -165,7 +167,6 @@ class User < ApplicationRecord
     end
 
     def encrypt_password_on_create
-      self.password_hash = ""
       self.bcrypt_password_hash = User.bcrypt(password)
     end
 
@@ -198,7 +199,7 @@ class User < ApplicationRecord
     end
 
     def reset_password_and_deliver_notice
-      new_password = reset_password()
+      new_password = reset_password
       Maintenance::User::PasswordResetMailer.confirmation(self, new_password).deliver_now
     end
   end
@@ -295,7 +296,7 @@ class User < ApplicationRecord
 
         when Levels::ADMIN
           "Admin"
-          
+
         else
           ""
         end
@@ -569,23 +570,23 @@ end
 
   module ApiMethods
     def api_attributes
-      attributes = [
-        :id, :created_at, :name, :inviter_id, :level, :base_upload_limit,
-        :post_upload_count, :post_update_count, :note_update_count, :is_banned,
-        :can_approve_posts, :can_upload_free, :is_super_voter, :level_string,
+      attributes = %i[
+        id created_at name inviter_id level base_upload_limit
+        post_upload_count post_update_count note_update_count is_banned
+        can_approve_posts can_upload_free is_super_voter level_string
       ]
 
       if id == CurrentUser.user.id
         attributes += BOOLEAN_ATTRIBUTES
-        attributes += [
-          :updated_at, :email, :last_logged_in_at, :last_forum_read_at,
-          :recent_tags, :comment_threshold, :default_image_size,
-          :favorite_tags, :blacklisted_tags, :time_zone, :per_page,
-          :custom_style, :favorite_count, :api_regen_multiplier,
-          :api_burst_limit, :remaining_api_limit, :statement_timeout,
-          :favorite_group_limit, :favorite_limit, :tag_query_limit,
-          :can_comment_vote?, :can_remove_from_pools?, :is_comment_limited?,
-          :can_comment?, :can_upload?, :max_saved_searches, :theme
+        attributes += %i[
+          updated_at email last_logged_in_at last_forum_read_at
+          comment_threshold default_image_size
+          favorite_tags blacklisted_tags time_zone per_page
+          custom_style favorite_count api_regen_multiplier
+          api_burst_limit remaining_api_limit statement_timeout
+          favorite_group_limit favorite_limit tag_query_limit
+          can_comment_vote? can_remove_from_pools? is_comment_limited?
+          can_comment? can_upload? max_saved_searches theme
         ]
       end
 
@@ -594,13 +595,13 @@ end
 
     # extra attributes returned for /users/:id.json but not for /users.json.
     def full_attributes
-      [
-        :wiki_page_version_count, :artist_version_count,
-        :artist_commentary_version_count, :pool_version_count,
-        :forum_post_count, :comment_count, :favorite_group_count,
-        :appeal_count, :flag_count, :positive_feedback_count,
-        :neutral_feedback_count, :negative_feedback_count, :upload_limit,
-        :max_upload_limit
+      %i[
+        wiki_page_version_count artist_version_count
+        artist_commentary_version_count pool_version_count
+        forum_post_count comment_count favorite_group_count
+        appeal_count flag_count positive_feedback_count
+        neutral_feedback_count negative_feedback_count upload_limit
+        max_upload_limit
       ]
     end
 
@@ -611,6 +612,10 @@ end
         "level" => level,
         "created_at" => created_at.strftime("%Y-%m-%d %H:%M")
       }.to_json
+    end
+
+    def api_token
+      api_key.try(:key)
     end
   end
 
@@ -726,10 +731,10 @@ end
         if params[x].present?
           attr_idx = BOOLEAN_ATTRIBUTES.index(x.to_s)
           if params[x].to_s.truthy?
-            bitprefs_include ||= "0"*bitprefs_length
+            bitprefs_include ||= "0" * bitprefs_length
             bitprefs_include[attr_idx] = '1'
           elsif params[x].to_s.falsy?
-            bitprefs_exclude ||= "0"*bitprefs_length
+            bitprefs_exclude ||= "0" * bitprefs_length
             bitprefs_exclude[attr_idx] = '1'
           end
         end
@@ -738,13 +743,13 @@ end
       if bitprefs_include
         bitprefs_include.reverse!
         q = q.where("bit_prefs::bit(:len) & :bits::bit(:len) = :bits::bit(:len)",
-                    {:len => bitprefs_length, :bits => bitprefs_include})
+                    :len => bitprefs_length, :bits => bitprefs_include)
       end
 
       if bitprefs_exclude
         bitprefs_exclude.reverse!
         q = q.where("bit_prefs::bit(:len) & :bits::bit(:len) = 0::bit(:len)",
-                    {:len => bitprefs_length, :bits => bitprefs_exclude})
+                    :len => bitprefs_length, :bits => bitprefs_exclude)
       end
 
       if params[:current_user_first].to_s.truthy? && !CurrentUser.is_anonymous?

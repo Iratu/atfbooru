@@ -37,12 +37,13 @@ footer#page-footer {
 
   #sidebar {
     flex: 0;
-    min-width: 15em;
+    min-width: 20em;
   }
 
   #content {
     flex: 1;
     padding-left: 1em;
+    min-width: 0;
   }
 
   @media (max-width: 660px) {

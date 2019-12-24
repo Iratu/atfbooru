@@ -1,5 +1,5 @@
 class PostVote < ApplicationRecord
-  class Error < Exception ; end
+  class Error < Exception; end
 
   belongs_to :post
   belongs_to :user
@@ -21,6 +21,18 @@ class PostVote < ApplicationRecord
 
   def self.positive_post_ids(user_id)
     select_values_sql("select post_id from post_votes where score > 0 and user_id = ?", user_id)
+  end
+
+  def self.visible(user = CurrentUser.user)
+    return all if user.is_admin?
+    where(user: user)
+  end
+
+  def self.search(params)
+    q = super
+    q = q.visible
+    q = q.search_attributes(params, :post, :user, :score)
+    q.apply_default_order(params)
   end
 
   def initialize_attributes

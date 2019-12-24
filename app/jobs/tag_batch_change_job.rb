@@ -1,5 +1,5 @@
 class TagBatchChangeJob < ApplicationJob
-  class Error < Exception ; end
+  class Error < Exception; end
 
   queue_as :default
 
@@ -22,7 +22,7 @@ class TagBatchChangeJob < ApplicationJob
 
   def self.estimate_update_count(antecedent, consequent)
     CurrentUser.without_safe_mode do
-      PostReadOnly.tag_match(antecedent).count
+      Post.tag_match(antecedent).count
     end
   end
 

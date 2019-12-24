@@ -1,7 +1,6 @@
 class ArtistsController < ApplicationController
   respond_to :html, :xml, :json, :js
   before_action :member_only, :except => [:index, :show, :show_or_new, :banned]
-  before_action :builder_only, :only => [:destroy]
   before_action :admin_only, :only => [:ban, :unban]
   before_action :load_artist, :only => [:ban, :unban, :show, :edit, :update, :destroy, :undelete]
 
@@ -15,15 +14,7 @@ class ArtistsController < ApplicationController
   end
 
   def banned
-    @artists = Artist.where("is_banned = ?", true).order("name")
-    respond_with(@artists) do |format|
-      format.xml do
-        render :xml => @artists.to_xml(:include => [:urls], :root => "artists")
-      end
-      format.json do
-        render :json => @artists.to_json(:include => [:urls])
-      end
-    end
+    redirect_to artists_path(search: { is_banned: "true", order: "updated_at" }, format: request.format.symbol)
   end
 
   def ban
@@ -37,21 +28,24 @@ class ArtistsController < ApplicationController
   end
 
   def index
-    @artists = Artist.includes(:urls).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
-    respond_with(@artists) do |format|
-      format.xml do
-        render :xml => @artists.to_xml(:include => [:urls], :root => "artists")
-      end
-      format.json do
-        render :json => @artists.to_json(:include => [:urls])
-      end
+    # XXX
+    params[:search][:name] = params.delete(:name) if params[:name]
+
+    @artists = Artist.includes(:urls).paginated_search(params)
+    @artists = @artists.includes(:tag) if request.format.html?
+    @artists = @artists.includes(:urls) if !request.format.html?
+
+    if params[:redirect].to_s.truthy? && @artists.one? && @artists.first.name == Artist.normalize_name(params[:search][:any_name_or_url_matches])
+      redirect_to @artists.first
+    else
+      respond_with @artists
     end
   end
 
   def show
     @artist = Artist.find(params[:id])
     @post_set = PostSets::Artist.new(@artist)
-    respond_with(@artist, methods: [:domains], include: [:urls])
+    respond_with(@artist)
   end
 
   def create
@@ -66,9 +60,6 @@ class ArtistsController < ApplicationController
   end
 
   def destroy
-    if !@artist.deletable_by?(CurrentUser.user)
-      raise User::PrivilegeError
-    end
     @artist.update_attribute(:is_active, false)
     redirect_to(artist_path(@artist), :notice => "Artist deleted")
   end
@@ -94,21 +85,14 @@ class ArtistsController < ApplicationController
     end
   end
 
-private
+  private
 
   def load_artist
     @artist = Artist.find(params[:id])
   end
 
-  def search_params
-    sp = params.fetch(:search, {})
-    sp[:name] = params[:name] if params[:name]
-    sp.permit!
-  end
-
   def artist_params(context = nil)
-    permitted_params = %i[name other_names other_names_string group_name url_string notes]
-    permitted_params << :is_active if CurrentUser.is_builder?
+    permitted_params = %i[name other_names other_names_string group_name url_string notes is_active]
     permitted_params << :source if context == :new
 
     params.fetch(:artist, {}).permit(permitted_params)

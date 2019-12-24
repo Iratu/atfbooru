@@ -22,7 +22,7 @@ class DanbooruLogger
   end
 
   def self.add_session_attributes(request, session, user)
-    request_params = request.parameters.with_indifferent_access.except(*Rails.application.config.filter_parameters, :controller, :action)
+    request_params = request.parameters.with_indifferent_access.except(:controller, :action)
     session_params = session.to_h.with_indifferent_access.slice(:session_id, :started_at)
     user_params = { id: user&.id, name: user&.name, level: user&.level_string, ip: request.remote_ip, safe_mode: CurrentUser.safe_mode? }
 
@@ -35,17 +35,18 @@ class DanbooruLogger
     return unless defined?(::NewRelic)
 
     attributes = flatten_hash(hash).transform_keys { |key| "#{prefix}.#{key}" }
+    attributes.delete_if { |key, value| key.end_with?(*Rails.application.config.filter_parameters.map(&:to_s)) }
     ::NewRelic::Agent.add_custom_attributes(attributes)
   end
 
-  private
+  private_class_method
 
   # flatten_hash({ foo: { bar: { baz: 42 } } })
   # => { "foo.bar.baz" => 42 }
   def self.flatten_hash(hash)
     hash.each_with_object({}) do |(k, v), h|
       if v.is_a?(Hash)
-        flatten_hash(v).map do|h_k, h_v|
+        flatten_hash(v).map do |h_k, h_v|
           h["#{k}.#{h_k}"] = h_v
         end
       else

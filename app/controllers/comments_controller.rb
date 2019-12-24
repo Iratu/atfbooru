@@ -72,7 +72,8 @@ class CommentsController < ApplicationController
     respond_with(@comment)
   end
 
-private
+  private
+
   def index_for_post
     @post = Post.find(params[:post_id])
     @comments = @post.comments
@@ -89,7 +90,7 @@ private
   end
 
   def index_by_comment
-    @comments = Comment.includes(:creator, :updater).search(search_params).paginate(params[:page], :limit => params[:limit], :search_count => params[:search])
+    @comments = Comment.includes(:creator, :updater).paginated_search(params)
     respond_with(@comments) do |format|
       format.atom do
         @comments = @comments.includes(:post, :creator).load

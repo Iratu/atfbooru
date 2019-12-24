@@ -1,8 +1,7 @@
-=begin rdoc
-  A tag set represents a set of tags that are displayed together.
-  This class makes it easy to fetch the categories for all the
-  tags in one call instead of fetching them sequentially.
-=end
+# rdoc
+#   A tag set represents a set of tags that are displayed together.
+#   This class makes it easy to fetch the categories for all the
+#   tags in one call instead of fetching them sequentially.
 
 class TagSetPresenter < Presenter
   extend Memoist
@@ -49,7 +48,7 @@ class TagSetPresenter < Presenter
   end
 
   # compact (horizontal) list, as seen in the /comments index.
-  def inline_tag_list_html(humanize_tags: true)
+  def inline_tag_list_html(humanize_tags: false)
     html = split_tag_list_html(category_list: TagCategory.categorized_list, headers: false, show_extra_links: false, name_only: true, humanize_tags: humanize_tags)
     %{<span class="inline-tag-list">#{html}</span>}.html_safe
   end
@@ -61,34 +60,23 @@ class TagSetPresenter < Presenter
     end.reject(&:blank?).join(" \n")
   end
 
-  def humanized_essential_tag_string(category_list: TagCategory.humanized_list, default: "")
-    strings = category_list.map do |category|
-      mapping = TagCategory.humanized_mapping[category]
-      max_tags = mapping["slice"]
-      regexmap = mapping["regexmap"]
-      formatstr = mapping["formatstr"]
-      excluded_tags = mapping["exclusion"]
+  def humanized_essential_tag_string(default: "")
+    chartags = tags_for_category("character")
+    characters = chartags.max_by(5, &:post_count).map(&:unqualified_name)
+    characters += ["#{chartags.size - 5} more"] if chartags.size > 5
+    characters = characters.to_sentence
 
-      type_tags = tags_for_category(category).map(&:name) - excluded_tags
-      next if type_tags.empty?
+    copytags = tags_for_category("copyright")
+    copyrights = copytags.max_by(1, &:post_count).map(&:unqualified_name)
+    copyrights += ["#{copytags.size - 1} more"] if copytags.size > 1
+    copyrights = copyrights.to_sentence
+    copyrights = "(#{copyrights})" if characters.present?
 
-      if max_tags > 0 && type_tags.length > max_tags
-        type_tags = type_tags.sort_by {|x| -x.size}.take(max_tags) + ["etc"]
-      end
+    artists = tags_for_category("artist").map(&:name).grep_v("banned_artist").to_sentence
+    artists = "drawn by #{artists}" if artists.present?
 
-      if regexmap != //
-        type_tags = type_tags.map { |tag| tag.match(regexmap)[1] }
-      end
-
-      if category == "copyright" && tags_for_category("character").blank?
-        type_tags.to_sentence
-      else
-        formatstr % type_tags.to_sentence
-      end
-    end
-
-    strings = strings.compact.join(" ").tr("_", " ")
-    strings.blank? ? default : strings
+    strings = "#{characters} #{copyrights} #{artists}"
+    strings.presence || default
   end
 
   private
@@ -124,13 +112,15 @@ class TagSetPresenter < Presenter
     unless name_only
       if category == Tag.categories.artist
         html << %{<a class="wiki-link" href="/artists/show_or_new?name=#{u(name)}">?</a> }
+      elsif name =~ /\A\d+\z/
+        html << %{<a class="wiki-link" href="/wiki_pages/~#{u(name)}">?</a> }
       else
-        html << %{<a class="wiki-link" href="/wiki_pages/show_or_new?title=#{u(name)}">?</a> }
+        html << %{<a class="wiki-link" href="/wiki_pages/#{u(name)}">?</a> }
       end
 
       if show_extra_links && current_query.present?
-        html << %{<a rel="nofollow" href="/posts?tags=#{u(current_query)}+#{u(name)}" class="search-inc-tag">+</a> }
-        html << %{<a rel="nofollow" href="/posts?tags=#{u(current_query)}+-#{u(name)}" class="search-exl-tag">&ndash;</a> }
+        html << %{<a href="/posts?tags=#{u(current_query)}+#{u(name)}" class="search-inc-tag">+</a> }
+        html << %{<a href="/posts?tags=#{u(current_query)}+-#{u(name)}" class="search-exl-tag">&ndash;</a> }
       end
     end
 
@@ -142,7 +132,7 @@ class TagSetPresenter < Presenter
       if count >= 10_000
         post_count = "#{count / 1_000}k"
       elsif count >= 1_000
-        post_count = "%.1fk" % (count / 1_000.0)
+        post_count = format("%.1fk", (count / 1_000.0))
       else
         post_count = count
       end

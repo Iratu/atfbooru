@@ -21,11 +21,9 @@ gem 'capistrano-rbenv'
 gem 'streamio-ffmpeg'
 gem 'rubyzip', :require => "zip"
 gem 'stripe'
-gem 'twitter'
-gem 'aws-sdk', '~> 2'
+gem 'aws-sdk-sqs', '~> 1'
 gem 'responders'
-gem 'dtext_rb', :git => "https://github.com/r888888888/dtext_rb.git", :require => "dtext"
-gem 'cityhash'
+gem 'dtext_rb', git: "https://github.com/evazion/dtext_rb.git", require: "dtext"
 gem 'memoist'
 gem 'daemons'
 gem 'oauth2'
@@ -43,8 +41,10 @@ gem 'redis'
 gem 'request_store'
 gem 'builder'
 # gem 'did_you_mean' # github.com/yuki24/did_you_mean/issues/117
-gem 'term-ansicolor', require: "term/ansicolor"
 gem 'puma'
+gem 'scenic'
+gem 'ipaddress'
+gem 'http'
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"
@@ -81,7 +81,7 @@ group :test do
   gem "shoulda-context"
   gem "shoulda-matchers"
   gem "factory_bot"
-  gem "mocha", :require => "mocha/setup"
+  gem "mocha"
   gem "ffaker"
   gem "simplecov", :require => false
   gem "webmock"

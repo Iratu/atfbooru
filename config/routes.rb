@@ -1,5 +1,4 @@
 Rails.application.routes.draw do
-
   namespace :admin do
     resources :users, :only => [:edit, :update]
     resource  :alias_and_implication_import, :only => [:new, :create]
@@ -59,7 +58,6 @@ Rails.application.routes.draw do
       resource :count_fixes, only: [:new, :create]
       resource :email_notification, :only => [:show, :destroy]
       resource :password_reset, :only => [:new, :create, :edit, :update]
-      resource :login_reminder, :only => [:new, :create]
       resource :deletion, :only => [:show, :destroy]
       resource :email_change, :only => [:new, :create]
       resource :dmail_filter, :only => [:edit, :update]
@@ -81,7 +79,7 @@ Rails.application.routes.draw do
     end
   end
   resources :artist_urls, only: [:index, :update]
-  resources :artist_versions, :only => [:index] do
+  resources :artist_versions, :only => [:index, :show] do
     collection do
       get :search
     end
@@ -92,8 +90,9 @@ Rails.application.routes.draw do
       post :approve
     end
   end
+  resources :comment_votes, only: [:index]
   resources :comments do
-    resource :votes, :controller => "comment_votes", :only => [:create, :destroy]
+    resource :votes, controller: "comment_votes", only: [:create, :destroy], as: "comment_votes"
     collection do
       get :search
     end
@@ -123,6 +122,7 @@ Rails.application.routes.draw do
     end
   end
   resource  :dtext_preview, :only => [:create]
+  resources :dtext_links, only: [:index]
   resources :favorites, :only => [:index, :create, :destroy]
   resources :favorite_groups do
     member do
@@ -131,7 +131,6 @@ Rails.application.routes.draw do
     resource :order, :only => [:edit], :controller => "favorite_group_orders"
   end
   resources :forum_posts do
-    resource :votes, controller: "forum_post_votes"
     member do
       post :undelete
     end
@@ -139,6 +138,7 @@ Rails.application.routes.draw do
       get :search
     end
   end
+  resources :forum_post_votes, only: [:index, :create, :destroy]
   resources :forum_topics do
     member do
       post :undelete
@@ -153,19 +153,11 @@ Rails.application.routes.draw do
     resource :visit, :controller => "forum_topic_visits"
   end
   resources :ip_bans
-  resource :iqdb_queries, :only => [:show]  do
+  resources :ip_addresses, only: [:index]
+  resource :iqdb_queries, :only => [:show, :create] do
     collection do
       get :preview
       get :check, to: redirect {|path_params, req| "/iqdb_queries?#{req.query_string}"}
-    end
-  end
-  resources :janitor_trials do
-    collection do
-      get :test
-    end
-    member do
-      put :promote
-      put :demote
     end
   end
   resources :mod_actions
@@ -178,7 +170,7 @@ Rails.application.routes.draw do
       put :revert
     end
   end
-  resources :note_versions, :only => [:index]
+  resources :note_versions, :only => [:index, :show]
   resource :note_previews, :only => [:show]
   resources :pools do
     member do
@@ -190,7 +182,7 @@ Rails.application.routes.draw do
     end
     resource :order, :only => [:edit], :controller => "pool_orders"
   end
-  resource  :pool_element, :only => [:create, :destroy] do
+  resource :pool_element, :only => [:create, :destroy] do
     collection do
       get :all_select
     end
@@ -201,14 +193,15 @@ Rails.application.routes.draw do
     end
   end
   resources :post_replacements, :only => [:index, :new, :create, :update]
-    resources :posts, :only => [:index, :show, :update] do
+  resources :post_votes, only: [:index]
+  resources :posts, only: [:index, :show, :update] do
     resources :events, :only => [:index], :controller => "post_events"
     resources :replacements, :only => [:index, :new, :create], :controller => "post_replacements"
     resource :artist_commentary, :only => [:index, :show] do
       collection { put :create_or_update }
       member { put :revert }
     end
-    resource :votes, :controller => "post_votes", :only => [:create, :destroy]
+    resource :votes, controller: "post_votes", only: [:create, :destroy], as: "post_votes"
     collection do
       get :random
     end
@@ -240,13 +233,13 @@ Rails.application.routes.draw do
       put :revert
     end
   end
-  resources :artist_commentary_versions, :only => [:index]
+  resources :artist_commentary_versions, :only => [:index, :show]
   resource :related_tag, :only => [:show, :update]
   get "reports/uploads" => "reports#uploads"
   get "reports/upload_tags" => "reports#upload_tags"
   get "reports/down_voting_post" => "reports#down_voting_post"
   post "reports/down_voting_post_create" => "reports#down_voting_post_create"
-  resource :recommended_posts, only: [:show]
+  resources :recommended_posts, only: [:index]
   resources :saved_searches, :except => [:show] do
     collection do
       get :labels
@@ -266,13 +259,11 @@ Rails.application.routes.draw do
       post :approve
     end
   end
-  resource :tag_alias_request, :only => [:new, :create]
   resources :tag_implications do
     member do
       post :approve
     end
   end
-  resource :tag_implication_request, :only => [:new, :create]
   resources :uploads do
     collection do
       post :preprocess
@@ -292,20 +283,12 @@ Rails.application.routes.draw do
     end
   end
   resource :user_upgrade, :only => [:new, :create, :show]
-  resources :user_feedbacks do
-    collection do
-      get :search
-    end
-  end
+  resources :user_feedbacks, except: [:destroy]
   resources :user_name_change_requests, only: [:new, :create, :show, :index]
-  resources :wiki_pages do
-    member do
-      put :revert
-    end
-    collection do
-      get :search
-      get :show_or_new
-    end
+  resources :wiki_pages, id: /.+?(?=\.json|\.xml|\.html)|.+/ do
+    put :revert, on: :member
+    get :search, on: :collection
+    get :show_or_new, on: :collection
   end
   resources :wiki_page_versions, :only => [:index, :show, :diff] do
     collection do
@@ -319,12 +302,12 @@ Rails.application.routes.draw do
   resources :fposts, :controller => "forum_posts"
 
   # legacy aliases
-  get "/artist" => redirect {|params, req| "/artists?page=#{req.params[:page]}&search[name]=#{CGI::escape(req.params[:name].to_s)}"}
+  get "/artist" => redirect {|params, req| "/artists?page=#{req.params[:page]}&search[name]=#{CGI.escape(req.params[:name].to_s)}"}
   get "/artist/index.xml", :controller => "legacy", :action => "artists", :format => "xml"
   get "/artist/index.json", :controller => "legacy", :action => "artists", :format => "json"
   get "/artist/index" => redirect {|params, req| "/artists?page=#{req.params[:page]}"}
   get "/artist/show/:id" => redirect("/artists/%{id}")
-  get "/artist/show" => redirect {|params, req| "/artists?name=#{CGI::escape(req.params[:name].to_s)}"}
+  get "/artist/show" => redirect {|params, req| "/artists?name=#{CGI.escape(req.params[:name].to_s)}"}
   get "/artist/history/:id" => redirect("/artist_versions?search[artist_id]=%{id}")
   get "/artist/recent_changes" => redirect("/artist_versions")
 
@@ -334,7 +317,7 @@ Rails.application.routes.draw do
   get "/comment/new" => redirect("/comments")
   get("/comment/search" => redirect do |params, req|
     if req.params[:query] =~ /^user:(.+)/i
-      "/comments?group_by=comment&search[creator_name]=#{CGI::escape($1)}"
+      "/comments?group_by=comment&search[creator_name]=#{CGI.escape($1)}"
     else
       "/comments/search"
     end
@@ -349,7 +332,7 @@ Rails.application.routes.draw do
   get "/forum/show/:id" => redirect {|params, req| "/forum_posts/#{req.params[:id]}?page=#{req.params[:page]}"}
   get "/forum/search" => redirect("/forum_posts/search")
 
-  get "/help/:title" => redirect {|params, req| ("/wiki_pages?title=#{CGI::escape('help:' + req.params[:title])}")}
+  get "/help/:title" => redirect {|params, req| "/wiki_pages?title=#{CGI.escape('help:' + req.params[:title])}"}
 
   get "/note" => redirect {|params, req| "/notes?page=#{req.params[:page]}"}
   get "/note/index" => redirect {|params, req| "/notes?page=#{req.params[:page]}"}
@@ -364,12 +347,12 @@ Rails.application.routes.draw do
   get "/post/index.xml", :controller => "legacy", :action => "posts", :format => "xml"
   get "/post/index.json", :controller => "legacy", :action => "posts", :format => "json"
   get "/post/piclens", :controller => "legacy", :action => "unavailable"
-  get "/post/index" => redirect {|params, req| "/posts?tags=#{CGI::escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
-  get "/post" => redirect {|params, req| "/posts?tags=#{CGI::escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
+  get "/post/index" => redirect {|params, req| "/posts?tags=#{CGI.escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
+  get "/post" => redirect {|params, req| "/posts?tags=#{CGI.escape(req.params[:tags].to_s)}&page=#{req.params[:page]}"}
   get "/post/upload" => redirect("/uploads/new")
   get "/post/moderate" => redirect("/moderator/post/queue")
-  get "/post/atom" => redirect {|params, req| "/posts.atom?tags=#{CGI::escape(req.params[:tags].to_s)}"}
-  get "/post/atom.feed" => redirect {|params, req| "/posts.atom?tags=#{CGI::escape(req.params[:tags].to_s)}"}
+  get "/post/atom" => redirect {|params, req| "/posts.atom?tags=#{CGI.escape(req.params[:tags].to_s)}"}
+  get "/post/atom.feed" => redirect {|params, req| "/posts.atom?tags=#{CGI.escape(req.params[:tags].to_s)}"}
   get "/post/popular_by_day" => redirect("/explore/posts/popular")
   get "/post/popular_by_week" => redirect("/explore/posts/popular")
   get "/post/popular_by_month" => redirect("/explore/posts/popular")
@@ -388,10 +371,10 @@ Rails.application.routes.draw do
 
   get "/tag/index.xml", :controller => "legacy", :action => "tags", :format => "xml"
   get "/tag/index.json", :controller => "legacy", :action => "tags", :format => "json"
-  get "/tag" => redirect {|params, req| "/tags?page=#{req.params[:page]}&search[name_matches]=#{CGI::escape(req.params[:name].to_s)}&search[order]=#{req.params[:order]}&search[category]=#{req.params[:type]}"}
-  get "/tag/index" => redirect {|params, req| "/tags?page=#{req.params[:page]}&search[name_matches]=#{CGI::escape(req.params[:name].to_s)}&search[order]=#{req.params[:order]}"}
+  get "/tag" => redirect {|params, req| "/tags?page=#{req.params[:page]}&search[name_matches]=#{CGI.escape(req.params[:name].to_s)}&search[order]=#{req.params[:order]}&search[category]=#{req.params[:type]}"}
+  get "/tag/index" => redirect {|params, req| "/tags?page=#{req.params[:page]}&search[name_matches]=#{CGI.escape(req.params[:name].to_s)}&search[order]=#{req.params[:order]}"}
 
-  get "/tag_implication" => redirect {|params, req| "/tag_implications?search[name_matches]=#{CGI::escape(req.params[:query].to_s)}"}
+  get "/tag_implication" => redirect {|params, req| "/tag_implications?search[name_matches]=#{CGI.escape(req.params[:query].to_s)}"}
 
   get "/user/index.xml", :controller => "legacy", :action => "users", :format => "xml"
   get "/user/index.json", :controller => "legacy", :action => "users", :format => "json"
@@ -400,13 +383,15 @@ Rails.application.routes.draw do
   get "/user/show/:id" => redirect("/users/%{id}")
   get "/user/login" => redirect("/sessions/new")
   get "/user_record" => redirect {|params, req| "/user_feedbacks?search[user_id]=#{req.params[:user_id]}"}
+  get "/login", to: "sessions#new", as: :login
+  get "/logout", to: "sessions#sign_out", as: :logout
   get "/profile", to: "users#profile", as: :profile
   get "/settings", to: "users#settings", as: :settings
 
   get "/wiki" => redirect {|params, req| "/wiki_pages?page=#{req.params[:page]}"}
   get "/wiki/index" => redirect {|params, req| "/wiki_pages?page=#{req.params[:page]}"}
   get "/wiki/rename" => redirect("/wiki_pages")
-  get "/wiki/show" => redirect {|params, req| "/wiki_pages?title=#{CGI::escape(req.params[:title].to_s)}"}
+  get "/wiki/show" => redirect {|params, req| "/wiki_pages?title=#{CGI.escape(req.params[:title].to_s)}"}
   get "/wiki/recent_changes" => redirect {|params, req| "/wiki_page_versions?search[updater_id]=#{req.params[:user_id]}"}
   get "/wiki/history/:title" => redirect("/wiki_page_versions?title=%{title}")
 
@@ -416,6 +401,7 @@ Rails.application.routes.draw do
   get "/static/site_map" => "static#site_map", :as => "site_map"
   get "/static/terms_of_service" => "static#terms_of_service", :as => "terms_of_service"
   get "/static/contact" => "static#contact", :as => "contact"
+  get "/static/dtext_help" => "static#dtext_help", :as => "dtext_help"
   get "/meta_searches/tags" => "meta_searches#tags", :as => "meta_searches_tags"
 
   get "/intro" => redirect("/explore/posts/intro")

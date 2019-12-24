@@ -96,11 +96,11 @@ class TagAutocompleteTest < ActiveSupport::TestCase
       @tags = [
         create(:tag, name: "/abc", post_count: 0),
         create(:tag, name: "abcdef", post_count: 1),
-        create(:tag, name: "zzzzzz", post_count: 1),
+        create(:tag, name: "zzzzzz", post_count: 1)
       ]
       as_user do
         @aliases = [
-          create(:tag_alias, antecedent_name: "/abc", consequent_name: "abcdef", status: "active", post_count: 1)
+          create(:tag_alias, antecedent_name: "/abc", consequent_name: "abcdef", status: "active")
         ]
       end
     end
