@@ -1,7 +1,6 @@
 class UploadService
   module Utils
     module_function
-    class CorruptFileError < RuntimeError; end
 
     def file_header_to_file_ext(file)
       case File.read(file.path, 16)
@@ -22,6 +21,14 @@ class UploadService
       else
         "bin"
       end
+    end
+
+    def corrupt?(filename)
+      image = Vips::Image.new_from_file(filename, fail: true)
+      image.stats
+      false
+    rescue Vips::Error
+      true
     end
 
     def calculate_ugoira_dimensions(source_path)
@@ -168,8 +175,6 @@ class UploadService
     end
 
     def automatic_tags(upload, file)
-      return "" unless Danbooru.config.enable_dimension_autotagging
-
       tags = []
       tags << "video_with_sound" if is_video_with_audio?(upload, file)
       tags << "animated_gif" if is_animated_gif?(upload, file)
@@ -181,23 +186,8 @@ class UploadService
       return file if file.present?
       raise "No file or source URL provided" if upload.source_url.blank?
 
-      attempts = 0
-
-      begin
-        download = Downloads::File.new(upload.source_url, upload.referer_url)
-        file, strategy = download.download!
-
-        if !DanbooruImageResizer.validate_shell(file)
-          raise CorruptFileError.new("File is corrupted")
-        end
-      rescue StandardError
-        if attempts == 3
-          raise
-        end
-
-        attempts += 1
-        retry
-      end
+      download = Downloads::File.new(upload.source_url, upload.referer_url)
+      file, strategy = download.download!
 
       if download.data[:ugoira_frame_data].present?
         upload.context = {

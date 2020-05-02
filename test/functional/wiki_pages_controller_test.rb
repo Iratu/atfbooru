@@ -31,6 +31,18 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         assert_response :success
         assert_select "tr td:first-child", text: "abc"
       end
+
+      should "redirect the legacy title param to the show page" do
+        get wiki_pages_path(title: "abc")
+        assert_redirected_to wiki_pages_path(search: { title_normalize: "abc" }, redirect: true)
+      end
+    end
+
+    context "search action" do
+      should "work" do
+        get search_wiki_pages_path
+        assert_response :success
+      end
     end
 
     context "show action" do
@@ -117,6 +129,11 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         get show_or_new_wiki_pages_path, params: { title: "what" }
         assert_redirected_to wiki_page_path("what")
       end
+
+      should "redirect when given a blank title" do
+        get show_or_new_wiki_pages_path
+        assert_redirected_to new_wiki_page_path
+      end
     end
 
     context "new action" do
@@ -133,11 +150,8 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "edit action" do
       should "render" do
-        as_user do
-          @wiki_page = create(:wiki_page)
-        end
-
-        get_auth wiki_page_path(@wiki_page), @mod
+        @wiki_page = as(@user) { create(:wiki_page) }
+        get_auth edit_wiki_page_path(@wiki_page), @user
         assert_response :success
       end
     end
@@ -146,6 +160,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
       should "create a wiki_page" do
         assert_difference("WikiPage.count", 1) do
           post_auth wiki_pages_path, @user, params: {:wiki_page => {:title => "abc", :body => "abc"}}
+          assert_redirected_to(wiki_page_path(WikiPage.last))
         end
       end
     end
@@ -155,13 +170,45 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         as_user do
           @tag = create(:tag, name: "foo", post_count: 42)
           @wiki_page = create(:wiki_page, title: "foo")
+          @builder = create(:builder_user)
         end
       end
 
       should "update a wiki_page" do
         put_auth wiki_page_path(@wiki_page), @user, params: {:wiki_page => {:body => "xyz"}}
-        @wiki_page.reload
-        assert_equal("xyz", @wiki_page.body)
+
+        assert_redirected_to wiki_page_path(@wiki_page)
+        assert_equal("xyz", @wiki_page.reload.body)
+      end
+
+      should "not allow members to edit locked wiki pages" do
+        as(@user) { @wiki_page.update!(is_locked: true) }
+        put_auth wiki_page_path(@wiki_page), @user, params: { wiki_page: { body: "xyz" }}
+
+        assert_response 403
+        assert_not_equal("xyz", @wiki_page.reload.body)
+      end
+
+      should "allow builders to edit locked wiki pages" do
+        as(@builder) { @wiki_page.update!(is_locked: true) }
+        put_auth wiki_page_path(@wiki_page), @builder, params: { wiki_page: { body: "xyz" }}
+
+        assert_redirected_to wiki_page_path(@wiki_page)
+        assert_equal("xyz", @wiki_page.reload.body)
+      end
+
+      should "not allow members to edit the is_locked flag" do
+        put_auth wiki_page_path(@wiki_page), @user, params: { wiki_page: { is_locked: true }}
+
+        assert_response 403
+        assert_equal(false, @wiki_page.reload.is_locked)
+      end
+
+      should "allow builders to edit the is_locked flag" do
+        put_auth wiki_page_path(@wiki_page), @builder, params: { wiki_page: { is_locked: true }}
+
+        assert_redirected_to wiki_page_path(@wiki_page)
+        assert_equal(true, @wiki_page.reload.is_locked)
       end
 
       should "warn about renaming a wiki page with a non-empty tag" do

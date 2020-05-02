@@ -1,17 +1,24 @@
-class UserMailer < ActionMailer::Base
+class UserMailer < ApplicationMailer
   add_template_helper ApplicationHelper
   add_template_helper UsersHelper
-  default :from => Danbooru.config.contact_email, :content_type => "text/html"
 
   def dmail_notice(dmail)
     @dmail = dmail
-    mail(:to => "#{dmail.to.name} <#{dmail.to.email}>", :subject => "#{Danbooru.config.app_name} - Message received from #{dmail.from.name}")
+    mail to: dmail.to.email_with_name, subject: "#{Danbooru.config.app_name} - Message received from #{dmail.from.name}"
   end
 
-  def forum_notice(user, forum_topic, forum_posts)
+  def password_reset(user)
     @user = user
-    @forum_topic = forum_topic
-    @forum_posts = forum_posts
-    mail(:to => "#{user.name} <#{user.email}>", :subject => "#{Danbooru.config.app_name} forum topic #{forum_topic.title} updated")
+    mail to: @user.email_with_name, subject: "#{Danbooru.config.app_name} password reset request"
+  end
+
+  def email_change_confirmation(user)
+    @user = user
+    mail to: @user.email_with_name, subject: "Confirm your email address"
+  end
+
+  def welcome_user(user)
+    @user = user
+    mail to: @user.email_with_name, subject: "Welcome to #{Danbooru.config.app_name}! Confirm your email address"
   end
 end

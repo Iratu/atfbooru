@@ -57,28 +57,6 @@ class TagAliasTest < ActiveSupport::TestCase
       end
     end
 
-    context "#estimate_update_count" do
-      setup do
-        FactoryBot.create(:post, tag_string: "aaa bbb ccc")
-        @alias = FactoryBot.create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", status: "pending")
-      end
-
-      should "get the right count" do
-        assert_equal(1, @alias.estimate_update_count)
-      end
-    end
-
-    context "#update_notice" do
-      setup do
-        @forum_topic = FactoryBot.create(:forum_topic)
-      end
-
-      should "update the cache" do
-        FactoryBot.create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: true, forum_topic: @forum_topic)
-        assert_equal(@forum_topic.id, Cache.get("tcn:aaa"))
-      end
-    end
-
     context "#reject!" do
       should "not be blocked by validations" do
         ta1 = create(:tag_alias, antecedent_name: "kitty", consequent_name: "kitten", status: "active")
@@ -103,12 +81,12 @@ class TagAliasTest < ActiveSupport::TestCase
         ti = FactoryBot.build(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", skip_secondary_validations: false)
 
         assert(ti.invalid?)
-        assert_includes(ti.errors[:base], "The tag alias [[aaa]] -> [[bbb]]  has conflicting wiki pages. [[bbb]] should be updated to include information from [[aaa]] if necessary.")
+        assert_includes(ti.errors[:base], "The tag alias [[aaa]] -> [[bbb]] has conflicting wiki pages. [[bbb]] should be updated to include information from [[aaa]] if necessary.")
       end
     end
 
     should "populate the creator information" do
-      ta = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
+      ta = create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", creator: CurrentUser.user)
       assert_equal(CurrentUser.user.id, ta.creator_id)
     end
 
@@ -160,6 +138,16 @@ class TagAliasTest < ActiveSupport::TestCase
       end
     end
 
+    should "move existing wikis" do
+      wiki = create(:wiki_page, title: "aaa")
+      ta = create(:tag_alias, antecedent_name: "aaa", consequent_name: "bbb", status: "pending")
+
+      ta.approve!(approver: @admin)
+      perform_enqueued_jobs
+
+      assert_equal("bbb", wiki.reload.title)
+    end
+
     should "move existing aliases" do
       ta1 = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :status => "pending")
       ta2 = FactoryBot.create(:tag_alias, :antecedent_name => "bbb", :consequent_name => "ccc", :status => "pending")
@@ -181,84 +169,40 @@ class TagAliasTest < ActiveSupport::TestCase
       assert_equal("ccc", ti.reload.consequent_name)
     end
 
-    should "not push the antecedent's category to the consequent if the antecedent is general" do
-      tag1 = FactoryBot.create(:tag, :name => "aaa")
-      tag2 = FactoryBot.create(:tag, :name => "bbb", :category => 1)
-      ta = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
-      tag2.reload
-      assert_equal(1, tag2.category)
-    end
-
-    should "push the antecedent's category to the consequent" do
-      tag1 = FactoryBot.create(:tag, :name => "aaa", :category => 1)
-      tag2 = FactoryBot.create(:tag, :name => "bbb", :category => 0)
-      ta = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb")
+    should "push the consequent's category to the antecedent if the antecedent is general" do
+      tag1 = create(:tag, name: "general", category: 0)
+      tag2 = create(:tag, name: "artist", category: 1)
+      ta = create(:tag_alias, antecedent_name: "general", consequent_name: "artist")
 
       ta.approve!(approver: @admin)
       perform_enqueued_jobs
 
+      assert_equal(1, tag1.reload.category)
       assert_equal(1, tag2.reload.category)
     end
 
-    context "with an associated forum topic" do
-      setup do
-        @admin = FactoryBot.create(:admin_user)
-        CurrentUser.scoped(@admin) do
-          @topic = FactoryBot.create(:forum_topic, :title => "Tag alias: aaa -> bbb")
-          @post = FactoryBot.create(:forum_post, :topic_id => @topic.id, :body => TagAliasRequest.command_string("aaa", "bbb"))
-          @alias = FactoryBot.create(:tag_alias, :antecedent_name => "aaa", :consequent_name => "bbb", :forum_topic => @topic, :forum_post => @post, :status => "pending")
-        end
-      end
+    should "push the antecedent's category to the consequent if the consequent is general" do
+      tag1 = create(:tag, name: "artist", category: 1)
+      tag2 = create(:tag, name: "general", category: 0)
+      ta = create(:tag_alias, antecedent_name: "artist", consequent_name: "general")
 
-      context "and conflicting wiki pages" do
-        setup do
-          CurrentUser.scoped(@admin) do
-            @wiki1 = FactoryBot.create(:wiki_page, :title => "aaa")
-            @wiki2 = FactoryBot.create(:wiki_page, :title => "bbb")
-            @alias.approve!(approver: @admin)
-            perform_enqueued_jobs
-          end
-        end
+      ta.approve!(approver: @admin)
+      perform_enqueued_jobs
 
-        should "update the forum topic when approved" do
-          assert_equal("[APPROVED] Tag alias: aaa -> bbb", @topic.reload.title)
-          assert_match(/The tag alias .* been approved/m, @topic.posts.second.body)
-        end
+      assert_equal(1, tag1.reload.category)
+      assert_equal(1, tag2.reload.category)
+    end
 
-        should "warn about conflicting wiki pages when approved" do
-          assert_match(/has conflicting wiki pages/m, @topic.posts.third.body)
-        end
-      end
+    should "not change either tag category when neither the antecedent or consequent are general" do
+      tag1 = create(:tag, name: "character", category: 4)
+      tag2 = create(:tag, name: "copyright", category: 3)
+      ta = create(:tag_alias, antecedent_name: "character", consequent_name: "copyright")
 
-      should "update the topic when processed" do
-        assert_difference("ForumPost.count") do
-          @alias.approve!(approver: @admin)
-          perform_enqueued_jobs
-        end
-      end
+      ta.approve!(approver: @admin)
+      perform_enqueued_jobs
 
-      should "update the parent post" do
-        previous = @post.body
-        @alias.approve!(approver: @admin)
-        perform_enqueued_jobs
-        assert_not_equal(previous, @post.reload.body)
-      end
-
-      should "update the topic when rejected" do
-        assert_difference("ForumPost.count") do
-          @alias.reject!
-        end
-      end
-
-      should "update the topic when failed" do
-        @alias.stubs(:sleep).returns(true)
-        @alias.stubs(:update_posts).raises(Exception, "oh no")
-        @alias.process!
-
-        assert_equal("[FAILED] Tag alias: aaa -> bbb", @topic.reload.title)
-        assert_match(/error: oh no/, @alias.status)
-        assert_match(/The tag alias .* failed during processing/, @topic.posts.last.body)
-      end
+      assert_equal(4, tag1.reload.category)
+      assert_equal(3, tag2.reload.category)
     end
   end
 end

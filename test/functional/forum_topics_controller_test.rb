@@ -7,8 +7,9 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
       @other_user = create(:user)
       @mod = create(:moderator_user)
 
-      as_user do
-        @forum_topic = create(:forum_topic, :title => "my forum topic", :original_post_attributes => {:body => "xxx"})
+      as(@user) do
+        @forum_topic = create(:forum_topic, creator: @user, title: "my forum topic")
+        @forum_post = create(:forum_post, creator: @user, topic: @forum_topic, body: "xxx")
       end
     end
 
@@ -28,9 +29,7 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
         @gold_user = create(:gold_user)
 
         # An open topic should bump...
-        as(@gold_user) do
-          @open_topic = create(:forum_topic)
-        end
+        @open_topic = as(@gold_user) { create(:forum_topic, creator: @gold_user) }
         @gold_user.reload
         as(@gold_user) do
           assert(@gold_user.has_forum_been_updated?)
@@ -47,9 +46,7 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
         end
 
         # Then adding an unread private topic should not bump.
-        as(@mod) do
-          create(:forum_post, :topic_id => @forum_topic.id)
-        end
+        as(@mod) { create(:forum_post, topic: @forum_topic, creator: @mod) }
         @gold_user.reload
         as(@gold_user) do
           assert_equal(false, @gold_user.has_forum_been_updated?)
@@ -91,14 +88,19 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
     context "index action" do
       setup do
         as_user do
-          @topic1 = create(:forum_topic, :is_sticky => true, :original_post_attributes => {:body => "xxx"})
-          @topic2 = create(:forum_topic, :original_post_attributes => {:body => "xxx"})
+          @topic1 = create(:forum_topic, is_sticky: true, creator: @user)
+          @topic2 = create(:forum_topic, creator: @user)
+          @post1 = create(:forum_post, topic: @topic1, creator: @user, body: "xxx")
+          @post2 = create(:forum_post, topic: @topic2, creator: @user, body: "xxx")
         end
       end
 
-      should "list all forum topics" do
+      should "list public forum topics for members" do
         get forum_topics_path
+
         assert_response :success
+        assert_select "a.forum-post-link", count: 1, text: @topic1.title
+        assert_select "a.forum-post-link", count: 1, text: @topic2.title
       end
 
       should "not list stickied topics first for JSON responses" do
@@ -110,6 +112,26 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
       should "render for atom feed" do
         get forum_topics_path, params: {:format => :atom}
         assert_response :success
+      end
+
+      context "with private topics" do
+        should "not show private topics to unprivileged users" do
+          as(@user) { @topic2.update!(min_level: User::Levels::MODERATOR) }
+          get forum_topics_path
+
+          assert_response :success
+          assert_select "a.forum-post-link", count: 1, text: @topic1.title
+          assert_select "a.forum-post-link", count: 0, text: @topic2.title
+        end
+
+        should "show private topics to privileged users" do
+          as(@user) { @topic2.update!(min_level: User::Levels::MODERATOR) }
+          get_auth forum_topics_path, @mod
+
+          assert_response :success
+          assert_select "a.forum-post-link", count: 1, text: @topic1.title
+          assert_select "a.forum-post-link", count: 1, text: @topic2.title
+        end
       end
 
       context "with search conditions" do
@@ -127,6 +149,51 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
           assert_select "a.forum-post-link", count: 0, text: @forum_topic.title
           assert_select "a.forum-post-link", count: 0, text: @topic1.title
           assert_select "a.forum-post-link", count: 0, text: @topic2.title
+        end
+      end
+
+      context "when listing topics" do
+        should "always show topics as read for anonymous users" do
+          get forum_topics_path
+          assert_select 'tr[data-is-read="false"]', count: 0
+        end
+
+        should "show topics as read after viewing them" do
+          get_auth forum_topics_path, @user
+          assert_response :success
+          assert_select 'tr[data-is-read="false"]', count: 3
+
+          get_auth forum_topic_path(@forum_topic.id), @user
+          assert_response :success
+
+          get_auth forum_topics_path, @user
+          assert_response :success
+        end
+
+        should "show topics as read after marking all as read" do
+          get_auth forum_topics_path, @user
+          assert_response :success
+          assert_select 'tr[data-is-read="false"]', count: 3
+
+          post_auth mark_all_as_read_forum_topics_path, @user
+          assert_response 302
+
+          get_auth forum_topics_path, @user
+          assert_response :success
+          assert_select 'tr[data-is-read="false"]', count: 0
+        end
+
+        should "show topics on page 2 as read after marking all as read" do
+          get_auth forum_topics_path(page: 2, limit: 1), @user
+          assert_response :success
+          assert_select 'tr[data-is-read="false"]', count: 1
+
+          post_auth mark_all_as_read_forum_topics_path, @user
+          assert_response 302
+
+          get_auth forum_topics_path(page: 2, limit: 1), @user
+          assert_response :success
+          assert_select 'tr[data-is-read="false"]', count: 0
         end
       end
     end
@@ -158,11 +225,43 @@ class ForumTopicsControllerTest < ActionDispatch::IntegrationTest
     context "create action" do
       should "create a new forum topic and post" do
         assert_difference(["ForumPost.count", "ForumTopic.count"], 1) do
-          post_auth forum_topics_path, @user, params: {:forum_topic => {:title => "bababa", :original_post_attributes => {:body => "xaxaxa"}}}
+          post_auth forum_topics_path, @user, params: { forum_topic: { title: "bababa", original_post_attributes: { body: "xaxaxa" }}}
         end
 
         forum_topic = ForumTopic.last
         assert_redirected_to(forum_topic_path(forum_topic))
+      end
+    end
+
+    context "update action" do
+      should "allow mods to lock forum topics" do
+        put_auth forum_topic_path(@forum_topic), @mod, params: { forum_topic: { is_locked: true }}
+
+        assert_redirected_to forum_topic_path(@forum_topic)
+        assert_equal(true, @forum_topic.reload.is_locked)
+      end
+
+      should "allow users to update their own topics" do
+        put_auth forum_topic_path(@forum_topic), @user, params: { forum_topic: { title: "test" }}
+
+        assert_redirected_to forum_topic_path(@forum_topic)
+        assert_equal("test", @forum_topic.reload.title)
+      end
+
+      should "not allow users to update locked topics" do
+        as(@mod) { @forum_topic.update!(is_locked: true) }
+        put_auth forum_topic_path(@forum_topic), @user, params: { forum_topic: { title: "test" }}
+
+        assert_response 403
+        assert_not_equal("test", @forum_topic.reload.title)
+      end
+
+      should "allow mods to update locked topics" do
+        as(@mod) { @forum_topic.update!(is_locked: true) }
+        put_auth forum_topic_path(@forum_topic), @mod, params: { forum_topic: { title: "test" }}
+
+        assert_redirected_to forum_topic_path(@forum_topic)
+        assert_equal("test", @forum_topic.reload.title)
       end
     end
 

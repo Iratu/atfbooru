@@ -1,5 +1,6 @@
 module TagRelationshipRetirementService
   module_function
+
   THRESHOLD = 2.years
 
   def forum_topic_title
@@ -21,8 +22,9 @@ module TagRelationshipRetirementService
   def forum_topic
     topic = ForumTopic.where(title: forum_topic_title).first
     if topic.nil?
-      topic = CurrentUser.as_system do
-        ForumTopic.create(title: forum_topic_title, category_id: 1, original_post_attributes: {body: forum_topic_body})
+      CurrentUser.as(User.system) do
+        topic = ForumTopic.create!(creator: User.system, title: forum_topic_title, category_id: 1)
+        forum_post = ForumPost.create!(creator: User.system, body: forum_topic_body, topic: topic)
       end
     end
     return topic
@@ -61,6 +63,6 @@ module TagRelationshipRetirementService
   end
 
   def is_unused?(name)
-    return !Post.tag_match("status:any #{name}").where("created_at > ?", THRESHOLD.ago).exists?
+    !Post.raw_tag_match(name).where("created_at > ?", THRESHOLD.ago).exists?
   end
 end

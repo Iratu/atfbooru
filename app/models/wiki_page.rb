@@ -1,5 +1,5 @@
 class WikiPage < ApplicationRecord
-  class RevertError < Exception; end
+  class RevertError < StandardError; end
 
   META_WIKIS = ["list_of_", "tag_group:", "pool_group:", "howto:", "about:", "help:", "template:"]
 
@@ -11,15 +11,15 @@ class WikiPage < ApplicationRecord
   validates_presence_of :title
   validates_presence_of :body, :unless => -> { is_deleted? || other_names.present? }
   validate :validate_rename
-  validate :validate_not_locked
 
   array_attribute :other_names
   has_one :tag, :foreign_key => "name", :primary_key => "title"
-  has_one :artist, -> {where(:is_active => true)}, :foreign_key => "name", :primary_key => "title"
+  has_one :artist, -> { active }, foreign_key: "name", primary_key: "title"
   has_many :versions, -> {order("wiki_page_versions.id ASC")}, :class_name => "WikiPageVersion", :dependent => :destroy
   has_many :dtext_links, as: :model, dependent: :destroy
 
   api_attributes including: [:category_name]
+  deletable
 
   module SearchMethods
     def find_by_id_or_title(id)
@@ -34,23 +34,15 @@ class WikiPage < ApplicationRecord
       where(title: normalize_title(title))
     end
 
-    def active
-      where("is_deleted = false")
-    end
-
-    def recent
-      order("updated_at DESC").limit(25)
-    end
-
     def other_names_include(name)
-      name = normalize_other_name(name).downcase
-      subquery = WikiPage.from("unnest(other_names) AS other_name").where("lower(other_name) = ?", name)
+      name = normalize_other_name(name)
+      subquery = WikiPage.from("unnest(other_names) AS other_name").where_iequals("other_name", name)
       where(id: subquery)
     end
 
     def other_names_match(name)
       if name =~ /\*/
-        subquery = WikiPage.from("unnest(other_names) AS other_name").where("other_name ILIKE ?", name.to_escaped_for_sql_like)
+        subquery = WikiPage.from("unnest(other_names) AS other_name").where_ilike("other_name", name)
         where(id: subquery)
       else
         other_names_include(name)
@@ -72,11 +64,11 @@ class WikiPage < ApplicationRecord
     def search(params = {})
       q = super
 
-      q = q.search_attributes(params, :is_locked, :is_deleted, :body)
+      q = q.search_attributes(params, :is_locked, :is_deleted, :body, :title, :other_names)
       q = q.text_attribute_matches(:body, params[:body_matches], index_column: :body_index, ts_config: "danbooru")
 
-      if params[:title].present?
-        q = q.where_like(:title, normalize_title(params[:title]))
+      if params[:title_normalize].present?
+        q = q.where_like(:title, normalize_title(params[:title_normalize]))
       end
 
       if params[:other_names_match].present?
@@ -101,7 +93,6 @@ class WikiPage < ApplicationRecord
         q = q.where("other_names is null or other_names = '{}'")
       end
 
-      params[:order] ||= params.delete(:sort)
       case params[:order]
       when "title"
         q = q.order("title")
@@ -115,13 +106,14 @@ class WikiPage < ApplicationRecord
     end
   end
 
-  extend SearchMethods
-
-  def validate_not_locked
-    if is_locked? && !CurrentUser.is_builder?
-      errors.add(:is_locked, "and cannot be updated")
+  module ApiMethods
+    def html_data_attributes
+      super + [:category_name]
     end
   end
+
+  extend SearchMethods
+  include ApiMethods
 
   def validate_rename
     return unless title_changed?
@@ -171,7 +163,7 @@ class WikiPage < ApplicationRecord
   end
 
   def category_name
-    Tag.category_for(title)
+    tag&.category
   end
 
   def pretty_title
@@ -230,23 +222,11 @@ class WikiPage < ApplicationRecord
     self.dtext_links = DtextLink.new_from_dtext(body)
   end
 
-  def post_set
-    @post_set ||= PostSets::WikiPage.new(title, 1, 4)
-  end
-
-  def presenter
-    @presenter ||= WikiPagePresenter.new(self)
-  end
-
   def tags
     titles = DText.parse_wiki_titles(body).uniq
     tags = Tag.nonempty.where(name: titles).pluck(:name)
     tags += TagAlias.active.where(antecedent_name: titles).pluck(:antecedent_name)
     TagAlias.to_aliased(titles & tags)
-  end
-
-  def visible?
-    artist.blank? || !artist.is_banned? || CurrentUser.is_builder?
   end
 
   def to_param
@@ -255,5 +235,9 @@ class WikiPage < ApplicationRecord
     else
       title
     end
+  end
+
+  def self.available_includes
+    [:tag, :artist, :dtext_links]
   end
 end

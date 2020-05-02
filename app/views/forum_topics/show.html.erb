@@ -1,9 +1,16 @@
+<% page_title @forum_topic.title %>
+<% meta_description(DText.excerpt(@forum_topic.original_post&.body)) %>
+
+<% atom_feed_tag(@forum_topic.title, forum_topic_url(@forum_topic.id, format: :atom)) %>
+<%= render "meta_links", collection: @forum_posts %>
+<%= render "secondary_links" %>
+
 <div id="c-forum-topics">
   <div id="a-show">
     <h1>
       <%= @forum_topic.title %>
 
-      <% if @forum_topic.min_level >= User::Levels::MODERATOR %>
+      <% if @forum_topic.is_private? %>
         <span class="level-topic">(<%= User.level_string(@forum_topic.min_level).downcase %>+ only)</span>
       <% end %>
 
@@ -20,38 +27,16 @@
       </div>
     <% end %>
 
-    <%= render "forum_posts/listing", forum_posts: @forum_posts, original_forum_post_id: @forum_topic.original_post.id, dtext_data: DText.preprocess(@forum_posts.map(&:body)) %>
+    <%= render "forum_posts/listing", forum_posts: @forum_posts, original_forum_post_id: @forum_topic.original_post&.id, dtext_data: DText.preprocess(@forum_posts.map(&:body)), moderation_reports: @forum_topic.moderation_reports.visible(CurrentUser.user).recent %>
 
-    <% if CurrentUser.is_member? %>
-      <% if CurrentUser.is_moderator? || !@forum_topic.is_locked? %>
-        <p><%= link_to "Post reply", new_forum_post_path(topic_id: @forum_topic.id), id: "new-response-link" %></p>
+    <% if policy(ForumPost.new(topic: @forum_topic)).create? %>
+      <p><%= link_to "Post reply", new_forum_post_path(topic_id: @forum_topic.id), id: "new-response-link" %></p>
 
-        <div style="display: none;" id="topic-response">
-          <%= render "forum_posts/partials/new/form", :forum_post => ForumPost.new(:topic_id => @forum_topic.id) %>
-        </div>
-      <% end %>
+      <div style="display: none;" id="topic-response">
+        <%= render "forum_posts/partials/new/form", forum_post: ForumPost.new(topic_id: @forum_topic.id) %>
+      </div>
     <% end %>
 
     <%= numbered_paginator(@forum_posts) %>
   </div>
 </div>
-
-<%= render "secondary_links" %>
-
-<% content_for(:page_title) do %>
-  <%= @forum_topic.title %> - Forum - <%= Danbooru.config.app_name %>
-<% end %>
-
-<% content_for(:html_header) do %>
-  <%= auto_discovery_link_tag(:atom, {format: :atom}, {title: @forum_topic.title}) %>
-
-  <script>
-    $(function() {
-      $("#new-response-link").click(function(e) {
-        $("#topic-response").show();
-        document.body.scrollIntoView(false);
-        e.preventDefault();
-      })
-    });
-  </script>
-<% end %>

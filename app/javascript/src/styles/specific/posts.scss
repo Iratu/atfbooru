@@ -159,7 +159,7 @@ table article.post-preview {
 }
 
 /* Flagged posts have red borders for approvers. */
-body[data-user-can-approve-posts="true"] .post-preview {
+body[data-current-user-can-approve-posts="true"] .post-preview {
   &.post-status-flagged img {
     border-color: var(--preview-flagged-color);
   }
@@ -190,6 +190,11 @@ body[data-user-can-approve-posts="true"] .post-preview {
     border: none;
     margin: 0;
     padding: 5px 5px 10px;
+    max-width: 154px;
+
+    img {
+      white-space: normal;
+    }
   }
 }
 
@@ -335,10 +340,6 @@ div#c-posts {
   }
 
   div#a-show {
-    .active, .pool-selected-true {
-      font-weight: bold;
-    }
-
     #post-info-source {
       word-break: break-all;
     }
@@ -354,13 +355,9 @@ div#c-posts {
       li {
         padding: 0 1em 0 0;
       }
-
-      div.share a {
-        margin: 0;
-      }
     }
 
-    #image-container {
+    .image-container {
       margin: 1em 0 0.5em;
     }
 
@@ -395,6 +392,10 @@ div#c-posts {
         position: relative;
         text-align: center;
         padding: 0 5.5em;
+
+        &[data-selected="true"] {
+          font-weight: bold;
+        }
 
         .prev {
           position: absolute;
@@ -452,6 +453,12 @@ div#c-posts {
   }
 }
 
+body[data-post-current-image-size="large"] .image-view-large-link,
+body[data-post-current-image-size="original"] .image-view-original-link,
+body[data-post-current-image-size="original"] #image-resize-notice {
+  display: none;
+}
+
 div#c-post-versions, div#c-artist-versions {
   div#a-index {
     a {
@@ -492,7 +499,7 @@ div#c-explore-posts {
     margin: 0 0.5em;
   }
 
-  #popular-nav-links {
+  .date-nav-links {
     text-align: center;
   }
 

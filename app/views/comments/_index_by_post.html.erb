@@ -1,10 +1,4 @@
 <div id="p-index-by-post">
-  <% if !CurrentUser.user.is_builder? %>
-    <div style="margin-bottom: 1em;">
-      <h2>Before commenting, read the <%= link_to_wiki "how to comment guide", "howto:comment" %>.</h2>
-    </div>
-  <% end %>
-
   <% if @posts.blank? %>
     <%= render "post_sets/blank" %>
   <% end %>
@@ -22,5 +16,3 @@
 </div>
 
 <%= numbered_paginator(@posts) %>
-
-<% content_for(:html_header, auto_discovery_link_tag(:atom, comments_url(:atom, search: { do_not_bump_post: true }), title: "Comments")) %>

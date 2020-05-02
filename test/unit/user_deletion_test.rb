@@ -6,10 +6,8 @@ class UserDeletionTest < ActiveSupport::TestCase
       should "fail" do
         @user = create(:user)
         @deletion = UserDeletion.new(@user, "wrongpassword")
-
-        assert_raise(UserDeletion::ValidationError) do
-          @deletion.delete!
-        end
+        @deletion.delete!
+        assert_includes(@deletion.errors[:base], "Password is incorrect")
       end
     end
 
@@ -17,23 +15,21 @@ class UserDeletionTest < ActiveSupport::TestCase
       should "fail" do
         @user = create(:admin_user)
         @deletion = UserDeletion.new(@user, "password")
-
-        assert_raise(UserDeletion::ValidationError) do
-          @deletion.delete!
-        end
+        @deletion.delete!
+        assert_includes(@deletion.errors[:base], "Admins cannot delete their account")
       end
     end
   end
 
   context "a valid user deletion" do
     setup do
-      @user = create(:user, email: "ted@danbooru.com")
+      @user = create(:user, name: "foo", email_address: build(:email_address))
       @deletion = UserDeletion.new(@user, "password")
     end
 
     should "blank out the email" do
       @deletion.delete!
-      assert_nil(@user.reload.email)
+      assert_nil(@user.reload.email_address)
     end
 
     should "rename the user" do
@@ -41,9 +37,18 @@ class UserDeletionTest < ActiveSupport::TestCase
       assert_equal("user_#{@user.id}", @user.reload.name)
     end
 
+    should "generate a user name change request" do
+      assert_difference("UserNameChangeRequest.count") do
+        @deletion.delete!
+      end
+
+      assert_equal("foo", UserNameChangeRequest.last.original_name)
+      assert_equal("user_#{@user.id}", UserNameChangeRequest.last.desired_name)
+    end
+
     should "reset the password" do
       @deletion.delete!
-      assert_nil(User.authenticate(@user.name, "password"))
+      assert_equal(false, @user.authenticate_password("password"))
     end
 
     should "remove any favorites" do

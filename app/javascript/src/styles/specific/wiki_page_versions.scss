@@ -1,11 +1,11 @@
 div#c-wiki-page-versions {
   #a-diff {
-    del {
+    ul.wiki-other-names-diff-list li.removed {
       background: var(--wiki-page-versions-diff-del-background);
       text-decoration: none;
     }
 
-    ins {
+    ul.wiki-other-names-diff-list li.added {
       background: var(--wiki-page-versions-diff-ins-background);
       text-decoration: none;
     }

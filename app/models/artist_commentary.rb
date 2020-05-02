@@ -1,5 +1,5 @@
 class ArtistCommentary < ApplicationRecord
-  class RevertError < Exception; end
+  class RevertError < StandardError; end
 
   attr_accessor :remove_commentary_tag, :remove_commentary_request_tag, :remove_commentary_check_tag, :remove_partial_commentary_tag
   attr_accessor :add_commentary_tag, :add_commentary_request_tag, :add_commentary_check_tag, :add_partial_commentary_tag
@@ -11,19 +11,23 @@ class ArtistCommentary < ApplicationRecord
   after_save :create_version
   after_commit :tag_post
 
+  scope :original_absent, -> { where(original_title: "").where(original_description: "") }
+  scope :original_present, -> { where.not(original_title: "").or(where.not(original_description: "")) }
+  scope :translation_absent, -> { where(translated_title: "").where(translated_description: "") }
+  scope :translation_present, -> { where.not(translated_title: "").or(where.not(translated_description: "")) }
+  scope :translated, -> { original_present.translation_present }
+  scope :untranslated, -> { original_present.translation_absent }
+  scope :deleted, -> { original_absent.translation_absent }
+  scope :undeleted, -> { original_present.or(translation_present) }
+
   module SearchMethods
     def text_matches(query)
       query = "*#{query}*" unless query =~ /\*/
-      escaped_query = query.to_escaped_for_sql_like
-      where("original_title ILIKE ? ESCAPE E'\\\\' OR original_description ILIKE ? ESCAPE E'\\\\' OR translated_title ILIKE ? ESCAPE E'\\\\' OR translated_description ILIKE ? ESCAPE E'\\\\'", escaped_query, escaped_query, escaped_query, escaped_query)
-    end
 
-    def deleted
-      where(original_title: "", original_description: "", translated_title: "", translated_description: "")
-    end
-
-    def undeleted
-      where("original_title != '' OR original_description != '' OR translated_title != '' OR translated_description != ''")
+      where_ilike(:original_title, query)
+        .or(where_ilike(:original_description, query))
+        .or(where_ilike(:translated_title, query))
+        .or(where_ilike(:translated_description, query))
     end
 
     def search(params)
@@ -141,4 +145,8 @@ class ArtistCommentary < ApplicationRecord
 
   extend SearchMethods
   include VersionMethods
+
+  def self.available_includes
+    [:post]
+  end
 end

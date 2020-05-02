@@ -3,18 +3,18 @@ class UsersController < ApplicationController
   skip_before_action :api_check
 
   def new
-    @user = User.new
+    @user = authorize User.new
+    @user.email_address = EmailAddress.new
     respond_with(@user)
   end
 
   def edit
-    @user = User.find(params[:id])
-    check_privilege(@user)
+    @user = authorize User.find(params[:id])
     respond_with(@user)
   end
 
   def settings
-    @user = CurrentUser.user
+    @user = authorize CurrentUser.user
 
     if @user.is_anonymous?
       redirect_to login_path(url: settings_path)
@@ -31,24 +31,22 @@ class UsersController < ApplicationController
       return
     end
 
-    @users = User.paginated_search(params)
-    if params[:redirect].to_s.truthy? && @users.one? && User.normalize_name(@users.first.name) == User.normalize_name(params[:search][:name_matches])
-      redirect_to @users.first
-    else
-      respond_with @users
-    end
+    @users = authorize User.paginated_search(params)
+    @users = @users.includes(:inviter) if request.format.html?
+
+    respond_with(@users)
   end
 
   def search
   end
 
   def show
-    @user = User.find(params[:id])
+    @user = authorize User.find(params[:id])
     respond_with(@user, methods: @user.full_attributes)
   end
 
   def profile
-    @user = CurrentUser.user
+    @user = authorize CurrentUser.user
 
     if @user.is_member?
       params[:action] = "show"
@@ -61,31 +59,46 @@ class UsersController < ApplicationController
   end
 
   def create
-    @user = User.new(user_params(:create))
-    if !Danbooru.config.enable_recaptcha? || verify_recaptcha(model: @user)
-      @user.save
-      if @user.errors.empty?
-        session[:user_id] = @user.id
-      else
-        flash[:notice] = "Sign up failed: #{@user.errors.full_messages.join("; ")}"
-      end
-      set_current_user
-      respond_with(@user)
-    else
-      flash[:notice] = "Sign up failed"
-      redirect_to new_user_path
+    requires_verification = IpLookup.new(CurrentUser.ip_addr).is_proxy? || IpBan.hit!(:partial, CurrentUser.ip_addr)
+
+    @user = authorize User.new(
+      last_ip_addr: CurrentUser.ip_addr,
+      requires_verification: requires_verification,
+      name: params[:user][:name],
+      password: params[:user][:password],
+      password_confirmation: params[:user][:password_confirmation]
+    )
+
+    if params[:user][:email].present?
+      @user.email_address = EmailAddress.new(address: params[:user][:email])
     end
+
+    if Danbooru.config.enable_recaptcha? && !verify_recaptcha(model: @user)
+      flash[:notice] = "Sign up failed"
+    elsif @user.email_address&.invalid?(:deliverable)
+      flash[:notice] = "Sign up failed: email address is invalid or doesn't exist"
+      @user.errors[:base] << @user.email_address.errors.full_messages.join("; ")
+    elsif !@user.save
+      flash[:notice] = "Sign up failed: #{@user.errors.full_messages.join("; ")}"
+    else
+      session[:user_id] = @user.id
+      UserMailer.welcome_user(@user).deliver_later if @user.can_receive_email?(require_verification: false)
+      set_current_user
+    end
+
+    respond_with(@user)
   end
 
   def update
-    @user = User.find(params[:id])
-    check_privilege(@user)
-    @user.update(user_params(:update))
+    @user = authorize User.find(params[:id])
+    @user.update(permitted_attributes(@user))
+
     if @user.errors.any?
       flash[:notice] = @user.errors.full_messages.join("; ")
     else
       flash[:notice] = "Settings updated"
     end
+
     respond_with(@user) do |format|
       format.html { redirect_back fallback_location: edit_user_path(@user) }
     end
@@ -98,30 +111,11 @@ class UsersController < ApplicationController
 
   private
 
-  def check_privilege(user)
-    raise User::PrivilegeError unless user.id == CurrentUser.id || CurrentUser.is_admin?
-  end
-
-  def user_params(context)
-    permitted_params = %i[
-      password old_password password_confirmation email
-      comment_threshold default_image_size favorite_tags blacklisted_tags
-      time_zone per_page custom_style theme
-
-      receive_email_notifications always_resize_images enable_post_navigation
-      new_post_navigation_layout enable_privacy_mode
-      enable_sequential_post_navigation hide_deleted_posts style_usernames
-      enable_auto_complete show_deleted_children
-      disable_categorized_saved_searches disable_tagged_filenames
-      disable_cropped_thumbnails disable_mobile_gestures
-      enable_safe_mode disable_responsive_mode disable_post_tooltips
-      enable_recommended_posts opt_out_tracking
-    ]
-
-    permitted_params += [dmail_filter_attributes: %i[id words]]
-    permitted_params << :name if context == :create
-    permitted_params << :level if CurrentUser.is_admin?
-
-    params.require(:user).permit(permitted_params)
+  def item_matches_params(user)
+    if params[:search][:name_matches]
+      User.normalize_name(user.name) == User.normalize_name(params[:search][:name_matches])
+    else
+      true
+    end
   end
 end

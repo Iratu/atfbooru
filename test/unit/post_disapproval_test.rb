@@ -19,9 +19,14 @@ class PostDisapprovalTest < ActiveSupport::TestCase
         @post_2 = FactoryBot.create(:post, :is_pending => true)
       end
 
+      should "not allow blank messages" do
+        @post_disapproval = create(:post_disapproval, post: @post_1, message: "")
+        assert_equal(nil, @post_disapproval.message)
+      end
+
       context "made by alice" do
         setup do
-          @disapproval = PostDisapproval.create(:user => @alice, :post => @post_1)
+          @disapproval = create(:post_disapproval, user: @alice, post: @post_1)
         end
 
         context "when the current user is alice" do
@@ -50,11 +55,9 @@ class PostDisapprovalTest < ActiveSupport::TestCase
 
       context "for a post that has been approved" do
         setup do
-          @post = FactoryBot.create(:post)
+          @post = FactoryBot.create(:post, is_pending: true)
           @user = FactoryBot.create(:user)
-          travel_to(2.months.ago) do
-            @disapproval = PostDisapproval.create(:user => @user, :post => @post)
-          end
+          @disapproval = create(:post_disapproval, user: @user, post: @post, created_at: 2.months.ago)
         end
 
         should "be pruned" do
@@ -66,12 +69,12 @@ class PostDisapprovalTest < ActiveSupport::TestCase
 
       context "when sending dmails" do
         setup do
-          @uploaders = FactoryBot.create_list(:user, 2)
+          @uploaders = FactoryBot.create_list(:user, 2, created_at: 2.weeks.ago)
           @disapprovers = FactoryBot.create_list(:mod_user, 2)
 
           # 2 uploaders, with 2 uploads each, and 2 disapprovals on each upload.
           @uploaders.each do |uploader|
-            FactoryBot.create_list(:post, 2, uploader: uploader).each do |post|
+            FactoryBot.create_list(:post, 2, is_pending: true, uploader: uploader).each do |post|
               FactoryBot.create(:post_disapproval, post: post, user: @disapprovers[0])
               FactoryBot.create(:post_disapproval, post: post, user: @disapprovers[1])
             end

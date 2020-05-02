@@ -6,23 +6,13 @@ class Ban < ApplicationRecord
   after_destroy :create_unban_mod_action
   belongs_to :user
   belongs_to :banner, :class_name => "User"
-  validate :user_is_inferior
   validates_presence_of :reason, :duration
-  before_validation :initialize_banner_id, :on => :create
 
   scope :unexpired, -> { where("bans.expires_at > ?", Time.now) }
   scope :expired, -> { where("bans.expires_at <= ?", Time.now) }
 
   def self.is_banned?(user)
     exists?(["user_id = ? AND expires_at > ?", user.id, Time.now])
-  end
-
-  def self.reason_matches(query)
-    if query =~ /\*/
-      where("lower(bans.reason) LIKE ?", query.mb_chars.downcase.to_escaped_for_sql_like)
-    else
-      where("bans.reason @@ plainto_tsquery(?)", query)
-    end
   end
 
   def self.search(params)
@@ -44,32 +34,17 @@ class Ban < ApplicationRecord
     q
   end
 
-  def self.prune!
-    expired.includes(:user).find_each do |ban|
-      ban.user.unban! if ban.user.ban_expired?
+  module ApiMethods
+    def html_data_attributes
+      super + [:expired?]
     end
   end
 
-  def initialize_banner_id
-    self.banner_id = CurrentUser.id if self.banner_id.blank?
-  end
+  include ApiMethods
 
-  def user_is_inferior
-    if user
-      if user.is_admin?
-        errors[:base] << "You can never ban an admin."
-        false
-      elsif user.is_moderator? && banner.is_admin?
-        true
-      elsif user.is_moderator?
-        errors[:base] << "Only admins can ban moderators."
-        false
-      elsif banner.is_admin? || banner.is_moderator?
-        true
-      else
-        errors[:base] << "No one else can ban."
-        false
-      end
+  def self.prune!
+    expired.includes(:user).find_each do |ban|
+      ban.user.unban! if ban.user.ban_expired?
     end
   end
 
@@ -101,7 +76,7 @@ class Ban < ApplicationRecord
   end
 
   def expired?
-    expires_at < Time.now
+    persisted? && expires_at < Time.now
   end
 
   def create_feedback
@@ -114,5 +89,9 @@ class Ban < ApplicationRecord
 
   def create_unban_mod_action
     ModAction.log(%{Unbanned <@#{user_name}>}, :user_unban)
+  end
+
+  def self.available_includes
+    [:user, :banner]
   end
 end

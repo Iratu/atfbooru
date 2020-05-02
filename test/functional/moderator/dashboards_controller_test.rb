@@ -8,7 +8,6 @@ module Moderator
           @user = create(:gold_user)
         end
         @admin = create(:admin_user)
-        Danbooru.config.stubs(:member_comment_time_threshold).returns(1.week.from_now)
       end
 
       context "show action" do
@@ -127,14 +126,10 @@ module Moderator
         end
 
         context "for appeals" do
-          setup do
-            as(@user) do
-              @post = create(:post, :is_deleted => true)
-              @post.appeal!("blah")
-            end
-          end
-
           should "render" do
+            @post = create(:post, is_deleted: true)
+            @appeal = create(:post_appeal, post: @post)
+
             get_auth moderator_dashboard_path, @admin
             assert_response :success
           end

@@ -33,10 +33,6 @@ module TestHelpers
     CurrentUser.as(@user, &block)
   end
 
-  def as_admin(&block)
-    CurrentUser.as_admin(&block)
-  end
-
   def load_pixiv_tokens!
     if ENV["DANBOORU_PERSIST_PIXIV_SESSION"] && Cache.get("pixiv-papi-access-token")
       Cache.put("pixiv-papi-access-token", Thread.current[:pixiv_papi_access_token])
@@ -57,20 +53,22 @@ end
 class ActiveSupport::TestCase
   include ActiveJob::TestHelper
   include FactoryBot::Syntax::Methods
-  include PostArchiveTestHelper
-  include PoolArchiveTestHelper
+  extend PostArchiveTestHelper
+  extend PoolArchiveTestHelper
   include ReportbooruHelper
   include DownloadTestHelper
   include IqdbTestHelper
   include UploadTestHelper
   include TestHelpers
 
+  mock_post_version_service!
+  mock_pool_version_service!
+
   setup do
     Socket.stubs(:gethostname).returns("www.example.com")
     mock_popular_search_service!
     mock_missed_search_service!
     WebMock.allow_net_connect!
-    Danbooru.config.stubs(:enable_sock_puppet_validation?).returns(false)
 
     storage_manager = StorageManager::Local.new(base_dir: "#{Rails.root}/public/data/test")
     Danbooru.config.stubs(:storage_manager).returns(storage_manager)
@@ -84,9 +82,12 @@ class ActiveSupport::TestCase
 end
 
 class ActionDispatch::IntegrationTest
-  include PostArchiveTestHelper
-  include PoolArchiveTestHelper
   include TestHelpers
+  extend PostArchiveTestHelper
+  extend PoolArchiveTestHelper
+
+  mock_post_version_service!
+  mock_pool_version_service!
 
   def method_authenticated(method_name, url, user, options)
     post session_path, params: { name: user.name, password: user.password }
@@ -112,7 +113,6 @@ class ActionDispatch::IntegrationTest
   def setup
     super
     Socket.stubs(:gethostname).returns("www.example.com")
-    Danbooru.config.stubs(:enable_sock_puppet_validation?).returns(false)
 
     ActionDispatch::IntegrationTest.register_encoder :xml, response_parser: ->(body) { Nokogiri.XML(body) }
   end

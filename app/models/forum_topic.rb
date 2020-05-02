@@ -11,12 +11,15 @@ class ForumTopic < ApplicationRecord
     Admin: User::Levels::ADMIN
   }
 
-  belongs_to_creator
+  belongs_to :creator, class_name: "User"
   belongs_to_updater
-  has_many :posts, -> {order("forum_posts.id asc")}, :class_name => "ForumPost", :foreign_key => "topic_id", :dependent => :destroy
-  has_one :original_post, -> {order("forum_posts.id asc")}, class_name: "ForumPost", foreign_key: "topic_id", inverse_of: :topic
-  has_many :subscriptions, :class_name => "ForumSubscription"
-  before_validation :initialize_is_deleted, :on => :create
+  has_many :forum_posts, foreign_key: "topic_id", dependent: :destroy, inverse_of: :topic
+  has_many :forum_topic_visits
+  has_one :forum_topic_visit_by_current_user, -> { where(user_id: CurrentUser.id) }, class_name: "ForumTopicVisit"
+  has_many :moderation_reports, through: :forum_posts
+  has_one :original_post, -> { order(id: :asc) }, class_name: "ForumPost", foreign_key: "topic_id", inverse_of: :topic
+  has_many :bulk_update_requests, :foreign_key => "forum_topic_id"
+
   validates_presence_of :title
   validates_associated :original_post
   validates_inclusion_of :category_id, :in => CATEGORIES.keys
@@ -27,6 +30,14 @@ class ForumTopic < ApplicationRecord
   after_save(:if => ->(rec) {rec.is_locked? && rec.saved_change_to_is_locked?}) do |rec|
     ModAction.log("locked forum topic ##{id} (title: #{title})", :forum_topic_lock)
   end
+
+  deletable
+
+  scope :public_only, -> { where(min_level: MIN_LEVELS[:None]) }
+  scope :private_only, -> { where.not(min_level: MIN_LEVELS[:None]) }
+  scope :pending, -> { where(id: BulkUpdateRequest.has_topic.pending.select(:forum_topic_id)) }
+  scope :approved, -> { where(category_id: 1).where(id: BulkUpdateRequest.approved.has_topic.select(:forum_topic_id)).where.not(id: BulkUpdateRequest.has_topic.pending.or(BulkUpdateRequest.has_topic.rejected).select(:forum_topic_id)) }
+  scope :rejected, -> { where(category_id: 1).where(id: BulkUpdateRequest.rejected.has_topic.select(:forum_topic_id)).where.not(id: BulkUpdateRequest.has_topic.pending.or(BulkUpdateRequest.has_topic.approved).select(:forum_topic_id)) }
 
   module CategoryMethods
     extend ActiveSupport::Concern
@@ -47,12 +58,21 @@ class ForumTopic < ApplicationRecord
   end
 
   module SearchMethods
-    def active
-      where("is_deleted = false")
+    def visible(user)
+      where("min_level <= ?", user.level)
     end
 
-    def permitted
-      where("min_level <= ?", CurrentUser.level)
+    def read_by_user(user)
+      last_forum_read_at = user.last_forum_read_at || "2000-01-01".to_time
+
+      read_topics = user.visited_forum_topics.where("forum_topic_visits.last_read_at >= forum_topics.updated_at")
+      old_topics = where("? >= forum_topics.updated_at", last_forum_read_at)
+
+      where(id: read_topics).or(where(id: old_topics))
+    end
+
+    def unread_by_user(user)
+      where.not(id: ForumTopic.read_by_user(user))
     end
 
     def sticky_first
@@ -65,12 +85,27 @@ class ForumTopic < ApplicationRecord
 
     def search(params)
       q = super
-      q = q.permitted
       q = q.search_attributes(params, :creator, :updater, :is_sticky, :is_locked, :is_deleted, :category_id, :title, :response_count)
       q = q.text_attribute_matches(:title, params[:title_matches], index_column: :text_index)
 
-      if params[:mod_only].present?
-        q = q.where("min_level >= ?", MIN_LEVELS[:Moderator])
+      if params[:is_private].to_s.truthy?
+        q = q.private_only
+      elsif params[:is_private].to_s.falsy?
+        q = q.public_only
+      end
+
+      if params[:status] == "pending"
+        q = q.pending
+      elsif params[:status] == "approved"
+        q = q.approved
+      elsif params[:status] == "rejected"
+        q = q.rejected
+      end
+
+      if params[:is_read].to_s.truthy?
+        q = q.read_by_user(CurrentUser.user)
+      elsif params[:is_read].to_s.falsy?
+        q = q.unread_by_user(CurrentUser.user)
       end
 
       case params[:order]
@@ -80,21 +115,15 @@ class ForumTopic < ApplicationRecord
         q = q.apply_default_order(params)
       end
 
+      unless params[:is_deleted].present?
+        q = q.active
+      end
+
       q
     end
   end
 
   module VisitMethods
-    def read_by?(user = nil)
-      user ||= CurrentUser.user
-
-      if user.last_forum_read_at && updated_at <= user.last_forum_read_at
-        return true
-      end
-
-      ForumTopicVisit.where("user_id = ? and forum_topic_id = ? and last_read_at >= ?", user.id, id, updated_at).exists?
-    end
-
     def mark_as_read!(user = CurrentUser.user)
       return if user.is_anonymous?
 
@@ -105,39 +134,32 @@ class ForumTopic < ApplicationRecord
         ForumTopicVisit.create(:user_id => user.id, :forum_topic_id => id, :last_read_at => updated_at)
       end
 
-      has_unread_topics =
-        ForumTopic
-        .permitted
-        .active
-        .where("forum_topics.updated_at >= ?", user.last_forum_read_at)
-        .joins("left join forum_topic_visits on (forum_topic_visits.forum_topic_id = forum_topics.id and forum_topic_visits.user_id = #{user.id})")
-        .where("(forum_topic_visits.id is null or forum_topic_visits.last_read_at < forum_topics.updated_at)")
-        .exists?
+      unread_topics = ForumTopic.visible(user).active.unread_by_user(user)
 
-      unless has_unread_topics
-        user.update_attribute(:last_forum_read_at, Time.now)
+      if !unread_topics.exists?
+        user.update!(last_forum_read_at: Time.zone.now)
         ForumTopicVisit.prune!(user)
       end
-    end
-  end
-
-  module SubscriptionMethods
-    def user_subscription(user)
-      subscriptions.where(:user_id => user.id).first
     end
   end
 
   extend SearchMethods
   include CategoryMethods
   include VisitMethods
-  include SubscriptionMethods
 
-  def editable_by?(user)
-    (creator_id == user.id || user.is_moderator?) && visible?(user)
+  # XXX forum_topic_visit_by_current_user is a hack to reduce queries on the forum index.
+  def is_read?
+    return true if CurrentUser.is_anonymous?
+    return true if new_record?
+
+    topic_last_read_at = forum_topic_visit_by_current_user&.last_read_at || "2000-01-01".to_time
+    forum_last_read_at = CurrentUser.last_forum_read_at || "2000-01-01".to_time
+
+    (topic_last_read_at >= updated_at) || (forum_last_read_at >= updated_at)
   end
 
-  def visible?(user)
-    user.level >= min_level
+  def is_private?
+    min_level > MIN_LEVELS[:None]
   end
 
   def create_mod_action_for_delete
@@ -148,33 +170,27 @@ class ForumTopic < ApplicationRecord
     ModAction.log("undeleted forum topic ##{id} (title: #{title})", :forum_topic_undelete)
   end
 
-  def initialize_is_deleted
-    self.is_deleted = false if is_deleted.nil?
-  end
-
   def page_for(post_id)
-    (posts.where("id < ?", post_id).count / Danbooru.config.posts_per_page.to_f).ceil
+    (forum_posts.where("id < ?", post_id).count / Danbooru.config.posts_per_page.to_f).ceil
   end
 
   def last_page
     (response_count / Danbooru.config.posts_per_page.to_f).ceil
   end
 
-  def merge(topic)
-    ForumPost.where(:id => self.posts.map(&:id)).update_all(:topic_id => topic.id)
-    topic.update(response_count: topic.response_count + self.posts.length, updater_id: CurrentUser.id)
-    self.update_columns(:response_count => 0, :is_deleted => true, :updater_id => CurrentUser.id)
-  end
-
-  def delete!
-    update(is_deleted: true)
-  end
-
-  def undelete!
-    update(is_deleted: false)
-  end
-
   def update_orignal_post
-    original_post&.update_columns(:updater_id => CurrentUser.id, :updated_at => Time.now)
+    original_post&.update_columns(:updater_id => updater.id, :updated_at => Time.now)
+  end
+
+  def pretty_title
+    title.gsub(/\A\[APPROVED\]|\[REJECTED\]/, "")
+  end
+
+  def html_data_attributes
+    super + [:is_read?]
+  end
+
+  def self.available_includes
+    [:creator, :updater, :original_post]
   end
 end

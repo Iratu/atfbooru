@@ -1,6 +1,10 @@
-div#note-container {
-  position: absolute;
-  z-index: 50;
+.note-container {
+  display: inline-block;
+  position: relative;
+
+  &.hide-notes .note-box {
+    visibility: hidden;
+  }
 
   div.note-body {
     position: absolute;
@@ -8,16 +12,18 @@ div#note-container {
     background: var(--note-body-background);
     color: var(--note-body-text-color);
     min-width: 140px;
+    width: min-content;
     min-height: 1em;
     line-height: 1.25;
     cursor: pointer;
     padding: 4px;
     z-index: 150;
-    overflow: hidden;
+    overflow-wrap: break-word;
+    overflow-y: hidden;
   }
 
   div.note-body, div.note-box.embedded div.note-box-inner-border {
-    h1, h2, h3, h4, h5, h6, a, span, div, blockquote, br, p, ul, li, ol, em, strong, small, big, b, i, font, u, s, code, center {
+    h1, h2, h3, h4, h5, h6, a, span, div, blockquote, p, ul, li, ol, em, strong, small, big, b, i, font, u, s, code, center {
       line-height: 1.25;
     }
 
@@ -71,6 +77,10 @@ div#note-container {
   }
 
   div.note-box {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
     position: absolute;
     border: var(--note-box-border);
     min-width: 5px;
@@ -78,32 +88,54 @@ div#note-container {
     width: 100px;
     height: 100px;
     cursor: move;
-    background: var(--note-box-background);
+    background: var(--note-body-background);
     line-height: 1.25;
+    opacity: 0.5;
+    z-index: 100;
 
-    div.note-box-inner-border {
-      border: var(--note-box-inner-border);
-      background: var(--note-body-background);
+    &.unsaved {
+      border: var(--unsaved-note-box-border);
     }
 
-    div.note-box-inner-border.unsaved {
-      border: var(--unsaved-note-box-inner-border);
+    &.movable {
+      border: var(--movable-note-box-border);
     }
 
     &.embedded {
       color: var(--note-body-text-color);
+      border: 1px solid transparent;
+      opacity: 1;
 
-      div.bg {
-        height: 100%;
-        text-align: center;
-        display: table-cell;
-        vertical-align: middle;
+      &.hovering {
+        border: var(--note-box-border);
+        box-shadow: var(--note-box-shadow);
+
+        &.editing,
+        &.movable {
+          opacity: 1;
+        }
+
+        div.ui-resizable-handle {
+          display: block;
+        }
       }
 
-      div.note-box-inner-border {
-        text-align: center;
-        display: table-cell;
-        vertical-align: middle;
+      &.editing,
+      &.movable {
+        opacity: 0.4;
+      }
+
+      &.unsaved,
+      &.out-of-bounds {
+        border: var(--unsaved-note-box-border);
+      }
+
+      &.movable {
+        border: var(--movable-note-box-border);
+      }
+
+      div.ui-resizable-handle {
+        display: none;
       }
     }
 
@@ -119,6 +151,7 @@ div#note-preview {
   opacity: 0.6;
   display: none;
   background: var(--note-preview-background);
+  z-index: 100;
 }
 
 div.note-edit-dialog {

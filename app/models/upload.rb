@@ -1,11 +1,12 @@
 require "tmpdir"
 
 class Upload < ApplicationRecord
-  class Error < Exception; end
+  class Error < StandardError; end
 
   class FileValidator < ActiveModel::Validator
     def validate(record)
       validate_file_ext(record)
+      validate_integrity(record)
       validate_md5_uniqueness(record)
       validate_video_duration(record)
       validate_resolution(record)
@@ -14,6 +15,12 @@ class Upload < ApplicationRecord
     def validate_file_ext(record)
       if record.file_ext == "bin"
         record.errors[:file_ext] << "is invalid (only JPEG, PNG, GIF, SWF, MP4, and WebM files are allowed"
+      end
+    end
+
+    def validate_integrity(record)
+      if record.file_ext.in?(["jpg", "gif", "png"]) && UploadService::Utils.corrupt?(record.file.path)
+        record.errors[:file] << "File is corrupted"
       end
     end
 
@@ -62,7 +69,6 @@ class Upload < ApplicationRecord
 
   before_validation :initialize_attributes, on: :create
   before_validation :assign_rating_from_tags
-  validate :uploader_is_not_limited, on: :create
   # validates :source, format: { with: /\Ahttps?/ }, if: ->(record) {record.file.blank?}, on: :create
   validates :rating, inclusion: { in: %w(q e s) }, allow_nil: true
   validates :md5, confirmation: true, if: ->(rec) { rec.md5_confirmation.present? }
@@ -71,18 +77,28 @@ class Upload < ApplicationRecord
 
   after_destroy_commit :delete_files
 
+  scope :pending, -> { where(status: "pending") }
   scope :preprocessed, -> { where(status: "preprocessed") }
-
-  api_attributes including: [:uploader_name]
+  scope :uploaded_by, ->(user_id) { where(uploader_id: user_id) }
 
   def initialize_attributes
     self.uploader_id = CurrentUser.id
     self.uploader_ip_addr = CurrentUser.ip_addr
-    self.server = Danbooru.config.server_host
+    self.server = Socket.gethostname
   end
 
   def self.prune!(date = 1.day.ago)
     where("created_at < ?", date).lock.destroy_all
+  end
+
+  def self.visible(user)
+    if user.is_admin?
+      all
+    elsif user.is_member?
+      where(uploader: user)
+    else
+      none
+    end
   end
 
   module FileMethods
@@ -178,12 +194,6 @@ class Upload < ApplicationRecord
     end
   end
 
-  module UploaderMethods
-    def uploader_name
-      uploader.name
-    end
-  end
-
   module VideoMethods
     def video
       @video ||= FFMPEG::Movie.new(file.path)
@@ -191,21 +201,13 @@ class Upload < ApplicationRecord
   end
 
   module SearchMethods
-    def uploaded_by(user_id)
-      where("uploader_id = ?", user_id)
-    end
-
-    def pending
-      where(:status => "pending")
-    end
-
     def search(params)
       q = super
 
       q = q.search_attributes(params, :uploader, :post, :source, :rating, :parent_id, :server, :md5, :server, :file_ext, :file_size, :image_width, :image_height, :referer_url)
 
       if params[:source_matches].present?
-        q = q.where("uploads.source LIKE ? ESCAPE E'\\\\'", params[:source_matches].to_escaped_for_sql_like)
+        q = q.where_like(:source, params[:source_matches])
       end
 
       if params[:has_post].to_s.truthy?
@@ -215,15 +217,15 @@ class Upload < ApplicationRecord
       end
 
       if params[:status].present?
-        q = q.where("uploads.status LIKE ? ESCAPE E'\\\\'", params[:status].to_escaped_for_sql_like)
+        q = q.where_like(:status, params[:status])
       end
 
       if params[:backtrace].present?
-        q = q.where("uploads.backtrace LIKE ? ESCAPE E'\\\\'", params[:backtrace].to_escaped_for_sql_like)
+        q = q.where_like(:backtrace, params[:backtrace])
       end
 
       if params[:tag_string].present?
-        q = q.where("uploads.tag_string LIKE ? ESCAPE E'\\\\'", params[:tag_string].to_escaped_for_sql_like)
+        q = q.where_like(:tag_string, params[:tag_string])
       end
 
       q.apply_default_order(params)
@@ -232,19 +234,12 @@ class Upload < ApplicationRecord
 
   include FileMethods
   include StatusMethods
-  include UploaderMethods
   include VideoMethods
   extend SearchMethods
   include SourceMethods
 
-  def uploader_is_not_limited
-    if !uploader.can_upload?
-      errors.add(:uploader, uploader.upload_limited_reason)
-    end
-  end
-
   def assign_rating_from_tags
-    if rating = Tag.has_metatag?(tag_string, :rating)
+    if rating = PostQueryBuilder.new(tag_string).find_metatag(:rating)
       self.rating = rating.downcase.first
     end
   end
@@ -255,5 +250,13 @@ class Upload < ApplicationRecord
 
   def upload_as_pending?
     as_pending.to_s.truthy?
+  end
+
+  def has_commentary?
+    artist_commentary_title.present? || artist_commentary_desc.present? || translated_commentary_title.present? || translated_commentary_desc.present?
+  end
+
+  def self.available_includes
+    [:uploader, :post]
   end
 end

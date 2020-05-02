@@ -29,7 +29,7 @@ module Danbooru
     config.filter_parameters += [:password, :password_confirmation, :password_hash, :api_key]
     # config.assets.enabled = true
     # config.assets.version = '1.0'
-    config.autoload_paths += %W(#{config.root}/app/presenters #{config.root}/app/logical #{config.root}/app/mailers)
+    config.autoload_paths += %W(#{config.root}/app/presenters #{config.root}/app/logical/concerns #{config.root}/app/logical #{config.root}/app/mailers)
     config.plugins = [:all]
     config.time_zone = 'Eastern Time (US & Canada)'
 
@@ -46,17 +46,6 @@ module Danbooru
 
     config.log_tags = [->(req) {"PID:#{Process.pid}"}]
     config.action_controller.action_on_unpermitted_parameters = :raise
-    config.force_ssl = true
-
-    if Rails.env.production? && Danbooru.config.ssl_options.present?
-      config.ssl_options = Danbooru.config.ssl_options
-    else
-      config.ssl_options = {
-        hsts: false,
-        secure_cookies: false,
-        redirect: { exclude: ->(request) { true } }
-      }
-    end
 
     if File.exist?("#{config.root}/REVISION")
       config.x.git_hash = File.read("#{config.root}/REVISION").strip

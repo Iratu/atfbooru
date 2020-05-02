@@ -19,12 +19,8 @@ module PostSets
       end
 
       context "a set for page 2" do
-        setup do
-          @set = PostSets::Post.new("", 2)
-          ::Post.stubs(:records_per_page).returns(1)
-        end
-
         should "return the second element" do
+          @set = PostSets::Post.new("", 2, 1)
           assert_equal(@post_2.id, @set.posts.first.id)
         end
       end
@@ -69,16 +65,6 @@ module PostSets
         end
       end
 
-      context "a set for the 'a b' tag query" do
-        setup do
-          @set = PostSets::Post.new("a b")
-        end
-
-        should "know it isn't a single tag" do
-          assert(!@set.is_single_tag?)
-        end
-      end
-
       context "a set going to the 1,001st page" do
         setup do
           @set = PostSets::Post.new("a", 1_001)
@@ -120,10 +106,6 @@ module PostSets
       context "a set for the 'a' tag query" do
         setup do
           @set = PostSets::Post.new("a")
-        end
-
-        should "know it is a single tag" do
-          assert(@set.is_single_tag?)
         end
 
         should "normalize its tag query" do

@@ -11,7 +11,7 @@ class TagsControllerTest < ActionDispatch::IntegrationTest
 
     context "edit action" do
       should "render" do
-        get_auth tag_path(@tag), @user, params: {:id => @tag.id}
+        get_auth edit_tag_path(@tag), @user
         assert_response :success
       end
     end
@@ -49,6 +49,13 @@ class TagsControllerTest < ActionDispatch::IntegrationTest
         get autocomplete_tags_path, params: { search: { name_matches: "t" }, format: :json }
         assert_response :success
       end
+
+      should "respect the only param" do
+        get autocomplete_tags_path, params: { search: { name_matches: "t", only: "name" }, format: :json }
+
+        assert_response :success
+        assert_equal "touhou", response.parsed_body.first["name"]
+      end
     end
 
     context "show action" do
@@ -79,6 +86,7 @@ class TagsControllerTest < ActionDispatch::IntegrationTest
       should "not lock the tag for a user" do
         put_auth tag_path(@tag), @user, params: {tag: { is_locked: true }}
 
+        assert_response 403
         assert_equal(false, @tag.reload.is_locked)
       end
 
@@ -93,6 +101,7 @@ class TagsControllerTest < ActionDispatch::IntegrationTest
           @member = create(:member_user)
           put_auth tag_path(@tag), @member, params: {tag: { category: Tag.categories.general }}
 
+          assert_response 403
           assert_not_equal(Tag.categories.general, @tag.reload.category)
         end
 

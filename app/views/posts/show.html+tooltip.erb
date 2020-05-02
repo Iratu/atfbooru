@@ -1,6 +1,6 @@
 <div class="post-tooltip-header">
   <span class="post-tooltip-header-left">
-    <% if CurrentUser.is_moderator? %>
+    <% if policy(@post).can_view_uploader? %>
       <%= link_to_user @post.uploader %>
     <% end %>
 
@@ -48,7 +48,7 @@
     <div class="post-tooltip-pools">
       <% @post.pools.series.undeleted.each do |pool| %>
         <%= link_to pool, class: "pool-category-#{pool.category}" do %>
-          <%= "pool:#{pool.pretty_name} [#{pool.page_number(@post.id)}/#{pool.post_count}]" %>
+          <%= "pool:#{pool.name} [#{pool.page_number(@post.id)}/#{pool.post_count}]" %>
         <% end %>
       <% end %>
     </div>

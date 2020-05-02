@@ -1,4 +1,5 @@
 import CurrentUser from "./current_user";
+import Rails from '@rails/ujs';
 
 let Utility = {};
 
@@ -54,7 +55,8 @@ Utility.dialog = function(title, html) {
     },
     buttons: {
       "Submit": function() {
-        $dialog.find("form").submit();
+        let form = $dialog.find("form").get(0);
+        Rails.fire(form, "submit");
       },
       "Cancel": function() {
         $dialog.dialog("close");
@@ -104,6 +106,10 @@ Utility.intersect = function(a, b) {
 
 Utility.regexp_escape = function(string) {
   return string.replace(/([.?*+^$[\]\\(){}|-])/g, "\\$1");
+}
+
+Utility.regexp_split = function(string) {
+  return [...new Set(String(string === null || string === undefined ? "" : string).match(/\S+/g))];
 }
 
 $.fn.selectEnd = function() {

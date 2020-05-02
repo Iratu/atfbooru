@@ -1,21 +1,36 @@
+<% page_title "Wiki Comparison: #{@thispage.pretty_title.titleize}" %>
+
+<%= render "wiki_pages/secondary_links" %>
 <%= render "wiki_pages/sidebar" %>
 
 <% content_for(:content) do %>
-  <h1>Wiki Page: <%= @thispage.title %></h1>
+  <h1>Wiki Page Version Comparison:  <%= link_to @thispage.title, wiki_page_versions_path(search: { wiki_page_id: @thispage.wiki_page_id }, type: params[:type], anchor: "wiki-page-version-#{@thispage.id}"), class: "tag-type-#{@thispage.wiki_page.category_name}" %></h1>
 
-  <% if @thispage.visible? %>
-    <p>Showing differences between <%= compact_time @thispage.updated_at %> (<%= link_to_user @thispage.updater %>) and <%= compact_time @otherpage.updated_at %> (<%= link_to_user @otherpage.updater %>)</p>
-
-    <div>
-      <%= wiki_page_diff(@thispage, @otherpage) %>
-    </div>
-  <% else %>
-    <p>The artist requested removal of this page.</p>
+  <% if params[:type].present? %>
+    <%= render "versions/types" %>
   <% end %>
-<% end %>
 
-<%= render "wiki_pages/secondary_links" %>
+  <% if @otherpage.present? %>
+    <% if @thispage.id != @otherpage.id %>
+      <p>Showing differences between <%= compact_time @thispage.updated_at %> (<%= link_to_user @thispage.updater %>) and <%= compact_time @otherpage.updated_at %> (<%= link_to_user @otherpage.updater %>)</p>
 
-<% content_for(:page_title) do %>
-  Wiki Page Versions Comparison - <%= @thispage.pretty_title %> - <%= Danbooru.config.app_name %>
+      <% if wiki_version_show_other_names(@thispage, @otherpage) %>
+        <p><%= wiki_version_other_names_diff(@thispage, @otherpage) %></p>
+      <% else %>
+        <p><em>No changes to other names.</em></p>
+      <% end %>
+
+      <% if @thispage.body != @otherpage.body %>
+        <div class="diff-body">
+          <%= diff_body_html(@thispage, @otherpage, :body) %>
+        </div>
+      <% else %>
+        <p><em>No changes to body.</em></p>
+      <% end %>
+    <% else %>
+      <p><em>Version is latest!</em></p>
+    <% end %>
+  <% else %>
+    <p><em>No versions to compare!</em></p>
+  <% end %>
 <% end %>

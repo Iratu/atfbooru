@@ -1,21 +1,18 @@
 class PostDisapproval < ApplicationRecord
   DELETION_THRESHOLD = 1.month
+  REASONS = %w[breaks_rules poor_quality disinterest]
 
   belongs_to :post
   belongs_to :user
-  after_initialize :initialize_attributes, if: :new_record?
-  validates_uniqueness_of :post_id, :scope => [:user_id], :message => "have already hidden this post"
-  validates_inclusion_of :reason, :in => %w(legacy breaks_rules poor_quality disinterest)
+  validates :user, uniqueness: { scope: :post, message: "have already hidden this post" }
+  validates_inclusion_of :reason, in: REASONS
+  validate :validate_disapproval
 
-  scope :with_message, -> {where("message is not null and message <> ''")}
-  scope :without_message, -> {where("message is null or message = ''")}
+  scope :with_message, -> { where.not(message: nil) }
+  scope :without_message, -> { where(message: nil) }
   scope :breaks_rules, -> {where(:reason => "breaks_rules")}
   scope :poor_quality, -> {where(:reason => "poor_quality")}
-  scope :disinterest, -> {where(:reason => ["disinterest", "legacy"])}
-
-  def initialize_attributes
-    self.user_id ||= CurrentUser.user.id
-  end
+  scope :disinterest, -> {where(:reason => "disinterest")}
 
   def self.prune!
     PostDisapproval.where("post_id in (select _.post_id from post_disapprovals _ where _.created_at < ?)", DELETION_THRESHOLD.ago).delete_all
@@ -39,12 +36,6 @@ class PostDisapproval < ApplicationRecord
     end
   end
 
-  def create_downvote
-    if %w(breaks_rules poor_quality).include?(reason)
-      PostVote.create(:score => -1, :post_id => post_id)
-    end
-  end
-
   concerning :SearchMethods do
     class_methods do
       def search(params)
@@ -63,8 +54,29 @@ class PostDisapproval < ApplicationRecord
           q = q.apply_default_order(params)
         end
 
-        q.apply_default_order(params)
+        q
       end
     end
+  end
+
+  def self.available_includes
+    [:user, :post]
+  end
+
+  def validate_disapproval
+    if post.status == "active"
+      errors[:post] << "is already active and cannot be disapproved"
+    end
+  end
+
+  def message=(message)
+    message = nil if message.blank?
+    super(message)
+  end
+
+  def api_attributes
+    attributes = super
+    attributes -= [:creator_id] unless Pundit.policy!([CurrentUser.user, nil], self).can_view_creator?
+    attributes
   end
 end

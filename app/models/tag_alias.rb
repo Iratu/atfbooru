@@ -3,43 +3,15 @@ class TagAlias < TagRelationship
   validates_uniqueness_of :antecedent_name, scope: :status, conditions: -> { active }
   validate :absence_of_transitive_relation
   validate :wiki_pages_present, on: :create, unless: :skip_secondary_validations
-  validate :mininum_antecedent_count, on: :create, unless: :skip_secondary_validations
 
   module ApprovalMethods
-    def approve!(approver: CurrentUser.user, update_topic: true)
+    def approve!(approver: CurrentUser.user)
       update(approver: approver, status: "queued")
-      ProcessTagAliasJob.perform_later(self, update_topic: update_topic)
-    end
-  end
-
-  module ForumMethods
-    def forum_updater
-      @forum_updater ||= begin
-        post = if forum_topic
-          forum_post || forum_topic.posts.where("body like ?", TagAliasRequest.command_string(antecedent_name, consequent_name, id) + "%").last
-        else
-          nil
-        end
-        ForumUpdater.new(
-          forum_topic,
-          forum_post: post,
-          expected_title: "Tag alias: #{antecedent_name} -> #{consequent_name}",
-          skip_update: !TagRelationship::SUPPORT_HARD_CODED
-        )
-      end
+      ProcessTagAliasJob.perform_later(self)
     end
   end
 
   include ApprovalMethods
-  include ForumMethods
-
-  concerning :EmbeddedText do
-    class_methods do
-      def embedded_pattern
-        /\[ta:(?<id>\d+)\]/m
-      end
-    end
-  end
 
   def self.to_aliased(names)
     names = Array(names).map(&:to_s)
@@ -48,38 +20,26 @@ class TagAlias < TagRelationship
     names.map { |name| aliases[name] || name }
   end
 
-  def process!(update_topic: true)
+  def process!
     unless valid?
       raise errors.full_messages.join("; ")
     end
 
-    tries = 0
-
-    begin
-      CurrentUser.scoped(User.system) do
-        update!(status: "processing")
-        move_aliases_and_implications
-        move_saved_searches
-        ensure_category_consistency
-        update_posts
-        forum_updater.update(approval_message(approver), "APPROVED") if update_topic
-        rename_wiki_and_artist
-        update!(status: "active")
-      end
-    rescue Exception => e
-      if tries < 5
-        tries += 1
-        sleep 2**tries
-        retry
-      end
-
-      CurrentUser.scoped(approver) do
-        forum_updater.update(failure_message(e), "FAILED") if update_topic
-        update(status: "error: #{e}")
-      end
-
-      DanbooruLogger.log(e, tag_alias_id: id, antecedent_name: antecedent_name, consequent_name: consequent_name)
+    CurrentUser.scoped(User.system) do
+      update!(status: "processing")
+      move_aliases_and_implications
+      move_saved_searches
+      ensure_category_consistency
+      update_posts
+      rename_wiki_and_artist
+      update!(status: "active")
     end
+  rescue Exception => e
+    CurrentUser.scoped(approver) do
+      update(status: "error: #{e}")
+    end
+
+    DanbooruLogger.log(e, tag_alias_id: id, antecedent_name: antecedent_name, consequent_name: consequent_name)
   end
 
   def absence_of_transitive_relation
@@ -131,18 +91,10 @@ class TagAlias < TagRelationship
   end
 
   def ensure_category_consistency
-    if antecedent_tag.category != consequent_tag.category && antecedent_tag.category != Tag.categories.general
-      consequent_tag.update_attribute(:category, antecedent_tag.category)
-    end
-  end
-
-  def update_posts
-    Post.without_timeout do
-      Post.raw_tag_match(antecedent_name).find_each do |post|
-        escaped_antecedent_name = Regexp.escape(antecedent_name)
-        fixed_tags = post.tag_string.sub(/(?:\A| )#{escaped_antecedent_name}(?:\Z| )/, " #{consequent_name} ").strip
-        post.update(tag_string: fixed_tags)
-      end
+    if antecedent_tag.category == Tag.categories.general && consequent_tag.category != Tag.categories.general
+      antecedent_tag.update!(category: consequent_tag.category)
+    elsif consequent_tag.category == Tag.categories.general && antecedent_tag.category != Tag.categories.general
+      consequent_tag.update!(category: antecedent_tag.category)
     end
   end
 
@@ -150,9 +102,7 @@ class TagAlias < TagRelationship
     antecedent_wiki = WikiPage.titled(antecedent_name).first
     if antecedent_wiki.present?
       if WikiPage.titled(consequent_name).blank?
-        antecedent_wiki.update!(title: consequent_name, skip_secondary_validations: true)
-      else
-        forum_updater.update(conflict_message)
+        antecedent_wiki.update!(title: consequent_name)
       end
     end
 
@@ -165,15 +115,9 @@ class TagAlias < TagRelationship
 
   def wiki_pages_present
     if antecedent_wiki.present? && consequent_wiki.present?
-      errors[:base] << conflict_message
+      errors[:base] << "The tag alias [[#{antecedent_name}]] -> [[#{consequent_name}]] has conflicting wiki pages. [[#{consequent_name}]] should be updated to include information from [[#{antecedent_name}]] if necessary."
     elsif antecedent_wiki.blank? && consequent_wiki.blank?
       errors[:base] << "The #{consequent_name} tag needs a corresponding wiki page"
-    end
-  end
-
-  def mininum_antecedent_count
-    if antecedent_tag.post_count < 50
-      errors[:base] << "The #{antecedent_name} tag must have at least 50 posts for an alias to be created"
     end
   end
 

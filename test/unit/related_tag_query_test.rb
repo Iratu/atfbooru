@@ -37,11 +37,7 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
       end
 
       should "work" do
-        assert_equal(["aaa", "bbb", "ccc"], @query.tags)
-      end
-
-      should "render the json" do
-        assert_equal("{\"query\":\"aaa\",\"category\":null,\"tags\":[[\"aaa\",0],[\"bbb\",0],[\"ccc\",0]],\"wiki_page_tags\":[],\"other_wikis\":{}}", @query.to_json)
+        assert_equal(["aaa", "bbb", "ccc"], @query.tags.map(&:name))
       end
     end
 
@@ -51,7 +47,7 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
       end
 
       should "work" do
-        assert_equal([], @query.tags)
+        assert_equal(true, @query.tags.empty?)
       end
     end
 
@@ -68,7 +64,7 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
       end
 
       should "take related tags from the consequent tag" do
-        assert_equal(%w[aaa bbb ccc], @query.tags)
+        assert_equal(%w[aaa bbb ccc], @query.tags.map(&:name))
       end
     end
 
@@ -78,7 +74,7 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
       end
 
       should "work" do
-        assert_equal(["aaa"], @query.tags)
+        assert_equal(["aaa"], @query.tags.map(&:name))
       end
     end
 
@@ -118,7 +114,7 @@ class RelatedTagQueryTest < ActiveSupport::TestCase
     end
 
     should "find the related tags" do
-      assert_equal(%w(ccc), @query.tags)
+      assert_equal(["ccc"], @query.tags.map(&:name))
     end
   end
 end
