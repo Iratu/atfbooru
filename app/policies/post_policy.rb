@@ -40,7 +40,7 @@ class PostPolicy < ApplicationPolicy
   end
 
   def expunge?
-    user.is_admin?
+    user.is_approver?
   end
 
   def visible?
@@ -60,20 +60,20 @@ class PostPolicy < ApplicationPolicy
   end
 
   def can_lock_status?
-    user.is_admin?
+    user.is_approver?
   end
 
   def can_use_mode_menu?
-    user.is_gold?
+    user.is_member?
   end
 
   def can_view_favlist?
-    user.is_gold?
+    user.is_member?
   end
 
   # whether to show the + - links in the tag list.
   def show_extra_links?
-    user.is_gold?
+    user.is_member?
   end
 
   def permitted_attributes

@@ -1,7 +1,7 @@
 class UploadLimit
   extend Memoist
 
-  INITIAL_POINTS = 1000
+  INITIAL_POINTS = 5000
   MAXIMUM_POINTS = 10000
 
   attr_reader :user
@@ -13,7 +13,7 @@ class UploadLimit
   def limited?
     if user.can_upload_free?
       false
-    elsif user.created_at > 1.week.ago
+    elsif user.created_at > 1.day.ago
       true
     else
       used_upload_slots >= upload_slots
@@ -21,8 +21,8 @@ class UploadLimit
   end
 
   def limit_reason
-    if user.created_at > 1.week.ago
-      "cannot upload during your first week of registration"
+    if user.created_at > 1.day.ago
+      "cannot upload during your first day of registration"
     elsif limited?
       "have reached your upload limit"
     else
@@ -32,7 +32,7 @@ class UploadLimit
 
   def used_upload_slots
     pending = user.posts.pending
-    early_deleted = user.posts.deleted.where("created_at >= ?", 3.days.ago)
+    early_deleted = user.posts.deleted.where("created_at >= ?", 1.day.ago)
 
     pending.or(early_deleted).count
   end
