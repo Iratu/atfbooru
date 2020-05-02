@@ -1,10 +1,6 @@
 require 'test_helper'
 
 class PostTest < ActiveSupport::TestCase
-  def assert_tag_match(posts, query)
-    assert_equal(posts.map(&:id), Post.tag_match(query).pluck(:id))
-  end
-
   def self.assert_invalid_tag(tag_name)
     should "not allow '#{tag_name}' to be tagged" do
       post = build(:post, tag_string: "touhou #{tag_name}")
@@ -23,7 +19,6 @@ class PostTest < ActiveSupport::TestCase
     end
     CurrentUser.user = @user
     CurrentUser.ip_addr = "127.0.0.1"
-    mock_pool_archive_service!
   end
 
   def teardown
@@ -39,7 +34,7 @@ class PostTest < ActiveSupport::TestCase
         @upload = UploadService.new(FactoryBot.attributes_for(:jpg_upload)).start!
         @post = @upload.post
         Favorite.add(post: @post, user: @user)
-        create(:favorite_group).add!(@post.id)
+        create(:favorite_group, post_ids: [@post.id])
       end
 
       should "delete the files" do
@@ -387,9 +382,7 @@ class PostTest < ActiveSupport::TestCase
         p1 = FactoryBot.create(:post)
         c1 = FactoryBot.create(:post, :parent_id => p1.id)
         c1.delete!("test")
-        CurrentUser.scoped(new_user, "127.0.0.1") do
-          c1.undelete!
-        end
+        c1.approve!(new_user)
         p1.reload
         assert_equal(new_user.id, c1.approver_id)
       end
@@ -398,7 +391,7 @@ class PostTest < ActiveSupport::TestCase
         p1 = FactoryBot.create(:post)
         c1 = FactoryBot.create(:post, :parent_id => p1.id)
         c1.delete!("test")
-        c1.undelete!
+        c1.approve!
         p1.reload
         assert_not_nil(c1.parent_id)
         assert(p1.has_children?, "Parent should have children")
@@ -418,8 +411,8 @@ class PostTest < ActiveSupport::TestCase
         end
 
         should "not allow undeletion" do
-          @post.undelete!
-          assert_equal(["Is status locked ; cannot undelete post"], @post.errors.full_messages)
+          approval = @post.approve!
+          assert_equal(["Post is locked and cannot be approved"], approval.errors.full_messages)
           assert_equal(true, @post.is_deleted?)
         end
       end
@@ -436,9 +429,10 @@ class PostTest < ActiveSupport::TestCase
           end
 
           should "not be permitted" do
-            assert_raises(::Post::ApprovalError) do
-              @post.undelete!
-            end
+            approval = @post.approve!
+
+            assert_equal(false, approval.valid?)
+            assert_equal(["You have previously approved this post and cannot approve it again"], approval.errors.full_messages)
           end
         end
 
@@ -448,21 +442,22 @@ class PostTest < ActiveSupport::TestCase
           end
 
           should "not be permitted" do
-            assert_raises(::Post::ApprovalError) do
-              @post.undelete!
-            end
+            approval = @post.approve!
+
+            assert_equal(false, approval.valid?)
+            assert_equal(["You cannot approve a post you uploaded"], approval.errors.full_messages)
           end
         end
       end
 
       context "when undeleted" do
         should "be undeleted" do
-          @post.undelete!
+          @post.approve!
           assert_equal(false, @post.reload.is_deleted?)
         end
 
         should "create a mod action" do
-          @post.undelete!
+          @post.approve!
           assert_equal("undeleted post ##{@post.id}", ModAction.last.description)
           assert_equal("post_undelete", ModAction.last.category)
         end
@@ -482,9 +477,7 @@ class PostTest < ActiveSupport::TestCase
       end
 
       should "be appealed" do
-        assert_difference("PostAppeal.count", 1) do
-          @post.appeal!("xxx")
-        end
+        create(:post_appeal, post: @post)
         assert(@post.is_deleted?, "Post should still be deleted")
         assert_equal(1, @post.appeals.count)
       end
@@ -561,9 +554,10 @@ class PostTest < ActiveSupport::TestCase
       end
 
       should "not allow new appeals" do
-        assert_raises(PostAppeal::Error) do
-          @post.appeal!("wrong")
-        end
+        @appeal = build(:post_appeal, post: @post)
+
+        assert_equal(false, @appeal.valid?)
+        assert_equal(["Post is active"], @appeal.errors.full_messages)
       end
 
       should "not allow approval" do
@@ -839,15 +833,6 @@ class PostTest < ActiveSupport::TestCase
         end
 
         context "for a pool" do
-          setup do
-            mock_pool_archive_service!
-            start_pool_archive_transaction
-          end
-
-          teardown do
-            rollback_pool_archive_transaction
-          end
-
           context "on creation" do
             setup do
               @pool = FactoryBot.create(:pool)
@@ -996,6 +981,96 @@ class PostTest < ActiveSupport::TestCase
             assert_nil(@children[0].reload.parent_id)
             assert_nil(@children[1].reload.parent_id)
             assert_nil(@children[2].reload.parent_id)
+          end
+        end
+
+        context "for status:active" do
+          should "approve the post if the user has permission" do
+            as(create(:approver)) do
+              @post.update!(is_pending: true)
+              @post.update(tag_string: "aaa status:active")
+            end
+
+            assert_equal(false, @post.reload.is_pending?)
+          end
+
+          should "not approve the post if the user is doesn't have permission" do
+            assert_raises(User::PrivilegeError) do
+              @post.update!(is_pending: true)
+              @post.update(tag_string: "aaa status:active")
+            end
+
+            assert_equal(true, @post.reload.is_pending?)
+          end
+        end
+
+        context "for status:banned" do
+          should "ban the post if the user has permission" do
+            as(create(:approver)) do
+              @post.update(tag_string: "aaa status:banned")
+            end
+
+            assert_equal(true, @post.reload.is_banned?)
+          end
+
+          should "not ban the post if the user doesn't have permission" do
+            assert_raises(User::PrivilegeError) do
+              @post.update(tag_string: "aaa status:banned")
+            end
+
+            assert_equal(false, @post.reload.is_banned?)
+          end
+        end
+
+        context "for -status:banned" do
+          should "unban the post if the user has permission" do
+            as(create(:approver)) do
+              @post.update!(is_banned: true)
+              @post.update(tag_string: "aaa -status:banned")
+            end
+
+            assert_equal(false, @post.reload.is_banned?)
+          end
+
+          should "not unban the post if the user doesn't have permission" do
+            assert_raises(User::PrivilegeError) do
+              @post.update!(is_banned: true)
+              @post.update(tag_string: "aaa status:banned")
+            end
+
+            assert_equal(true, @post.reload.is_banned?)
+          end
+        end
+
+        context "for disapproved:<reason>" do
+          should "disapprove the post if the user has permission" do
+            @user = create(:approver)
+
+            as(@user) do
+              @post.update!(is_pending: true)
+              @post.update(tag_string: "aaa disapproved:disinterest")
+            end
+
+            assert_equal(@post.id, PostDisapproval.last.post_id)
+            assert_equal(@user.id, PostDisapproval.last.user_id)
+            assert_equal("disinterest", PostDisapproval.last.reason)
+          end
+
+          should "not disapprove the post if the user is doesn't have permission" do
+            assert_raises(User::PrivilegeError) do
+              @post.update!(is_pending: true)
+              @post.update(tag_string: "aaa disapproved:disinterest")
+            end
+
+            assert_equal(0, @post.disapprovals.count)
+          end
+
+          should "not allow disapproving active posts" do
+            assert_raises(User::PrivilegeError) do
+              @post.update(tag_string: "aaa disapproved:disinterest")
+            end
+
+            assert_equal(0, @post.disapprovals.count)
           end
         end
 
@@ -1266,7 +1341,7 @@ class PostTest < ActiveSupport::TestCase
 
       context "that has been updated" do
         should "create a new version if it's the first version" do
-          assert_difference("PostArchive.count", 1) do
+          assert_difference("PostVersion.count", 1) do
             post = FactoryBot.create(:post)
           end
         end
@@ -1274,7 +1349,7 @@ class PostTest < ActiveSupport::TestCase
         should "create a new version if it's been over an hour since the last update" do
           post = FactoryBot.create(:post)
           travel(6.hours) do
-            assert_difference("PostArchive.count", 1) do
+            assert_difference("PostVersion.count", 1) do
               post.update(tag_string: "zzz")
             end
           end
@@ -1282,14 +1357,14 @@ class PostTest < ActiveSupport::TestCase
 
         should "merge with the previous version if the updater is the same user and it's been less than an hour" do
           post = FactoryBot.create(:post)
-          assert_difference("PostArchive.count", 0) do
+          assert_difference("PostVersion.count", 0) do
             post.update(tag_string: "zzz")
           end
           assert_equal("zzz", post.versions.last.tags)
         end
 
         should "increment the updater's post_update_count" do
-          PostArchive.sqs_service.stubs(:merge?).returns(false)
+          PostVersion.sqs_service.stubs(:merge?).returns(false)
           post = FactoryBot.create(:post, :tag_string => "aaa bbb ccc")
 
           # XXX in the test environment the update count gets bumped twice: and
@@ -1373,7 +1448,7 @@ class PostTest < ActiveSupport::TestCase
 
           # final should be <aaa>, <bbb>, <ddd>, <eee>
           final_post = Post.find(post.id)
-          assert_equal(%w(aaa bbb ddd eee), Tag.scan_tags(final_post.tag_string).sort)
+          assert_equal("aaa bbb ddd eee", final_post.tag_string)
         end
 
         should "merge any tag changes that were made after loading the initial set of tags part 2" do
@@ -1396,7 +1471,7 @@ class PostTest < ActiveSupport::TestCase
 
           # final should be <aaa>, <bbb>, <ddd>, <eee>
           final_post = Post.find(post.id)
-          assert_equal(%w(aaa bbb ddd eee), Tag.scan_tags(final_post.tag_string).sort)
+          assert_equal("aaa bbb ddd eee", final_post.tag_string)
         end
 
         should "merge any parent, source, and rating changes that were made after loading the initial set" do
@@ -1706,14 +1781,11 @@ class PostTest < ActiveSupport::TestCase
         @parent = FactoryBot.create(:post)
         @child = FactoryBot.create(:post, parent: @parent)
 
-        @user1 = FactoryBot.create(:user, enable_privacy_mode: true)
+        @user1 = FactoryBot.create(:user, enable_private_favorites: true)
         @gold1 = FactoryBot.create(:gold_user)
-        @supervoter1 = FactoryBot.create(:user, is_super_voter: true)
 
         @child.add_favorite!(@user1)
         @child.add_favorite!(@gold1)
-        @child.add_favorite!(@supervoter1)
-        @parent.add_favorite!(@supervoter1)
 
         @child.give_favorites_to_parent
         @child.reload
@@ -1726,14 +1798,15 @@ class PostTest < ActiveSupport::TestCase
         assert_equal("", @child.fav_string)
         assert_equal([], @child.favorites.pluck(:user_id))
 
-        assert_equal(3, @parent.fav_count)
-        assert_equal(3, @parent.favorites.count)
+        assert_equal(2, @parent.fav_count)
+        assert_equal(2, @parent.favorites.count)
+        assert_equal("fav:#{@user1.id} fav:#{@gold1.id}", @parent.fav_string)
+        assert_equal([@user1.id, @gold1.id], @parent.favorites.pluck(:user_id))
       end
 
       should "create a vote for each user who can vote" do
         assert(@parent.votes.where(user: @gold1).exists?)
-        assert(@parent.votes.where(user: @supervoter1).exists?)
-        assert_equal(4, @parent.score)
+        assert_equal(1, @parent.score)
       end
     end
   end
@@ -1809,688 +1882,7 @@ class PostTest < ActiveSupport::TestCase
     end
   end
 
-  context "Searching:" do
-    setup do
-      mock_pool_archive_service!
-    end
-
-    should "return posts for the age:<1minute tag" do
-      post = FactoryBot.create(:post)
-      assert_tag_match([post], "age:<1minute")
-    end
-
-    should "return posts for the age:<1minute tag when the user is in Pacific time zone" do
-      post = FactoryBot.create(:post)
-      Time.zone = "Pacific Time (US & Canada)"
-      assert_tag_match([post], "age:<1minute")
-      Time.zone = "Eastern Time (US & Canada)"
-    end
-
-    should "return posts for the age:<1minute tag when the user is in Tokyo time zone" do
-      post = FactoryBot.create(:post)
-      Time.zone = "Asia/Tokyo"
-      assert_tag_match([post], "age:<1minute")
-      Time.zone = "Eastern Time (US & Canada)"
-    end
-
-    should "return posts for the ' tag" do
-      post1 = FactoryBot.create(:post, :tag_string => "'")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-
-      assert_tag_match([post1], "'")
-    end
-
-    should "return posts for the \\ tag" do
-      post1 = FactoryBot.create(:post, :tag_string => "\\")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-
-      assert_tag_match([post1], "\\")
-    end
-
-    should "return posts for the ( tag" do
-      post1 = FactoryBot.create(:post, :tag_string => "(")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-
-      assert_tag_match([post1], "(")
-    end
-
-    should "return posts for the ? tag" do
-      post1 = FactoryBot.create(:post, :tag_string => "?")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-
-      assert_tag_match([post1], "?")
-    end
-
-    should "return posts for 1 tag" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post2, post1], "aaa")
-    end
-
-    should "return posts for a 2 tag join" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post2], "aaa bbb")
-    end
-
-    should "return posts for a 2 tag union" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaab bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post3, post1], "~aaa ~ccc")
-    end
-
-    should "return posts for 1 tag with exclusion" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaa bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post1], "aaa -bbb")
-    end
-
-    should "return posts for 1 tag with a pattern" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaab bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post2, post1], "a*")
-    end
-
-    should "return posts for 2 tags, one with a pattern" do
-      post1 = FactoryBot.create(:post, :tag_string => "aaa")
-      post2 = FactoryBot.create(:post, :tag_string => "aaab bbb")
-      post3 = FactoryBot.create(:post, :tag_string => "bbb ccc")
-
-      assert_tag_match([post2], "a* bbb")
-    end
-
-    should "return posts for the id:<N> metatag" do
-      posts = FactoryBot.create_list(:post, 3)
-
-      assert_tag_match([posts[1]], "id:#{posts[1].id}")
-      assert_tag_match([posts[2]], "id:>#{posts[1].id}")
-      assert_tag_match([posts[0]], "id:<#{posts[1].id}")
-
-      assert_tag_match([posts[2], posts[0]], "-id:#{posts[1].id}")
-      assert_tag_match([posts[2], posts[1]], "id:>=#{posts[1].id}")
-      assert_tag_match([posts[1], posts[0]], "id:<=#{posts[1].id}")
-      assert_tag_match([posts[2], posts[0]], "id:#{posts[0].id},#{posts[2].id}")
-      assert_tag_match(posts.reverse, "id:#{posts[0].id}..#{posts[2].id}")
-    end
-
-    should "return posts for the fav:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2)
-      posts = users.map do |u|
-        CurrentUser.scoped(u) { FactoryBot.create(:post, tag_string: "fav:#{u.name}") }
-      end
-
-      assert_tag_match([posts[0]], "fav:#{users[0].name}")
-      assert_tag_match([posts[1]], "-fav:#{users[0].name}")
-    end
-
-    should "return posts for the ordfav:<name> metatag" do
-      post1 = FactoryBot.create(:post, tag_string: "fav:#{CurrentUser.name}")
-      post2 = FactoryBot.create(:post, tag_string: "fav:#{CurrentUser.name}")
-
-      assert_tag_match([post2, post1], "ordfav:#{CurrentUser.name}")
-    end
-
-    should "return posts for the pool:<name> metatag" do
-      SqsService.any_instance.stubs(:send_message)
-
-      pool1 = create(:pool, name: "test_a", category: "series")
-      pool2 = create(:pool, name: "test_b", category: "collection")
-      post1 = create(:post, tag_string: "pool:test_a")
-      post2 = create(:post, tag_string: "pool:test_b")
-
-      assert_tag_match([post1], "pool:#{pool1.id}")
-      assert_tag_match([post2], "pool:#{pool2.id}")
-
-      assert_tag_match([post1], "pool:TEST_A")
-      assert_tag_match([post2], "pool:Test_B")
-
-      assert_tag_match([post1], "pool:test_a")
-      assert_tag_match([post2], "-pool:test_a")
-
-      assert_tag_match([], "pool:test_a pool:test_b")
-      assert_tag_match([], "-pool:test_a -pool:test_b")
-
-      assert_tag_match([post2, post1], "pool:test*")
-
-      assert_tag_match([post2, post1], "pool:any")
-      assert_tag_match([post2, post1], "-pool:none")
-      assert_tag_match([], "-pool:any")
-      assert_tag_match([], "pool:none")
-
-      assert_tag_match([post1], "pool:series")
-      assert_tag_match([post2], "-pool:series")
-      assert_tag_match([post2], "pool:collection")
-      assert_tag_match([post1], "-pool:collection")
-    end
-
-    should "return posts for the ordpool:<name> metatag" do
-      posts = FactoryBot.create_list(:post, 2, tag_string: "newpool:test")
-
-      assert_tag_match(posts, "ordpool:test")
-    end
-
-    should "return posts for the ordpool:<name> metatag for a series pool containing duplicate posts" do
-      posts = FactoryBot.create_list(:post, 2)
-      pool = FactoryBot.create(:pool, name: "test", category: "series", post_ids: [posts[0].id, posts[1].id, posts[1].id])
-
-      assert_tag_match([posts[0], posts[1], posts[1]], "ordpool:test")
-    end
-
-    should "return posts for the parent:<N> metatag" do
-      parent = FactoryBot.create(:post)
-      child = FactoryBot.create(:post, tag_string: "parent:#{parent.id}")
-
-      assert_tag_match([parent], "parent:none")
-      assert_tag_match([child], "-parent:none")
-      assert_tag_match([child, parent], "parent:#{parent.id}")
-      assert_tag_match([child], "parent:#{child.id}")
-
-      assert_tag_match([child], "child:none")
-      assert_tag_match([parent], "child:any")
-    end
-
-    should "return posts for the favgroup:<name> metatag" do
-      favgroups = FactoryBot.create_list(:favorite_group, 2, creator: CurrentUser.user)
-      posts = favgroups.map { |g| FactoryBot.create(:post, tag_string: "favgroup:#{g.name}") }
-
-      assert_tag_match([posts[0]], "favgroup:#{favgroups[0].name}")
-      assert_tag_match([posts[1]], "-favgroup:#{favgroups[0].name}")
-      assert_tag_match([], "-favgroup:#{favgroups[0].name} -favgroup:#{favgroups[1].name}")
-    end
-
-    should "return posts for the user:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2)
-      posts = users.map { |u| FactoryBot.create(:post, uploader: u) }
-
-      assert_tag_match([posts[0]], "user:#{users[0].name}")
-      assert_tag_match([posts[1]], "-user:#{users[0].name}")
-    end
-
-    should "return posts for the approver:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2)
-      posts = users.map { |u| FactoryBot.create(:post, approver: u) }
-      posts << FactoryBot.create(:post, approver: nil)
-
-      assert_tag_match([posts[0]], "approver:#{users[0].name}")
-      assert_tag_match([posts[1]], "-approver:#{users[0].name}")
-      assert_tag_match([posts[1], posts[0]], "approver:any")
-      assert_tag_match([posts[2]], "approver:none")
-    end
-
-    should "return posts for the commenter:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2, created_at: 2.weeks.ago)
-      posts = FactoryBot.create_list(:post, 2)
-      comms = users.zip(posts).map { |u, p| as(u) { FactoryBot.create(:comment, post: p) } }
-
-      assert_tag_match([posts[0]], "commenter:#{users[0].name}")
-      assert_tag_match([posts[1]], "commenter:#{users[1].name}")
-    end
-
-    should "return posts for the commenter:<any|none> metatag" do
-      posts = FactoryBot.create_list(:post, 2)
-      FactoryBot.create(:comment, post: posts[0], is_deleted: false)
-      FactoryBot.create(:comment, post: posts[1], is_deleted: true)
-
-      assert_tag_match([posts[0]], "commenter:any")
-      assert_tag_match([posts[1]], "commenter:none")
-    end
-
-    should "return posts for the noter:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2)
-      posts = FactoryBot.create_list(:post, 2)
-      notes = users.zip(posts).map { |u, p| FactoryBot.create(:note, creator: u, post: p) }
-
-      assert_tag_match([posts[0]], "noter:#{users[0].name}")
-      assert_tag_match([posts[1]], "noter:#{users[1].name}")
-    end
-
-    should "return posts for the noter:<any|none> metatag" do
-      posts = FactoryBot.create_list(:post, 2)
-      FactoryBot.create(:note, post: posts[0], is_active: true)
-      FactoryBot.create(:note, post: posts[1], is_active: false)
-
-      assert_tag_match([posts[0]], "noter:any")
-      assert_tag_match([posts[1]], "noter:none")
-    end
-
-    should "return posts for the note_count:<N> metatag" do
-      posts = FactoryBot.create_list(:post, 3)
-      FactoryBot.create(:note, post: posts[0], is_active: true)
-      FactoryBot.create(:note, post: posts[1], is_active: false)
-
-      assert_tag_match([posts[1], posts[0]], "note_count:1")
-      assert_tag_match([posts[0]], "active_note_count:1")
-      assert_tag_match([posts[1]], "deleted_note_count:1")
-
-      assert_tag_match([posts[1], posts[0]], "notes:1")
-      assert_tag_match([posts[0]], "active_notes:1")
-      assert_tag_match([posts[1]], "deleted_notes:1")
-    end
-
-    should "return posts for the artcomm:<name> metatag" do
-      users = FactoryBot.create_list(:user, 2)
-      posts = FactoryBot.create_list(:post, 2)
-      users.zip(posts).map do |u, p|
-        CurrentUser.scoped(u) { FactoryBot.create(:artist_commentary, post: p) }
-      end
-
-      assert_tag_match([posts[0]], "artcomm:#{users[0].name}")
-      assert_tag_match([posts[1]], "artcomm:#{users[1].name}")
-    end
-
-    should "return posts for the date:<d> metatag" do
-      post = FactoryBot.create(:post, created_at: Time.parse("2017-01-01 12:00"))
-
-      assert_tag_match([post], "date:2017-01-01")
-    end
-
-    should "return posts for the age:<n> metatag" do
-      post = FactoryBot.create(:post)
-
-      assert_tag_match([post], "age:<60")
-      assert_tag_match([post], "age:<60s")
-      assert_tag_match([post], "age:<1mi")
-      assert_tag_match([post], "age:<1h")
-      assert_tag_match([post], "age:<1d")
-      assert_tag_match([post], "age:<1w")
-      assert_tag_match([post], "age:<1mo")
-      assert_tag_match([post], "age:<1y")
-    end
-
-    should "return posts for the ratio:<x:y> metatag" do
-      post = FactoryBot.create(:post, image_width: 1000, image_height: 500)
-
-      assert_tag_match([post], "ratio:2:1")
-      assert_tag_match([post], "ratio:2.0")
-    end
-
-    should "return posts for the status:<type> metatag" do
-      pending = FactoryBot.create(:post, is_pending: true)
-      flagged = FactoryBot.create(:post, is_flagged: true)
-      deleted = FactoryBot.create(:post, is_deleted: true)
-      banned  = FactoryBot.create(:post, is_banned: true)
-      all = [banned, deleted, flagged, pending]
-
-      assert_tag_match([flagged, pending], "status:modqueue")
-      assert_tag_match([pending], "status:pending")
-      assert_tag_match([flagged], "status:flagged")
-      assert_tag_match([deleted], "status:deleted")
-      assert_tag_match([banned],  "status:banned")
-      assert_tag_match([], "status:active")
-      assert_tag_match(all, "status:any")
-      assert_tag_match(all, "status:all")
-
-      assert_tag_match(all - [flagged, pending], "-status:modqueue")
-      assert_tag_match(all - [pending], "-status:pending")
-      assert_tag_match(all - [flagged], "-status:flagged")
-      assert_tag_match(all - [deleted], "-status:deleted")
-      assert_tag_match(all - [banned],  "-status:banned")
-      assert_tag_match(all, "-status:active")
-    end
-
-    should "return posts for the status:unmoderated metatag" do
-      flagged = FactoryBot.create(:post, is_flagged: true)
-      pending = FactoryBot.create(:post, is_pending: true)
-      disapproved = FactoryBot.create(:post, is_pending: true)
-
-      FactoryBot.create(:post_flag, post: flagged)
-      FactoryBot.create(:post_disapproval, post: disapproved, reason: "disinterest")
-
-      assert_tag_match([pending, flagged], "status:unmoderated")
-    end
-
-    should "respect the 'Deleted post filter' option when using the status:banned metatag" do
-      deleted = FactoryBot.create(:post, is_deleted: true, is_banned: true)
-      undeleted = FactoryBot.create(:post, is_banned: true)
-
-      CurrentUser.hide_deleted_posts = true
-      assert_tag_match([undeleted], "status:banned")
-
-      CurrentUser.hide_deleted_posts = false
-      assert_tag_match([undeleted, deleted], "status:banned")
-    end
-
-    should "return posts for the filetype:<ext> metatag" do
-      png = FactoryBot.create(:post, file_ext: "png")
-      jpg = FactoryBot.create(:post, file_ext: "jpg")
-
-      assert_tag_match([png], "filetype:png")
-      assert_tag_match([jpg], "-filetype:png")
-    end
-
-    should "return posts for the tagcount:<n> metatags" do
-      post = FactoryBot.create(:post, tag_string: "artist:wokada copyright:vocaloid char:hatsune_miku twintails")
-
-      assert_tag_match([post], "tagcount:4")
-      assert_tag_match([post], "arttags:1")
-      assert_tag_match([post], "copytags:1")
-      assert_tag_match([post], "chartags:1")
-      assert_tag_match([post], "gentags:1")
-    end
-
-    should "return posts for the md5:<md5> metatag" do
-      post1 = FactoryBot.create(:post, :md5 => "abcd")
-      post2 = FactoryBot.create(:post)
-
-      assert_tag_match([post1], "md5:abcd")
-    end
-
-    should "return posts for a source search" do
-      post1 = FactoryBot.create(:post, :source => "abcd")
-      post2 = FactoryBot.create(:post, :source => "abcdefg")
-      post3 = FactoryBot.create(:post, :source => "")
-
-      assert_tag_match([post2], "source:abcde")
-      assert_tag_match([post3, post1], "-source:abcde")
-
-      assert_tag_match([post3], "source:none")
-      assert_tag_match([post2, post1], "-source:none")
-    end
-
-    should "return posts for a case insensitive source search" do
-      post1 = FactoryBot.create(:post, :source => "ABCD")
-      post2 = FactoryBot.create(:post, :source => "1234")
-
-      assert_tag_match([post1], "source:abcd")
-    end
-
-    should "return posts for a pixiv source search" do
-      url = "http://i1.pixiv.net/img123/img/artist-name/789.png"
-      post = FactoryBot.create(:post, :source => url)
-
-      assert_tag_match([post], "source:*.pixiv.net/img*/artist-name/*")
-      assert_tag_match([],     "source:*.pixiv.net/img*/artist-fake/*")
-      assert_tag_match([post], "source:http://*.pixiv.net/img*/img/artist-name/*")
-      assert_tag_match([],     "source:http://*.pixiv.net/img*/img/artist-fake/*")
-    end
-
-    should "return posts for a pixiv id search (type 1)" do
-      url = "http://i1.pixiv.net/img-inf/img/2013/03/14/03/02/36/34228050_s.jpg"
-      post = FactoryBot.create(:post, :source => url)
-      assert_tag_match([post], "pixiv_id:34228050")
-    end
-
-    should "return posts for a pixiv id search (type 2)" do
-      url = "http://i1.pixiv.net/img123/img/artist-name/789.png"
-      post = FactoryBot.create(:post, :source => url)
-      assert_tag_match([post], "pixiv_id:789")
-    end
-
-    should "return posts for a pixiv id search (type 3)" do
-      url = "http://www.pixiv.net/member_illust.php?mode=manga_big&illust_id=19113635&page=0"
-      post = FactoryBot.create(:post, :source => url)
-      assert_tag_match([post], "pixiv_id:19113635")
-    end
-
-    should "return posts for a pixiv id search (type 4)" do
-      url = "http://i2.pixiv.net/img70/img/disappearedstump/34551381_p3.jpg?1364424318"
-      post = FactoryBot.create(:post, :source => url)
-      assert_tag_match([post], "pixiv_id:34551381")
-    end
-
-    should "return posts for a pixiv_id:any search" do
-      url = "http://i1.pixiv.net/img-original/img/2014/10/02/13/51/23/46304396_p0.png"
-      post = FactoryBot.create(:post, source: url)
-      assert_tag_match([post], "pixiv_id:any")
-    end
-
-    should "return posts for a pixiv_id:none search" do
-      post = FactoryBot.create(:post)
-      assert_tag_match([post], "pixiv_id:none")
-    end
-
-    context "saved searches" do
-      setup do
-        @post1 = FactoryBot.create(:post, tag_string: "aaa")
-        @post2 = FactoryBot.create(:post, tag_string: "bbb")
-        FactoryBot.create(:saved_search, query: "aaa", labels: ["zzz"], user: CurrentUser.user)
-        FactoryBot.create(:saved_search, query: "bbb", user: CurrentUser.user)
-      end
-
-      context "labeled" do
-        should "work" do
-          SavedSearch.expects(:post_ids_for).with(CurrentUser.id, label: "zzz").returns([@post1.id])
-          assert_tag_match([@post1], "search:zzz")
-        end
-      end
-
-      context "missing" do
-        should "work" do
-          SavedSearch.expects(:post_ids_for).with(CurrentUser.id, label: "uncategorized").returns([@post2.id])
-          assert_tag_match([@post2], "search:uncategorized")
-        end
-      end
-
-      context "all" do
-        should "work" do
-          SavedSearch.expects(:post_ids_for).with(CurrentUser.id).returns([@post1.id, @post2.id])
-          assert_tag_match([@post2, @post1], "search:all")
-        end
-      end
-    end
-
-    should "return posts for a rating:<s|q|e> metatag" do
-      s = FactoryBot.create(:post, :rating => "s")
-      q = FactoryBot.create(:post, :rating => "q")
-      e = FactoryBot.create(:post, :rating => "e")
-      all = [e, q, s]
-
-      assert_tag_match([s], "rating:s")
-      assert_tag_match([q], "rating:q")
-      assert_tag_match([e], "rating:e")
-
-      assert_tag_match(all - [s], "-rating:s")
-      assert_tag_match(all - [q], "-rating:q")
-      assert_tag_match(all - [e], "-rating:e")
-    end
-
-    should "return posts for a locked:<rating|note|status> metatag" do
-      rating_locked = FactoryBot.create(:post, is_rating_locked: true)
-      note_locked   = FactoryBot.create(:post, is_note_locked: true)
-      status_locked = FactoryBot.create(:post, is_status_locked: true)
-      all = [status_locked, note_locked, rating_locked]
-
-      assert_tag_match([rating_locked], "locked:rating")
-      assert_tag_match([note_locked], "locked:note")
-      assert_tag_match([status_locked], "locked:status")
-
-      assert_tag_match(all - [rating_locked], "-locked:rating")
-      assert_tag_match(all - [note_locked], "-locked:note")
-      assert_tag_match(all - [status_locked], "-locked:status")
-    end
-
-    should "return posts for a upvote:<user>, downvote:<user> metatag" do
-      CurrentUser.scoped(FactoryBot.create(:mod_user)) do
-        upvoted   = FactoryBot.create(:post, tag_string: "upvote:self")
-        downvoted = FactoryBot.create(:post, tag_string: "downvote:self")
-
-        assert_tag_match([upvoted],   "upvote:#{CurrentUser.name}")
-        assert_tag_match([downvoted], "downvote:#{CurrentUser.name}")
-      end
-    end
-
-    should "return posts for a disapproval:<type> metatag" do
-      CurrentUser.scoped(FactoryBot.create(:mod_user)) do
-        pending     = FactoryBot.create(:post, is_pending: true)
-        disapproved = FactoryBot.create(:post, is_pending: true)
-        disapproval = FactoryBot.create(:post_disapproval, post: disapproved, reason: "disinterest")
-
-        assert_tag_match([pending],     "disapproval:none")
-        assert_tag_match([disapproved], "disapproval:any")
-        assert_tag_match([disapproved], "disapproval:disinterest")
-        assert_tag_match([],            "disapproval:breaks_rules")
-
-        assert_tag_match([disapproved],          "-disapproval:none")
-        assert_tag_match([pending],              "-disapproval:any")
-        assert_tag_match([pending],              "-disapproval:disinterest")
-        assert_tag_match([disapproved, pending], "-disapproval:breaks_rules")
-      end
-    end
-
-    should "return posts ordered by a particular attribute" do
-      posts = (1..2).map do |n|
-        tags = ["tagme", "gentag1 gentag2 artist:arttag char:chartag copy:copytag"]
-
-        p = FactoryBot.create(
-          :post,
-          score: n,
-          fav_count: n,
-          file_size: 1.megabyte * n,
-          # posts[0] is portrait, posts[1] is landscape. posts[1].mpixels > posts[0].mpixels.
-          image_height: 100 * n * n,
-          image_width: 100 * (3 - n) * n,
-          tag_string: tags[n - 1]
-        )
-
-        FactoryBot.create(:artist_commentary, post: p)
-        FactoryBot.create(:comment, post: p, do_not_bump_post: false)
-        FactoryBot.create(:note, post: p)
-        p
-      end
-
-      FactoryBot.create(:note, post: posts.second)
-
-      assert_tag_match(posts.reverse, "order:id_desc")
-      assert_tag_match(posts.reverse, "order:score")
-      assert_tag_match(posts.reverse, "order:favcount")
-      assert_tag_match(posts.reverse, "order:change")
-      assert_tag_match(posts.reverse, "order:comment")
-      assert_tag_match(posts.reverse, "order:comment_bumped")
-      assert_tag_match(posts.reverse, "order:note")
-      assert_tag_match(posts.reverse, "order:artcomm")
-      assert_tag_match(posts.reverse, "order:mpixels")
-      assert_tag_match(posts.reverse, "order:portrait")
-      assert_tag_match(posts.reverse, "order:filesize")
-      assert_tag_match(posts.reverse, "order:tagcount")
-      assert_tag_match(posts.reverse, "order:gentags")
-      assert_tag_match(posts.reverse, "order:arttags")
-      assert_tag_match(posts.reverse, "order:chartags")
-      assert_tag_match(posts.reverse, "order:copytags")
-      assert_tag_match(posts.reverse, "order:rank")
-      assert_tag_match(posts.reverse, "order:note_count")
-      assert_tag_match(posts.reverse, "order:note_count_desc")
-      assert_tag_match(posts.reverse, "order:notes")
-      assert_tag_match(posts.reverse, "order:notes_desc")
-
-      assert_tag_match(posts, "order:id_asc")
-      assert_tag_match(posts, "order:score_asc")
-      assert_tag_match(posts, "order:favcount_asc")
-      assert_tag_match(posts, "order:change_asc")
-      assert_tag_match(posts, "order:comment_asc")
-      assert_tag_match(posts, "order:comment_bumped_asc")
-      assert_tag_match(posts, "order:artcomm_asc")
-      assert_tag_match(posts, "order:note_asc")
-      assert_tag_match(posts, "order:mpixels_asc")
-      assert_tag_match(posts, "order:landscape")
-      assert_tag_match(posts, "order:filesize_asc")
-      assert_tag_match(posts, "order:tagcount_asc")
-      assert_tag_match(posts, "order:gentags_asc")
-      assert_tag_match(posts, "order:arttags_asc")
-      assert_tag_match(posts, "order:chartags_asc")
-      assert_tag_match(posts, "order:copytags_asc")
-      assert_tag_match(posts, "order:note_count_asc")
-      assert_tag_match(posts, "order:notes_asc")
-    end
-
-    should "return posts for order:comment_bumped" do
-      post1 = FactoryBot.create(:post)
-      post2 = FactoryBot.create(:post)
-      post3 = FactoryBot.create(:post)
-
-      CurrentUser.scoped(FactoryBot.create(:gold_user), "127.0.0.1") do
-        comment1 = FactoryBot.create(:comment, :post => post1)
-        comment2 = FactoryBot.create(:comment, :post => post2, :do_not_bump_post => true)
-        comment3 = FactoryBot.create(:comment, :post => post3)
-      end
-
-      assert_tag_match([post3, post1, post2], "order:comment_bumped")
-      assert_tag_match([post2, post1, post3], "order:comment_bumped_asc")
-    end
-
-    should "return posts for a filesize search" do
-      post = FactoryBot.create(:post, :file_size => 1.megabyte)
-
-      assert_tag_match([post], "filesize:1mb")
-      assert_tag_match([post], "filesize:1000kb")
-      assert_tag_match([post], "filesize:1048576b")
-    end
-
-    should "not perform fuzzy matching for an exact filesize search" do
-      post = FactoryBot.create(:post, :file_size => 1.megabyte)
-
-      assert_tag_match([], "filesize:1048000b")
-      assert_tag_match([], "filesize:1048000")
-    end
-
-    should "resolve aliases to the actual tag" do
-      create(:tag_alias, antecedent_name: "kitten", consequent_name: "cat")
-      post1 = create(:post, tag_string: "cat")
-      post2 = create(:post, tag_string: "dog")
-
-      assert_tag_match([post1], "kitten")
-      assert_tag_match([post2], "-kitten")
-    end
-
-    should "fail for more than 6 tags" do
-      post1 = FactoryBot.create(:post, :rating => "s")
-
-      assert_raise(::Post::SearchError) do
-        Post.tag_match("a b c rating:s width:10 height:10 user:bob")
-      end
-    end
-
-    should "not count free tags against the user's search limit" do
-      post1 = FactoryBot.create(:post, tag_string: "aaa bbb rating:s")
-
-      Danbooru.config.expects(:is_unlimited_tag?).with("rating:s").once.returns(true)
-      Danbooru.config.expects(:is_unlimited_tag?).with(anything).twice.returns(false)
-      assert_tag_match([post1], "aaa bbb rating:s")
-    end
-
-    should "succeed for exclusive tag searches with no other tag" do
-      post1 = FactoryBot.create(:post, :rating => "s", :tag_string => "aaa")
-      assert_nothing_raised do
-        relation = Post.tag_match("-aaa")
-      end
-    end
-
-    should "succeed for exclusive tag searches combined with a metatag" do
-      post1 = FactoryBot.create(:post, :rating => "s", :tag_string => "aaa")
-      assert_nothing_raised do
-        relation = Post.tag_match("-aaa id:>0")
-      end
-    end
-  end
-
   context "Voting:" do
-    context "with a super voter" do
-      setup do
-        @user = FactoryBot.create(:user)
-        FactoryBot.create(:super_voter, user: @user)
-        @post = FactoryBot.create(:post)
-      end
-
-      should "account for magnitude" do
-        CurrentUser.scoped(@user, "127.0.0.1") do
-          assert_nothing_raised {@post.vote!("up")}
-          assert_raises(PostVote::Error) {@post.vote!("up")}
-          @post.reload
-          assert_equal(1, PostVote.count)
-          assert_equal(SuperVoter::MAGNITUDE, @post.score)
-        end
-      end
-    end
-
     should "not allow members to vote" do
       @user = FactoryBot.create(:user)
       @post = FactoryBot.create(:post)
@@ -2591,6 +1983,13 @@ class PostTest < ActiveSupport::TestCase
           Cache.expects(:put).with(Post.count_cache_key("aaa score:42"), 1, 180)
           Post.fast_count("aaa score:42")
         end
+
+        should "work with the hide_deleted_posts option turned on" do
+          user = create(:user, hide_deleted_posts: true)
+          as(user) do
+            assert_equal(1, Post.fast_count("aaa score:42"))
+          end
+        end
       end
 
       context "a blank search" do
@@ -2641,8 +2040,6 @@ class PostTest < ActiveSupport::TestCase
             post1 = FactoryBot.create(:post, tag_string: "aaa bbb rating:s")
             post2 = FactoryBot.create(:post, tag_string: "aaa bbb rating:e")
 
-            Danbooru.config.expects(:is_unlimited_tag?).with("rating:s").once.returns(true)
-            Danbooru.config.expects(:is_unlimited_tag?).with(anything).twice.returns(false)
             assert_equal(1, Post.fast_count("aaa bbb"))
           end
 
@@ -2696,7 +2093,7 @@ class PostTest < ActiveSupport::TestCase
 
     context "a post that has been updated" do
       setup do
-        PostArchive.sqs_service.stubs(:merge?).returns(false)
+        PostVersion.sqs_service.stubs(:merge?).returns(false)
         @post = FactoryBot.create(:post, :rating => "q", :tag_string => "aaa", :source => "")
         @post.reload
         @post.update(:tag_string => "aaa bbb ccc ddd")
@@ -2737,35 +2134,9 @@ class PostTest < ActiveSupport::TestCase
     should "generate the correct urls for animated gifs" do
       @post = FactoryBot.build(:post, md5: "deadbeef", file_ext: "gif", tag_string: "animated_gif")
 
-      assert_equal("https://#{Socket.gethostname}/data/preview/deadbeef.jpg", @post.preview_file_url)
-      assert_equal("https://#{Socket.gethostname}/data/deadbeef.gif", @post.large_file_url)
-      assert_equal("https://#{Socket.gethostname}/data/deadbeef.gif", @post.file_url)
-    end
-  end
-
-  context "Notes:" do
-    context "#copy_notes_to" do
-      setup do
-        @src = FactoryBot.create(:post, image_width: 100, image_height: 100, tag_string: "translated partially_translated", has_embedded_notes: true)
-        @dst = FactoryBot.create(:post, image_width: 200, image_height: 200, tag_string: "translation_request")
-
-        @src.notes.create(x: 10, y: 10, width: 10, height: 10, body: "test")
-        @src.notes.create(x: 10, y: 10, width: 10, height: 10, body: "deleted", is_active: false)
-        @src.reload
-
-        @src.copy_notes_to(@dst)
-      end
-
-      should "copy notes and tags" do
-        assert_equal(1, @dst.notes.active.length)
-        assert_equal(true, @dst.has_embedded_notes)
-        assert_equal("lowres partially_translated translated", @dst.tag_string)
-      end
-
-      should "rescale notes" do
-        note = @dst.notes.active.first
-        assert_equal([20, 20, 20, 20], [note.x, note.y, note.width, note.height])
-      end
+      assert_equal("https://localhost/data/preview/deadbeef.jpg", @post.preview_file_url)
+      assert_equal("https://localhost/data/deadbeef.gif", @post.large_file_url)
+      assert_equal("https://localhost/data/deadbeef.gif", @post.file_url)
     end
   end
 

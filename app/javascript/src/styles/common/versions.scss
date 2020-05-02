@@ -1,0 +1,25 @@
+body.a-index {
+  div#p-revert-listing {
+    display: flex;
+
+    table.striped {
+      flex: 1;
+    }
+  }
+
+  div#p-revert-listing  > article.post-preview {
+    margin-top: 2em;
+  }
+}
+
+div#version-comparisons {
+  margin-bottom: 1em;
+
+  span {
+    font-weight: bold;
+  }
+
+  ul#version-comparisons-list, ul#version-comparisons-list li {
+    display: inline;
+  }
+}

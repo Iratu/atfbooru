@@ -1,13 +1,13 @@
 class TagBatchChangeJob < ApplicationJob
-  class Error < Exception; end
+  class Error < StandardError; end
 
-  queue_as :default
+  queue_as :bulk_update
 
   def perform(antecedent, consequent, updater, updater_ip_addr)
     raise Error.new("antecedent is missing") if antecedent.blank?
 
-    normalized_antecedent = TagAlias.to_aliased(::Tag.scan_tags(antecedent.mb_chars.downcase))
-    normalized_consequent = TagAlias.to_aliased(::Tag.scan_tags(consequent.mb_chars.downcase))
+    normalized_antecedent = TagAlias.to_aliased(PostQueryBuilder.new(antecedent.mb_chars.downcase).split_query)
+    normalized_consequent = TagAlias.to_aliased(PostQueryBuilder.new(consequent.mb_chars.downcase).parse_tag_edit)
 
     CurrentUser.without_safe_mode do
       CurrentUser.scoped(updater, updater_ip_addr) do
@@ -20,22 +20,17 @@ class TagBatchChangeJob < ApplicationJob
     end
   end
 
-  def self.estimate_update_count(antecedent, consequent)
-    CurrentUser.without_safe_mode do
-      Post.tag_match(antecedent).count
-    end
-  end
-
   def migrate_posts(normalized_antecedent, normalized_consequent)
     ::Post.tag_match(normalized_antecedent.join(" ")).find_each do |post|
-      post.reload
-      tags = (post.tag_array - normalized_antecedent + normalized_consequent).join(" ")
-      post.update(tag_string: tags)
+      post.with_lock do
+        tags = (post.tag_array - normalized_antecedent + normalized_consequent).join(" ")
+        post.update(tag_string: tags)
+      end
     end
   end
 
   def migrate_saved_searches(normalized_antecedent, normalized_consequent)
-    tags = Tag.scan_tags(normalized_antecedent.join(" "), strip_metatags: true)
+    tags = PostQueryBuilder.new(normalized_antecedent.join(" ")).split_query
 
     # https://www.postgresql.org/docs/current/static/functions-array.html
     saved_searches = SavedSearch.where("string_to_array(query, ' ') @> ARRAY[?]", tags)
@@ -50,7 +45,7 @@ class TagBatchChangeJob < ApplicationJob
     query = normalized_antecedent
     adds = normalized_consequent
     arel = query.inject(User.none) do |scope, x|
-      scope.or(User.where("blacklisted_tags like ?", "%" + x.to_escaped_for_sql_like + "%"))
+      scope.or(User.where_like(:blacklisted_tags, "*#{x}*"))
     end
 
     arel.find_each do |user|
@@ -58,7 +53,7 @@ class TagBatchChangeJob < ApplicationJob
 
       begin
         repl = user.blacklisted_tags.split(/\r\n|\r|\n/).map do |line|
-          list = Tag.scan_tags(line)
+          list = PostQueryBuilder.new(line).split_query
 
           if (list & query).size != query.size
             next line

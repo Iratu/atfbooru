@@ -1,5 +1,4 @@
 class UserUpgradesController < ApplicationController
-  before_action :member_only, only: [:show]
   helper_method :user
   skip_before_action :verify_authenticity_token, only: [:create]
 
@@ -13,6 +12,7 @@ class UserUpgradesController < ApplicationController
   end
 
   def show
+    authorize User, :upgrade?
   end
 
   def user
@@ -30,13 +30,13 @@ class UserUpgradesController < ApplicationController
 
     if params[:desc] == "Upgrade to Gold"
       level = User::Levels::GOLD
-      cost = 2000
+      cost = UserUpgrade.gold_price
     elsif params[:desc] == "Upgrade to Platinum"
       level = User::Levels::PLATINUM
-      cost = 4000
+      cost = UserUpgrade.platinum_price
     elsif params[:desc] == "Upgrade Gold to Platinum" && @user.level == User::Levels::GOLD
       level = User::Levels::PLATINUM
-      cost = 2000
+      cost = UserUpgrade.upgrade_price
     else
       raise "Invalid desc"
     end

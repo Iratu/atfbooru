@@ -178,7 +178,7 @@ module Sources
       end
 
       def artists
-        Artist.find_artists(normalize_for_artist_finder.to_s)
+        ArtistFinder.find_artists(normalize_for_artist_finder.to_s)
       end
 
       # A new artist entry with suggested defaults for when the artist doesn't
@@ -240,11 +240,6 @@ module Sources
         self.class.to_dtext(artist_commentary_desc)
       end
 
-      # A strategy may return extra data unrelated to the file
-      def data
-        return {}
-      end
-
       # A search query that should return any posts that were previously
       # uploaded from the same source. These may be duplicates, or they may be
       # other posts from the same gallery.
@@ -274,6 +269,8 @@ module Sources
           :artists => artists.as_json(include: :sorted_urls),
           :image_url => image_url,
           :image_urls => image_urls,
+          :preview_url => preview_url,
+          :preview_urls => preview_urls,
           :page_url => page_url,
           :canonical_url => canonical_url,
           :normalized_for_artist_finder_url => normalize_for_artist_finder,

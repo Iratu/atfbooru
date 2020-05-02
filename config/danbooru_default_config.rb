@@ -25,24 +25,14 @@ module Danbooru
       "Danbooru"
     end
 
-    def description
-      "Find good anime art fast"
-    end
-
     # The canonical hostname of the site.
     def hostname
       Socket.gethostname
     end
 
-    # The list of all domain names this site is accessible under.
-    # Example: %w[danbooru.donmai.us sonohara.donmai.us hijiribe.donmai.us safebooru.donmai.us]
-    def hostnames
-      [hostname]
-    end
-
     # Contact email address of the admin.
     def contact_email
-      "webmaster@#{server_host}"
+      "webmaster@#{hostname}"
     end
 
     # System actions, such as sending automated dmails, will be performed with
@@ -51,15 +41,6 @@ module Danbooru
     # Run `rake db:seed` to create this account if it doesn't already exist in your install.
     def system_user
       "DanbooruBot"
-    end
-
-    def upload_feedback_topic
-      ForumTopic.where(title: "Upload Feedback Thread").first
-    end
-
-    # The ID of the "Curated" pool. If present, this pool will be updated daily with curated posts.
-    def curated_pool_id
-      nil
     end
 
     def source_code_url
@@ -74,17 +55,11 @@ module Danbooru
       "#{source_code_url}/issues"
     end
 
-    # This is a salt used to make dictionary attacks on account passwords harder.
-    def password_salt
-      "choujin-steiner"
-    end
-
     # Set the default level, permissions, and other settings for new users here.
     def customize_new_user(user)
       # user.level = User::Levels::MEMBER
       # user.can_approve_posts = false
       # user.can_upload_free = false
-      # user.is_super_voter = false
       #
       # user.comment_threshold = -1
       # user.blacklisted_tags = ["spoilers", "guro", "scat", "furry -rating:s"].join("\n")
@@ -92,6 +67,11 @@ module Danbooru
       # user.per_page = 20
       # user.disable_tagged_filenames = false
       true
+    end
+
+    # An array of regexes containing disallowed usernames.
+    def user_name_blacklist
+      []
     end
 
     # Thumbnail size
@@ -102,15 +82,6 @@ module Danbooru
     # Large resize image width. Set to nil to disable.
     def large_image_width
       850
-    end
-
-    def large_image_prefix
-      "sample-"
-    end
-
-    # When calculating statistics based on the posts table, gather this many posts to sample from.
-    def post_sample_size
-      300
     end
 
     # After a post receives this many comments, new comments will no longer bump the post in comment/index.
@@ -137,8 +108,8 @@ module Danbooru
     end
 
     # Return true if the given tag shouldn't count against the user's tag search limit.
-    def is_unlimited_tag?(tag)
-      tag.match?(/\A(-?status:deleted|rating:s.*|limit:.+)\z/i)
+    def is_unlimited_tag?(term)
+      term.type == :metatag && term.name.in?(%w[status rating limit])
     end
 
     # After this many pages, the paginator will switch to sequential mode.
@@ -167,10 +138,6 @@ module Danbooru
       40000
     end
 
-    def member_comment_time_threshold
-      1.week.ago
-    end
-
     # https://guides.rubyonrails.org/action_mailer_basics.html#action-mailer-configuration
     # https://guides.rubyonrails.org/configuring.html#configuring-action-mailer
     def mail_delivery_method
@@ -185,38 +152,6 @@ module Danbooru
         # password: "pass",
         # authentication: :login
       }
-    end
-
-    # Permanently redirect all HTTP requests to HTTPS.
-    #
-    # https://en.wikipedia.org/wiki/HTTP_Strict_Transport_Security
-    # http://api.rubyonrails.org/classes/ActionDispatch/SSL.html
-    def ssl_options
-      {
-        redirect: { exclude: ->(request) { request.subdomain == "insecure" } },
-        hsts: {
-          expires: 1.year,
-          preload: true,
-          subdomains: false
-        }
-      }
-    end
-
-    # Disable the forced use of HTTPS.
-    # def ssl_options
-    #   false
-    # end
-
-    # The name of the server the app is hosted on.
-    def server_host
-      Socket.gethostname
-    end
-
-    # Names of all Danbooru servers which serve out of the same common database.
-    # Used in conjunction with load balancing to distribute files from one server to
-    # the others. This should match whatever gethostname returns on the other servers.
-    def all_server_hosts
-      [server_host]
     end
 
     # The method to use for storing image files.
@@ -349,45 +284,19 @@ module Danbooru
       nil
     end
 
-    def upload_notice_wiki_page
-      "help:upload_notice"
-    end
-
-    def flag_notice_wiki_page
-      "help:flag_notice"
-    end
-
-    def appeal_notice_wiki_page
-      "help:appeal_notice"
-    end
-
-    def replacement_notice_wiki_page
-      "help:replacement_notice"
-    end
-
     # The number of posts displayed per page.
     def posts_per_page
       20
     end
 
-    def is_post_restricted?(post)
-      false
+    # Tags that are not visible in safe mode.
+    def safe_mode_restricted_tags
+      restricted_tags + %w[censored condom nipples nude penis pussy sexually_suggestive]
     end
 
-    def is_user_restricted?(user)
-      !user.is_gold?
-    end
-
-    def can_user_see_post?(user, post)
-      if is_user_restricted?(user) && is_post_restricted?(post)
-        false
-      else
-        true
-      end
-    end
-
-    def max_appeals_per_day
-      1
+    # Tags that are only visible to Gold+ users.
+    def restricted_tags
+      []
     end
 
     # Counting every post is typically expensive because it involves a sequential scan on
@@ -446,23 +355,15 @@ module Danbooru
       nil
     end
 
-    def enable_dimension_autotagging
-      true
-    end
-
     # Should return true if the given tag should be suggested for removal in the post replacement dialog box.
     def remove_tag_after_replacement?(tag)
       tag =~ /\A(?:replaceme|.*_sample|resized|upscaled|downscaled|md5_mismatch|jpeg_artifacts|corrupted_image|source_request|non-web_source)\z/i
     end
 
-    # Posts with these tags will be highlighted yellow in the modqueue.
-    def modqueue_quality_warning_tags
-      %w[hard_translated self_upload nude_filter third-party_edit screencap]
-    end
-
-    # Posts with these tags will be highlighted red in the modqueue.
-    def modqueue_sample_warning_tags
-      %w[duplicate image_sample md5_mismatch resized upscaled downscaled]
+    # Posts with these tags will be highlighted in the modqueue.
+    def modqueue_warning_tags
+      %w[hard_translated self_upload nude_filter third-party_edit screencap
+      duplicate image_sample md5_mismatch resized upscaled downscaled]
     end
 
     def stripe_secret_key
@@ -496,11 +397,6 @@ module Danbooru
     # you should override this
     def email_key
       "zDMSATq0W3hmA5p3rKTgD"
-    end
-
-    # impose additional requirements to create tag aliases and implications
-    def strict_tag_requirements
-      true
     end
 
     # For downloads, if the host matches any of these IPs, block it
@@ -539,9 +435,6 @@ module Danbooru
     def twitter_site
     end
 
-    def addthis_key
-    end
-
     # include essential tags in image urls (requires nginx/apache rewrites)
     def enable_seo_post_urls
       false
@@ -550,11 +443,6 @@ module Danbooru
     # enable some (donmai-specific) optimizations for post counts
     def estimate_post_counts
       false
-    end
-
-    # disable this for tests
-    def enable_sock_puppet_validation?
-      true
     end
 
     # Enables recording of popular searches, missed searches, and post view
@@ -620,6 +508,31 @@ module Danbooru
 
     def rakismet_url
       "https://#{hostname}"
+    end
+
+    # API key for https://ipregistry.co. Used for looking up IP address
+    # information and for detecting proxies during signup.
+    def ip_registry_api_key
+      nil
+    end
+
+    # The whitelist of email domains allowed for account verification purposes.
+    # If a user signs up from a proxy, they must verify their account using an
+    # email address from one of the domains on this list before they can do
+    # anything on the site. This is meant to prevent users from using
+    # disposable emails to create sockpuppet accounts.
+    #
+    # If this list is empty or nil, then there are no restrictions on which
+    # email domains can be used to verify accounts.
+    def email_domain_verification_list
+      # ["gmail.com", "outlook.com", "yahoo.com"]
+      []
+    end
+
+    # API key for Google Maps. Used for embedding maps on IP address lookup pages.
+    # Generate at https://console.developers.google.com/apis/credentials
+    def google_maps_api_key
+      nil
     end
 
     # Cloudflare API token. Used to purge URLs from Cloudflare's cache when a

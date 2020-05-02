@@ -17,7 +17,6 @@ class CommentTest < ActiveSupport::TestCase
       setup do
         @post = FactoryBot.create(:post)
         Danbooru.config.stubs(:member_comment_limit).returns(100)
-        Danbooru.config.stubs(:member_comment_time_threshold).returns(1.week.from_now)
       end
 
       context "added in an edit" do
@@ -72,7 +71,7 @@ class CommentTest < ActiveSupport::TestCase
 
           dmail = Dmail.last
           assert_equal(<<-EOS.strip_heredoc, dmail.body)
-            @#{CurrentUser.name} mentioned you in a \"comment\":/posts/#{@comment.post_id}#comment-#{@comment.id} on post ##{@comment.post_id}:
+            @#{@comment.creator.name} mentioned you in a \"comment\":/posts/#{@comment.post_id}#comment-#{@comment.id} on post ##{@comment.post_id}:
 
             [quote]
             Hey @#{@user2.name} check this out!
@@ -82,24 +81,9 @@ class CommentTest < ActiveSupport::TestCase
       end
     end
 
-    context "created by a limited user" do
-      setup do
-        Danbooru.config.stubs(:member_comment_limit).returns(5)
-        Danbooru.config.stubs(:member_comment_time_threshold).returns(1.week.ago)
-      end
-
-      should "fail creation" do
-        post = FactoryBot.create(:post)
-        comment = FactoryBot.build(:comment, post: post)
-        comment.save
-        assert_equal(["You can not post comments within 1 week of sign up"], comment.errors.full_messages)
-      end
-    end
-
     context "created by an unlimited user" do
       setup do
         Danbooru.config.stubs(:member_comment_limit).returns(100)
-        Danbooru.config.stubs(:member_comment_time_threshold).returns(1.week.from_now)
       end
 
       context "that is then deleted" do
@@ -113,12 +97,6 @@ class CommentTest < ActiveSupport::TestCase
         should "nullify the last_commented_at field" do
           assert_nil(@post.last_commented_at)
         end
-      end
-
-      should "be created" do
-        comment = FactoryBot.build(:comment)
-        comment.save
-        assert(comment.errors.empty?, comment.errors.full_messages.join(", "))
       end
 
       should "not validate if the post does not exist" do
@@ -195,7 +173,7 @@ class CommentTest < ActiveSupport::TestCase
       should "not allow upvotes by the creator" do
         user = FactoryBot.create(:user)
         post = FactoryBot.create(:post)
-        c1 = FactoryBot.create(:comment, :post => post)
+        c1 = create(:comment, post: post, creator: CurrentUser.user)
 
         exception = assert_raises(ActiveRecord::RecordInvalid) { c1.vote!("up") }
         assert_equal("Validation failed: You cannot upvote your own comments", exception.message)

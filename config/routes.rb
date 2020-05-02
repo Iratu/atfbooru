@@ -1,7 +1,6 @@
 Rails.application.routes.draw do
   namespace :admin do
     resources :users, :only => [:edit, :update]
-    resource  :alias_and_implication_import, :only => [:new, :create]
     resource  :dashboard, :only => [:show]
   end
   namespace :moderator do
@@ -11,22 +10,12 @@ Rails.application.routes.draw do
         get :search
       end
     end
-    resources :invitations, :only => [:new, :create, :index]
-    resource :tag, :only => [:edit, :update]
     namespace :post do
-      resource :queue, :only => [:show] do
-        member do
-          get :random
-        end
-      end
-      resource :approval, :only => [:create]
-      resources :disapprovals, :only => [:create, :index]
-      resources :posts, :only => [:delete, :undelete, :expunge, :confirm_delete] do
+      resources :posts, :only => [:delete, :expunge, :confirm_delete] do
         member do
           get :confirm_delete
           post :expunge
           post :delete
-          post :undelete
           get :confirm_move_favorites
           post :move_favorites
           get :confirm_ban
@@ -35,7 +24,6 @@ Rails.application.routes.draw do
         end
       end
     end
-    resources :invitations, :only => [:new, :create, :index, :show]
     resources :ip_addrs, :only => [:index, :search] do
       collection do
         get :search
@@ -46,10 +34,10 @@ Rails.application.routes.draw do
     resources :posts, :only => [] do
       collection do
         get :popular
+        get :curated
         get :viewed
         get :searches
         get :missed_searches
-        get :intro
       end
     end
   end
@@ -57,10 +45,7 @@ Rails.application.routes.draw do
     namespace :user do
       resource :count_fixes, only: [:new, :create]
       resource :email_notification, :only => [:show, :destroy]
-      resource :password_reset, :only => [:new, :create, :edit, :update]
       resource :deletion, :only => [:show, :destroy]
-      resource :email_change, :only => [:new, :create]
-      resource :dmail_filter, :only => [:edit, :update]
       resource :api_key, :only => [:show, :view, :update, :destroy] do
         post :view
       end
@@ -78,7 +63,7 @@ Rails.application.routes.draw do
       get :banned
     end
   end
-  resources :artist_urls, only: [:index, :update]
+  resources :artist_urls, only: [:index]
   resources :artist_versions, :only => [:index, :show] do
     collection do
       get :search
@@ -112,11 +97,7 @@ Rails.application.routes.draw do
       put :cancel
     end
   end
-  resources :dmails, :only => [:new, :create, :index, :show, :destroy] do
-    member do
-      post :spam
-      post :ham
-    end
+  resources :dmails, :only => [:new, :create, :update, :index, :show] do
     collection do
       post :mark_all_as_read
     end
@@ -142,18 +123,14 @@ Rails.application.routes.draw do
   resources :forum_topics do
     member do
       post :undelete
-      get :new_merge
-      post :create_merge
-      post :subscribe
-      post :unsubscribe
     end
     collection do
       post :mark_all_as_read
     end
-    resource :visit, :controller => "forum_topic_visits"
   end
-  resources :ip_bans
-  resources :ip_addresses, only: [:index]
+  resources :forum_topic_visits, only: [:index]
+  resources :ip_bans, only: [:index, :new, :create, :update]
+  resources :ip_addresses, only: [:show, :index], id: /.+?(?=\.json|\.xml|\.html)|.+/
   resource :iqdb_queries, :only => [:show, :create] do
     collection do
       get :preview
@@ -161,6 +138,8 @@ Rails.application.routes.draw do
     end
   end
   resources :mod_actions
+  resources :moderation_reports, only: [:new, :create, :index, :show]
+  resources :modqueue, only: [:index]
   resources :news_updates
   resources :notes do
     collection do
@@ -172,6 +151,8 @@ Rails.application.routes.draw do
   end
   resources :note_versions, :only => [:index, :show]
   resource :note_previews, :only => [:show]
+  resource :password_reset, only: [:create, :show]
+  resources :pixiv_ugoira_frame_data, only: [:index]
   resources :pools do
     member do
       put :revert
@@ -182,14 +163,13 @@ Rails.application.routes.draw do
     end
     resource :order, :only => [:edit], :controller => "pool_orders"
   end
-  resource :pool_element, :only => [:create, :destroy] do
-    collection do
-      get :all_select
-    end
-  end
+  resource :pool_element, :only => [:create]
   resources :pool_versions, :only => [:index] do
     member do
       get :diff
+    end
+    collection do
+      get :search
     end
   end
   resources :post_replacements, :only => [:index, :new, :create, :update]
@@ -215,7 +195,8 @@ Rails.application.routes.draw do
   end
   resources :post_appeals
   resources :post_flags
-  resources :post_approvals, only: [:index]
+  resources :post_approvals, only: [:create, :index]
+  resources :post_disapprovals, only: [:create, :show, :index]
   resources :post_versions, :only => [:index, :search] do
     member do
       put :undo
@@ -235,11 +216,8 @@ Rails.application.routes.draw do
   end
   resources :artist_commentary_versions, :only => [:index, :show]
   resource :related_tag, :only => [:show, :update]
-  get "reports/uploads" => "reports#uploads"
-  get "reports/upload_tags" => "reports#upload_tags"
-  get "reports/down_voting_post" => "reports#down_voting_post"
-  post "reports/down_voting_post_create" => "reports#down_voting_post_create"
   resources :recommended_posts, only: [:index]
+  resources :robots, only: [:index]
   resources :saved_searches, :except => [:show] do
     collection do
       get :labels
@@ -254,16 +232,8 @@ Rails.application.routes.draw do
       get :autocomplete
     end
   end
-  resources :tag_aliases do
-    member do
-      post :approve
-    end
-  end
-  resources :tag_implications do
-    member do
-      post :approve
-    end
-  end
+  resources :tag_aliases, only: [:show, :index, :destroy]
+  resources :tag_implications, only: [:show, :index, :destroy]
   resources :uploads do
     collection do
       post :preprocess
@@ -272,7 +242,11 @@ Rails.application.routes.draw do
     end
   end
   resources :users do
-    resource :password, :only => [:edit], :controller => "maintenance/user/passwords"
+    resources :favorite_groups, controller: "favorite_groups", only: [:index], as: "favorite_groups"
+    resource :email, only: [:show, :edit, :update] do
+      get :verify
+    end
+    resource :password, only: [:edit, :update]
     resource :api_key, :only => [:show, :view, :update, :destroy], :controller => "maintenance/user/api_keys" do
       post :view
     end
@@ -295,11 +269,6 @@ Rails.application.routes.draw do
       get :diff
     end
   end
-
-  # aliases
-  resources :wpages, :controller => "wiki_pages"
-  resources :ftopics, :controller => "forum_topics"
-  resources :fposts, :controller => "forum_posts"
 
   # legacy aliases
   get "/artist" => redirect {|params, req| "/artists?page=#{req.params[:page]}&search[name]=#{CGI.escape(req.params[:name].to_s)}"}
@@ -402,9 +371,6 @@ Rails.application.routes.draw do
   get "/static/terms_of_service" => "static#terms_of_service", :as => "terms_of_service"
   get "/static/contact" => "static#contact", :as => "contact"
   get "/static/dtext_help" => "static#dtext_help", :as => "dtext_help"
-  get "/meta_searches/tags" => "meta_searches#tags", :as => "meta_searches_tags"
-
-  get "/intro" => redirect("/explore/posts/intro")
 
   root :to => "posts#index"
 

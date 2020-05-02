@@ -1,13 +1,21 @@
 class SessionLoader
-  class AuthenticationFailure < Exception; end
+  class AuthenticationFailure < StandardError; end
 
-  attr_reader :session, :cookies, :request, :params
+  attr_reader :session, :request, :params
 
   def initialize(request)
     @request = request
     @session = request.session
-    @cookies = request.cookie_jar
     @params = request.parameters
+  end
+
+  def login(name, password)
+    user = User.find_by_name(name)&.authenticate_password(password)
+    return nil unless user
+
+    session[:user_id] = user.id
+    user.update_column(:last_ip_addr, request.remote_ip)
+    user
   end
 
   def load
@@ -16,10 +24,10 @@ class SessionLoader
 
     if has_api_authentication?
       load_session_for_api
+    elsif params[:signed_user_id]
+      load_param_user(params[:signed_user_id])
     elsif session[:user_id]
       load_session_user
-    elsif cookie_password_hash_valid?
-      load_cookie_user
     end
 
     set_statement_timeout
@@ -34,7 +42,7 @@ class SessionLoader
   end
 
   def has_api_authentication?
-    request.authorization.present? || params[:login].present? || params[:api_key].present? || params[:password_hash].present?
+    request.authorization.present? || params[:login].present? || params[:api_key].present?
   end
 
   private
@@ -49,8 +57,6 @@ class SessionLoader
       authenticate_basic_auth
     elsif params[:login].present? && params[:api_key].present?
       authenticate_api_key(params[:login], params[:api_key])
-    elsif params[:login].present? && params[:password_hash].present?
-      authenticate_legacy_api_key(params[:login], params[:password_hash])
     else
       raise AuthenticationFailure
     end
@@ -64,33 +70,19 @@ class SessionLoader
   end
 
   def authenticate_api_key(name, api_key)
-    CurrentUser.user = User.authenticate_api_key(name, api_key)
-
-    if CurrentUser.user.nil?
-      raise AuthenticationFailure.new
-    end
+    user = User.find_by_name(name)&.authenticate_api_key(api_key)
+    raise AuthenticationFailure if user.blank?
+    CurrentUser.user = user
   end
 
-  def authenticate_legacy_api_key(name, password_hash)
-    CurrentUser.user = User.authenticate_hash(name, password_hash)
-
-    if CurrentUser.user.nil?
-      raise AuthenticationFailure.new
-    end
+  def load_param_user(signed_user_id)
+    session[:user_id] = Danbooru::MessageVerifier.new(:login).verify(signed_user_id)
+    load_session_user
   end
 
   def load_session_user
     user = User.find_by_id(session[:user_id])
     CurrentUser.user = user if user
-  end
-
-  def load_cookie_user
-    CurrentUser.user = User.find_by_name(cookies.signed[:user_name])
-    session[:user_id] = CurrentUser.user.id
-  end
-
-  def cookie_password_hash_valid?
-    cookies[:password_hash] && cookies.signed[:user_name] && User.authenticate_cookie_hash(cookies.signed[:user_name], cookies[:password_hash])
   end
 
   def update_last_logged_in_at
@@ -117,9 +109,5 @@ class SessionLoader
   def initialize_session_cookies
     session.options[:expire_after] = 20.years
     session[:started_at] ||= Time.now.utc.to_s
-
-    # clear out legacy login cookies if present
-    cookies.delete(:user_name)
-    cookies.delete(:password_hash)
   end
 end

@@ -1,70 +1,31 @@
 module WikiPageVersionsHelper
-  def wiki_page_version_status_diff(wiki_page_version)
-    cur = wiki_page_version
-    prev = wiki_page_version.previous
-
-    return "New" if prev.blank?
-
-    status = []
-    status += ["Renamed"] if cur.title != prev.title
-    status += ["Deleted"] if cur.is_deleted? && !prev.is_deleted?
-    status += ["Undeleted"] if !cur.is_deleted? && prev.is_deleted?
-    status.join(" ")
+  def wiki_version_show_diff(wiki_page_version, type)
+    other = wiki_page_version.send(type)
+    other.present? && ((wiki_page_version.body != other.body) || wiki_page_version.other_names_changed(type))
   end
 
-  def wiki_page_diff(thispage, otherpage)
-    pattern = Regexp.new('(?:<.+?>)|(?:\w+)|(?:[ \t]+)|(?:\r?\n)|(?:.+?)')
-    other_names_pattern = Regexp.new('\S+|\s+')
+  def wiki_version_show_other_names(this_version, other_version)
+    ((this_version.other_names - other_version.other_names) | (other_version.other_names - this_version.other_names)).length.positive?
+  end
 
-    thisarr = thispage.body.scan(pattern)
-    otharr = otherpage.body.scan(pattern)
+  def wiki_version_other_names_diff(this_version, other_version)
+    this_names = this_version.other_names
+    other_names = other_version.other_names
 
-    if thispage.other_names.present? || otherpage.other_names.present?
-      thisarr = "#{thispage.other_names}\n\n".scan(other_names_pattern) + thisarr
-      otharr = "#{otherpage.other_names}\n\n".scan(other_names_pattern) + otharr
+    diff_list_html(this_names, other_names, ul_class: ["wiki-other-names-diff-list list-inline"], li_class: ["wiki-other-name"])
+  end
+
+  def wiki_version_title_diff(wiki_page_version, type)
+    other = wiki_page_version.send(type)
+    if other.present? && (wiki_page_version.title != other.title)
+      if type == "previous"
+        name_diff = diff_name_html(wiki_page_version.title, other.title)
+      else
+        name_diff = diff_name_html(other.title, wiki_page_version.title)
+      end
+      %((<b>Rename:</b>&ensp;#{name_diff})).html_safe
+    else
+      ""
     end
-
-    cbo = Diff::LCS::ContextDiffCallbacks.new
-    diffs = thisarr.diff(otharr, cbo)
-
-    escape_html = ->(str) {str.gsub(/&/, '&amp;').gsub(/</, '&lt;').gsub(/>/, '&gt;')}
-
-    output = thisarr
-    output.each { |q| q.replace(escape_html[q]) }
-
-    diffs.reverse_each do |hunk|
-      newchange = hunk.max {|a, b| a.old_position <=> b.old_position}
-      newstart = newchange.old_position
-      oldstart = hunk.min {|a, b| a.old_position <=> b.old_position}.old_position
-
-      if newchange.action == '+'
-        output.insert(newstart, '</ins>')
-      end
-
-      hunk.reverse_each do |chg|
-        case chg.action
-        when '-'
-          oldstart = chg.old_position
-          output[chg.old_position] = '<br>' if chg.old_element.match(/^\r?\n$/)
-        when '+'
-          if chg.new_element.match(/^\r?\n$/)
-            output.insert(chg.old_position, '<br>')
-          else
-            output.insert(chg.old_position, (escape_html[chg.new_element]).to_s)
-          end
-        end
-      end
-
-      if newchange.action == '+'
-        output.insert(newstart, '<ins>')
-      end
-
-      if hunk[0].action == '-'
-        output.insert((newstart == oldstart || newchange.action != '+') ? newstart + 1 : newstart, '</del>')
-        output.insert(oldstart, '<del>')
-      end
-    end
-
-    output.join.gsub(/\r?\n/, '<br>').html_safe
   end
 end

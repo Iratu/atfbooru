@@ -9,7 +9,6 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
 
       CurrentUser.user = @user
       CurrentUser.ip_addr = "127.0.0.1"
-      Danbooru.config.stubs(:member_comment_time_threshold).returns(1.week.from_now)
       Danbooru.config.stubs(:member_comment_limit).returns(100)
     end
 
@@ -21,6 +20,7 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
     context "index action" do
       context "grouped by post" do
         should "render all comments for .js" do
+          @comment = as(@user) { create(:comment, post: @post) }
           get comments_path(post_id: @post.id), xhr: true
 
           assert_response :success
@@ -88,6 +88,7 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
       end
 
       should "render by comment" do
+        @comment = as(@user) { create(:comment, post: @post) }
         get comments_path(group_by: "comment")
         assert_response :success
       end
@@ -151,6 +152,7 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
 
         should "fail if updater is not a moderator" do
           put_auth comment_path(@comment.id), @user, params: {comment: {is_sticky: true}}
+          assert_response 403
           assert_equal(false, @comment.reload.is_sticky)
         end
       end
@@ -169,18 +171,27 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
       end
 
       should "not allow changing do_not_bump_post or post_id" do
-        as_user do
-          @another_post = create(:post)
-        end
-        put_auth comment_path(@comment.id), @comment.creator, params: {do_not_bump_post: true, post_id: @another_post.id}
+        @another_post = as(@user) { create(:post) }
+
+        put_auth comment_path(@comment.id), @comment.creator, params: { do_not_bump_post: true }
+        assert_response 403
         assert_equal(false, @comment.reload.do_not_bump_post)
-        assert_equal(@post.id, @comment.post_id)
+
+        put_auth comment_path(@comment.id), @comment.creator, params: { post_id: @another_post.id }
+        assert_response 403
+        assert_equal(@post.id, @comment.reload.post_id)
       end
     end
 
     context "new action" do
-      should "redirect" do
+      should "work" do
         get_auth new_comment_path, @user
+        assert_response :success
+      end
+
+      should "work when quoting a post" do
+        @comment = create(:comment)
+        get_auth new_comment_path(id: @comment.id), @user, as: :javascript
         assert_response :success
       end
     end
@@ -188,7 +199,7 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
     context "create action" do
       should "create a comment" do
         assert_difference("Comment.count", 1) do
-          post_auth comments_path, @user, params: {comment: FactoryBot.attributes_for(:comment, post_id: @post.id)}
+          post_auth comments_path, @user, params: { comment: { post_id: @post.id, body: "blah" } }
         end
         comment = Comment.last
         assert_redirected_to post_path(comment.post)
@@ -196,7 +207,7 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
 
       should "not allow commenting on nonexistent posts" do
         assert_difference("Comment.count", 0) do
-          post_auth comments_path, @user, params: {comment: FactoryBot.attributes_for(:comment, post_id: -1)}
+          post_auth comments_path, @user, params: { comment: { post_id: -1, body: "blah" } }
         end
         assert_redirected_to comments_path
       end
@@ -219,6 +230,18 @@ class CommentsControllerTest < ActionDispatch::IntegrationTest
 
         assert_equal(false, @comment.reload.is_deleted)
         assert_redirected_to(@comment)
+      end
+
+      should "not allow undeleting comments deleted by a moderator" do
+        @comment = create(:comment, post: @post)
+
+        delete_auth comment_path(@comment.id), @mod
+        assert_redirected_to @comment
+        assert(@comment.reload.is_deleted?)
+
+        post_auth undelete_comment_path(@comment.id), @user
+        assert_response 403
+        assert(@comment.reload.is_deleted?)
       end
     end
   end

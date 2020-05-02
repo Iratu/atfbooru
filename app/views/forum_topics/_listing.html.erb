@@ -1,53 +1,58 @@
-<table width="100%" class="striped">
-  <thead>
-    <tr>
-      <th>Title</th>
-      <th>Creator</th>
-      <th class="updater">Updated by</th>
-      <th class="updated-at">Updated at</th>
-    </tr>
-  </thead>
-  <tbody>
-    <% forum_topics.each do |topic| %>
-      <% if CurrentUser.user.level >= topic.min_level %>
-        <tr class="forum-topic-row forum-topic-category-<%= topic.category_id %>">
-          <td>
-            <% if topic.is_sticky? %>
-              <span class="sticky">Sticky:</span>
-            <% end %>
-
-            <% unless topic.read_by?(CurrentUser.user) %>
-              <span class="new">NEW</span>
-            <% end %>
-
-            <%= link_to topic.title, forum_topic_path(topic), class: "forum-post-link" %>
-
-            <% if topic.response_count > Danbooru.config.posts_per_page %>
-              <%= link_to "page #{topic.last_page}", forum_topic_path(topic, :page => topic.last_page), :class => "last-page" %>
-            <% end %>
-
-            <% if topic.is_locked? %>
-              <span class="locked-topic">(locked)</span>
-            <% end %>
-
-            <% if topic.min_level > 0 %>
-              <span class="level-topic">(<%= User.level_string(topic.min_level).downcase %> only)</span>
-            <% end %>
-          </td>
-          <td><%= link_to_user topic.creator %></td>
-          <td class="updater"><%= link_to_user topic.updater %></td>
-          <td class="updated-at"><%= compact_time topic.updated_at %></td>
-        </tr>
+<%= table_for forum_topics, width: "100%" do |t| %>
+  <% t.column "Title" do |topic| %>
+    <% if !topic.is_read? %>
+      <%= link_to forum_topics_path(search: { is_read: false }) do %>
+        <span class="topic-status label new">New</span>
       <% end %>
     <% end %>
-  </tbody>
-</table>
 
-<% content_for(:html_header) do %>
-<style>
-  @media screen and (max-width: 660px) {
-    .updater { display: none; }
-    .updated-at { display: none; }
-  }
-</style>
+    <% if topic.is_sticky? %>
+      <%= link_to forum_topics_path(search: { is_sticky: true }) do %>
+        <i class="topic-status icon stickied fas fa-thumbtack" title="Stickied"></i>
+      <% end %>
+    <% end %>
+
+    <% if topic.is_locked? %>
+      <%= link_to forum_topics_path(search: { is_locked: true }) do %>
+        <i class="topic-status icon locked fas fa-lock" title="Locked"></i>
+      <% end %>
+    <% end %>
+
+    <% if topic.is_deleted? %>
+      <%= link_to forum_topics_path(search: { is_deleted: true }) do %>
+        <i class="topic-status icon deleted fas fa-trash-alt" title="Deleted"></i>
+      <% end %>
+    <% end %>
+
+    <% if topic.is_private? %>
+      <%= link_to forum_topics_path(search: { is_private: true }) do %>
+        <i class="topic-status icon private fas fa-hand-paper" title="<%= User.level_string(topic.min_level) %> only"></i>
+      <% end %>
+    <% end %>
+
+    <% if forum_topic_status(topic).present? %>
+      <%= link_to topic.pretty_title, forum_topic_path(topic), class: "forum-post-link" %>
+    <% else %>
+      <%= link_to topic.title, forum_topic_path(topic), class: "forum-post-link" %>
+    <% end %>
+
+    <% if topic.response_count > Danbooru.config.posts_per_page %>
+      <%= link_to "page #{topic.last_page}", forum_topic_path(topic, :page => topic.last_page), :class => "last-page" %>
+    <% end %>
+  <% end %>
+  <% t.column "Status", width: "1%" do |topic| %>
+    <% status = forum_topic_status(topic) %>
+    <%= link_to forum_topics_path(search: { status: status }) do %>
+      <span class="topic-status label <%= status %>"><%= status %></span>
+    <% end %>
+  <% end %>
+  <% t.column "Creator", width: "8%" do |topic| %>
+    <%= link_to_user topic.creator %>
+  <% end %>
+  <% t.column "Updated by", width: "8%" do |topic| %>
+    <%= link_to_user topic.updater %>
+  <% end %>
+  <% t.column "Updated at", width: "8%" do |topic| %>
+    <%= compact_time topic.updated_at %>
+  <% end %>
 <% end %>

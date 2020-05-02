@@ -29,31 +29,15 @@ module Moderator
           end
 
           should "work even if the deleter has flagged the post previously" do
-            as_user do
-              PostFlag.create(:post => @post, :reason => "aaa", :is_resolved => false)
-            end
+            create(:post_flag, post: @post, creator: @admin)
             post_auth delete_moderator_post_post_path(@post), @admin, params: {:reason => "xxx", :format => "js", :commit => "Delete"}
             assert(@post.reload.is_deleted?)
           end
         end
 
-        context "undelete action" do
-          should "render" do
-            as_user do
-              @post.update(is_deleted: true)
-            end
-            assert_difference(-> { PostApproval.count }, 1) do
-              post_auth undelete_moderator_post_post_path(@post), @admin, params: {:format => "js"}
-            end
-
-            assert_response :success
-            assert(!@post.reload.is_deleted?)
-          end
-        end
-
         context "confirm_move_favorites action" do
           should "render" do
-            get_auth confirm_ban_moderator_post_post_path(@post), @admin
+            get_auth confirm_move_favorites_moderator_post_post_path(@post), @admin
             assert_response :success
           end
         end
@@ -94,18 +78,11 @@ module Moderator
           end
         end
 
-        context "confirm_ban action" do
-          should "render" do
-            get_auth confirm_ban_moderator_post_post_path(@post), @admin
-            assert_response :success
-          end
-        end
-
         context "ban action" do
           should "render" do
-            post_auth ban_moderator_post_post_path(@post), @admin, params: { commit: "Ban", format: "js" }
+            post_auth ban_moderator_post_post_path(@post), @admin
 
-            assert_response :success
+            assert_redirected_to @post
             assert_equal(true, @post.reload.is_banned?)
           end
         end
@@ -113,7 +90,7 @@ module Moderator
         context "unban action" do
           should "render" do
             @post.ban!
-            post_auth unban_moderator_post_post_path(@post), @admin, params: { format: "js" }
+            post_auth unban_moderator_post_post_path(@post), @admin
 
             assert_redirected_to(@post)
             assert_equal(false, @post.reload.is_banned?)

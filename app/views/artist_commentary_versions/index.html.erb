@@ -1,14 +1,12 @@
 <div id="c-artist-commentary-versions">
   <div id="a-index">
-    <h1>Artist Commentary Changes</h1>
+    <h1>Artist Commentary History</h1>
+
+    <%= render "versions/types" %>
 
     <%= render "posts/partials/common/inline_blacklist" %>
 
-    <% if params.dig(:search, :post_id).present? %>
-      <%= render "revert_listing" %>
-    <% else %>
-      <%= render "standard_listing" %>
-    <% end %>
+    <%= render "listing" %>
 
     <%= numbered_paginator(@commentary_versions) %>
 

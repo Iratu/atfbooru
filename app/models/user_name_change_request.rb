@@ -8,10 +8,10 @@ class UserNameChangeRequest < ApplicationRecord
 
   after_create :update_name!
 
-  def self.visible(viewer = CurrentUser.user)
-    if viewer.is_admin?
+  def self.visible(user)
+    if user.is_moderator?
       all
-    elsif viewer.is_member?
+    elsif user.is_member?
       where(user: User.undeleted)
     else
       none

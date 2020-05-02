@@ -1,20 +1,15 @@
+<% page_title "Edit User: #{@user.pretty_name}" %>
+<%= render "users/secondary_links" %>
+
 <div id="c-admin-users">
   <div id="a-edit">
     <h1>Edit User: <%= @user.name %></h1>
 
-    <%= simple_form_for(@user, url: admin_user_path(@user), method: :put) do |f| %>
+    <%= edit_form_for(@user, url: admin_user_path(@user)) do |f| %>
       <%= f.input :level, collection: User.level_hash.to_a, selected: @user.level %>
       <%= f.input :can_upload_free, label: "Unrestricted Uploads", as: :boolean, selected: @user.can_upload_free %>
       <%= f.input :can_approve_posts, label: "Approve Posts", as: :boolean, selected: @user.can_approve_posts %>
-      <%= f.input :no_flagging, label: "Banned From Flagging", as: :boolean, selected: @user.no_flagging %>
-      <%= f.input :no_feedback, label: "Banned From Giving Feedback", as: :boolean, selected: @user.no_feedback %>
       <%= f.submit "Update" %>
     <% end %>
   </div>
 </div>
-
-<%= render "users/secondary_links" %>
-
-<% content_for(:page_title) do %>
-  Edit User - <%= Danbooru.config.app_name %>
-<% end %>

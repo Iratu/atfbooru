@@ -58,13 +58,13 @@ class AliasAndImplicationImporter
     tokens.map do |token|
       case token[0]
       when :create_alias
-        tag_alias = TagAlias.new(:forum_topic_id => forum_id, :status => "pending", :antecedent_name => token[1], :consequent_name => token[2], :skip_secondary_validations => skip_secondary_validations)
+        tag_alias = TagAlias.new(creator: User.system, forum_topic_id: forum_id, status: "pending", antecedent_name: token[1], consequent_name: token[2], skip_secondary_validations: skip_secondary_validations)
         unless tag_alias.valid?
           raise Error, "Error: #{tag_alias.errors.full_messages.join("; ")} (create alias #{tag_alias.antecedent_name} -> #{tag_alias.consequent_name})"
         end
 
       when :create_implication
-        tag_implication = TagImplication.new(:forum_topic_id => forum_id, :status => "pending", :antecedent_name => token[1], :consequent_name => token[2], :skip_secondary_validations => skip_secondary_validations)
+        tag_implication = TagImplication.new(creator: User.system, forum_topic_id: forum_id, status: "pending", antecedent_name: token[1], consequent_name: token[2], skip_secondary_validations: skip_secondary_validations)
         unless tag_implication.valid?
           raise Error, "Error: #{tag_implication.errors.full_messages.join("; ")} (create implication #{tag_implication.antecedent_name} -> #{tag_implication.consequent_name})"
         end
@@ -78,46 +78,18 @@ class AliasAndImplicationImporter
     end
   end
 
-  def estimate_update_count
-    tokens = self.class.tokenize(text)
-    tokens.map do |token|
-      case token[0]
-      when :create_alias
-        TagAlias.new(antecedent_name: token[1], consequent_name: token[2]).estimate_update_count
-      when :create_implication
-        TagImplication.new(antecedent_name: token[1], consequent_name: token[2]).estimate_update_count
-      when :mass_update
-        TagBatchChangeJob.estimate_update_count(token[1], token[2])
-      when :change_category
-        Tag.find_by_name(token[1]).try(:post_count) || 0
-      else
-        0
-      end
-    end.sum
-  end
-
   def affected_tags
-    tokens = self.class.tokenize(text)
-    tokens.inject([]) do |all, token|
-      case token[0]
+    AliasAndImplicationImporter.tokenize(text).flat_map do |type, *args|
+      case type
       when :create_alias, :remove_alias, :create_implication, :remove_implication
-        all << token[1]
-        all << token[2]
-        all
-
+        [args[0], args[1]]
       when :mass_update
-        all += Tag.scan_tags(token[1])
-        all += Tag.scan_tags(token[2])
-        all
-
+        tags = PostQueryBuilder.new(args[0]).tags + PostQueryBuilder.new(args[1]).tags
+        tags.reject(&:negated).reject(&:optional).reject(&:wildcard).map(&:name)
       when :change_category
-        all << token[1]
-        all
-
-      else
-        all
+        args[0]
       end
-    end
+    end.sort.uniq
   end
 
   private
@@ -127,29 +99,29 @@ class AliasAndImplicationImporter
       tokens.map do |token|
         case token[0]
         when :create_alias
-          tag_alias = TagAlias.create(:forum_topic_id => forum_id, :status => "pending", :antecedent_name => token[1], :consequent_name => token[2], :skip_secondary_validations => skip_secondary_validations)
+          tag_alias = TagAlias.create(creator: approver, forum_topic_id: forum_id, status: "pending", antecedent_name: token[1], consequent_name: token[2], skip_secondary_validations: skip_secondary_validations)
           unless tag_alias.valid?
             raise Error, "Error: #{tag_alias.errors.full_messages.join("; ")} (create alias #{tag_alias.antecedent_name} -> #{tag_alias.consequent_name})"
           end
           tag_alias.rename_wiki_and_artist if rename_aliased_pages?
-          tag_alias.approve!(approver: approver, update_topic: false)
+          tag_alias.approve!(approver: approver)
 
         when :create_implication
-          tag_implication = TagImplication.create(:forum_topic_id => forum_id, :status => "pending", :antecedent_name => token[1], :consequent_name => token[2], :skip_secondary_validations => skip_secondary_validations)
+          tag_implication = TagImplication.create(creator: approver, forum_topic_id: forum_id, status: "pending", antecedent_name: token[1], consequent_name: token[2], skip_secondary_validations: skip_secondary_validations)
           unless tag_implication.valid?
             raise Error, "Error: #{tag_implication.errors.full_messages.join("; ")} (create implication #{tag_implication.antecedent_name} -> #{tag_implication.consequent_name})"
           end
-          tag_implication.approve!(approver: approver, update_topic: false)
+          tag_implication.approve!(approver: approver)
 
         when :remove_alias
           tag_alias = TagAlias.active.find_by(antecedent_name: token[1], consequent_name: token[2])
           raise Error, "Alias for #{token[1]} not found" if tag_alias.nil?
-          tag_alias.reject!(update_topic: false)
+          tag_alias.reject!
 
         when :remove_implication
           tag_implication = TagImplication.active.find_by(antecedent_name: token[1], consequent_name: token[2])
           raise Error, "Implication for #{token[1]} not found" if tag_implication.nil?
-          tag_implication.reject!(update_topic: false)
+          tag_implication.reject!
 
         when :mass_update
           TagBatchChangeJob.perform_later(token[1], token[2], User.system, "127.0.0.1")

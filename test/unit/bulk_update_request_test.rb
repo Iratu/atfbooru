@@ -13,52 +13,22 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
       CurrentUser.ip_addr = nil
     end
 
-    context "#estimate_update_count" do
-      setup do
-        FactoryBot.create(:post, tag_string: "aaa")
-        FactoryBot.create(:post, tag_string: "bbb")
-        FactoryBot.create(:post, tag_string: "ccc")
-        FactoryBot.create(:post, tag_string: "ddd")
-        FactoryBot.create(:post, tag_string: "eee")
+    should "parse the tags inside the script" do
+      @bur = create(:bulk_update_request, script: %{
+        create alias aaa -> 000
+        create implication bbb -> 111
+        remove alias ccc -> 222
+        remove implication ddd -> 333
+        mass update eee id:1 -fff ~ggg hhh* -> 444 -555
+        category iii -> meta
+      })
 
-        @script = "create alias aaa -> 000\n" +
-          "create implication bbb -> 111\n" +
-          "remove alias ccc -> 222\n" +
-          "remove implication ddd -> 333\n" +
-          "mass update eee -> 444\n"
-      end
-
-      subject { BulkUpdateRequest.new(script: @script) }
-
-      should "return the correct count" do
-        assert_equal(3, subject.estimate_update_count)
-      end
+      assert_equal(%w[000 111 222 333 444 aaa bbb ccc ddd eee iii], @bur.tags)
     end
 
-    context "#update_notice" do
-      setup do
-        @forum_topic = FactoryBot.create(:forum_topic)
-      end
-
-      should "update the cache" do
-        @script = "create alias aaa -> 000\n" +
-          "create implication bbb -> 111\n" +
-          "remove alias ccc -> 222\n" +
-          "remove implication ddd -> 333\n" +
-          "mass update eee -> 444\n"
-        FactoryBot.create(:bulk_update_request, script: @script, forum_topic: @forum_topic)
-
-        assert_equal(@forum_topic.id, Cache.get("tcn:aaa"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:000"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:bbb"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:111"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:ccc"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:222"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:ddd"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:333"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:eee"))
-        assert_equal(@forum_topic.id, Cache.get("tcn:444"))
-      end
+    should_eventually "parse tags with tag type prefixes inside the script" do
+      @bur = create(:bulk_update_request, script: "mass update aaa -> artist:bbb")
+      assert_equal(%w[aaa bbb], @bur.tags)
     end
 
     context "on approval" do
@@ -70,7 +40,7 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
           mass update aaa -> bbb
         '
 
-        @bur = FactoryBot.create(:bulk_update_request, :script => @script)
+        @bur = create(:bulk_update_request, script: @script, user: @admin)
         @bur.approve!(@admin)
 
         assert_enqueued_jobs(3)
@@ -104,14 +74,16 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
     end
 
     should "create a forum topic" do
-      assert_difference("ForumTopic.count", 1) do
-        BulkUpdateRequest.create(:title => "abc", :reason => "zzz", :script => "create alias aaa -> bbb", :skip_secondary_validations => true)
-      end
+      bur = create(:bulk_update_request, reason: "zzz", script: "create alias aaa -> bbb")
+
+      assert_equal(true, bur.forum_post.present?)
+      assert_match(/\[bur:#{bur.id}\]/, bur.forum_post.body)
+      assert_match(/zzz/, bur.forum_post.body)
     end
 
     context "that has an invalid alias" do
       setup do
-        @alias1 = FactoryBot.create(:tag_alias)
+        @alias1 = create(:tag_alias, creator: @admin)
         @req = FactoryBot.build(:bulk_update_request, :script => "create alias bbb -> aaa")
       end
 
@@ -172,19 +144,18 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
 
     context "with an associated forum topic" do
       setup do
-        @topic = FactoryBot.create(:forum_topic, :title => "[bulk] hoge")
-        @post = FactoryBot.create(:forum_post, :topic_id => @topic.id)
+        @topic = create(:forum_topic, title: "[bulk] hoge", creator: @admin)
+        @post = create(:forum_post, topic: @topic, creator: @admin)
         @req = FactoryBot.create(:bulk_update_request, :script => "create alias AAA -> BBB", :forum_topic_id => @topic.id, :forum_post_id => @post.id, :title => "[bulk] hoge")
       end
 
       should "gracefully handle validation errors during approval" do
-        @req.stubs(:update).raises(AliasAndImplicationImporter::Error.new("blah"))
+        @req.stubs(:update!).raises(AliasAndImplicationImporter::Error.new("blah"))
         assert_difference("ForumPost.count", 1) do
           @req.approve!(@admin)
         end
 
         assert_equal("pending", @req.reload.status)
-        assert_match(/\[FAILED\]/, @topic.reload.title)
       end
 
       should "leave the BUR pending if there is an unexpected error during approval" do
@@ -208,9 +179,7 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
           @req.approve!(@admin)
         end
 
-        @topic.reload
-        @post.reload
-        assert_match(/\[APPROVED\]/, @topic.title)
+        assert_match(/approved/, @post.reload.body)
       end
 
       should "update the topic when rejected" do
@@ -220,9 +189,7 @@ class BulkUpdateRequestTest < ActiveSupport::TestCase
           @req.reject!(@admin)
         end
 
-        @topic.reload
-        @post.reload
-        assert_match(/\[REJECTED\]/, @topic.title)
+        assert_match(/rejected/, @post.reload.body)
       end
 
       should "reference the rejector in the automated message" do

@@ -1,11 +1,10 @@
 class UploadsController < ApplicationController
-  before_action :member_only, except: [:index, :show]
   respond_to :html, :xml, :json, :js
   skip_before_action :verify_authenticity_token, only: [:preprocess]
 
   def new
+    authorize Upload
     @source = Sources::Strategies.find(params[:url], params[:ref]) if params[:url].present?
-    @upload_notice_wiki = WikiPage.titled(Danbooru.config.upload_notice_wiki_page).first
     @upload, @remote_size = UploadService::ControllerHelper.prepare(
       url: params[:url], ref: params[:ref]
     )
@@ -13,23 +12,27 @@ class UploadsController < ApplicationController
   end
 
   def batch
+    authorize Upload
     @url = params.dig(:batch, :url) || params[:url]
     @source = Sources::Strategies.find(@url, params[:ref]) if @url.present?
     respond_with(@source)
   end
 
   def image_proxy
+    authorize Upload
     resp = ImageProxy.get_image(params[:url])
     send_data resp.body, :type => resp.content_type, :disposition => "inline"
   end
 
   def index
-    @uploads = Upload.paginated_search(params, count_pages: true).includes(:post, :uploader)
+    @uploads = authorize Upload.visible(CurrentUser.user).paginated_search(params, count_pages: true)
+    @uploads = @uploads.includes(:uploader, post: :uploader) if request.format.html?
+
     respond_with(@uploads)
   end
 
   def show
-    @upload = Upload.find(params[:id])
+    @upload = authorize Upload.find(params[:id])
     respond_with(@upload) do |format|
       format.html do
         if @upload.is_completed? && @upload.post_id
@@ -40,14 +43,15 @@ class UploadsController < ApplicationController
   end
 
   def preprocess
+    authorize Upload
     @upload, @remote_size = UploadService::ControllerHelper.prepare(
-      url: upload_params[:source], file: upload_params[:file], ref: upload_params[:referer_url]
+      url: params.dig(:upload, :source), file: params.dig(:upload, :file), ref: params.dig(:upload, :referer_url),
     )
     render body: nil
   end
 
   def create
-    @service = UploadService.new(upload_params)
+    @service = authorize UploadService.new(permitted_attributes(Upload)), policy_class: UploadPolicy
     @upload = @service.start!
 
     if @service.warnings.any?
@@ -55,17 +59,5 @@ class UploadsController < ApplicationController
     end
 
     respond_with(@upload)
-  end
-
-  private
-
-  def upload_params
-    permitted_params = %i[
-      file source tag_string rating status parent_id artist_commentary_title
-      artist_commentary_desc include_artist_commentary referer_url
-      md5_confirmation as_pending
-    ]
-
-    params.require(:upload).permit(permitted_params)
   end
 end

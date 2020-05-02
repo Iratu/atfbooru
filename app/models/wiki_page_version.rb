@@ -3,7 +3,7 @@ class WikiPageVersion < ApplicationRecord
   belongs_to :wiki_page
   belongs_to_updater
   belongs_to :artist, optional: true
-  delegate :visible?, :to => :wiki_page
+  belongs_to :tag, primary_key: :name, foreign_key: :title, optional: true
 
   module SearchMethods
     def search(params)
@@ -24,10 +24,60 @@ class WikiPageVersion < ApplicationRecord
   end
 
   def previous
-    WikiPageVersion.where("wiki_page_id = ? and id < ?", wiki_page_id, id).order("id desc").first
+    @previous ||= begin
+      WikiPageVersion.where("wiki_page_id = ? and id < ?", wiki_page_id, id).order("id desc").limit(1).to_a
+    end
+    @previous.first
   end
 
-  def category_name
-    Tag.category_for(title)
+  def subsequent
+    @subsequent ||= begin
+      WikiPageVersion.where("wiki_page_id = ? and id > ?", wiki_page_id, id).order("id asc").limit(1).to_a
+    end
+    @subsequent.first
+  end
+
+  def current
+    @current ||= begin
+      WikiPageVersion.where("wiki_page_id = ?", wiki_page_id).order("id desc").limit(1).to_a
+    end
+    @current.first
+  end
+
+  def self.status_fields
+    {
+      body: "Body",
+      other_names_changed: "OtherNames",
+      title: "Renamed",
+      was_deleted: "Deleted",
+      was_undeleted: "Undeleted",
+    }
+  end
+
+  def other_names_changed(type)
+    other = self.send(type)
+    ((other_names - other.other_names) | (other.other_names - other_names)).length.positive?
+  end
+
+  def was_deleted(type)
+    other = self.send(type)
+    if type == "previous"
+      is_deleted && !other.is_deleted
+    else
+      !is_deleted && other.is_deleted
+    end
+  end
+
+  def was_undeleted(type)
+    other = self.send(type)
+    if type == "previous"
+      !is_deleted && other.is_deleted
+    else
+      is_deleted && !other.is_deleted
+    end
+  end
+
+  def self.available_includes
+    [:updater, :wiki_page, :artist]
   end
 end

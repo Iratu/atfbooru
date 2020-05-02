@@ -5,18 +5,10 @@
     margin-right: 0.5em;
   }
 
-  .added.obsolete, .added.obsolete a {
-    color: var(--diff-list-obsolete-added-color);
-  }
-
   .removed, .removed a {
-    color: var(--dif-list-removed-color);
+    color: var(--diff-list-removed-color);
     text-decoration: line-through;
     margin-right: 0.5em;
-  }
-
-  .removed.obsolete, .removed.obsolete a {
-    color: var(--diff-list-obsolete-removed-color);
   }
 
   ins, ins a {
@@ -30,12 +22,20 @@
     text-decoration: line-through;
     margin-right: 0.5em;
   }
+}
 
-  ins.obsolete, ins.obsolete a {
-    color: var(--diff-list-obsolete-added-color);
+.diff-body {
+  del {
+    background: var(--wiki-page-versions-diff-del-background);
+    text-decoration: none;
   }
 
-  del.obsolete, del.obsolete a {
-    color: var(--diff-list-obsolete-removed-color);
+  ins {
+    background: var(--wiki-page-versions-diff-ins-background);
+    text-decoration: none;
+  }
+
+  span.paragraph-mark {
+    opacity: 0.25;
   }
 }

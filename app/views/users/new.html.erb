@@ -1,3 +1,8 @@
+<% page_title "Sign up" %>
+<% meta_description "Create a new account for free on #{Danbooru.config.app_name}." %>
+
+<%= render "secondary_links" %>
+
 <div id="c-users">
   <div id="a-new" class="fixed-width-container">
     <h1>Sign Up</h1>
@@ -8,9 +13,9 @@
     </p>
 
     <div id="p3">
-      <%= simple_form_for(@user, html: {id: "signup-form"}) do |f| %>
+      <%= edit_form_for(@user, html: { id: "signup-form" }) do |f| %>
         <%= f.input :name, as: :string %>
-        <%= f.input :email, required: false, as: :email, hint: "Optional" %>
+        <%= f.input :email, label: "Email", required: false, as: :email, input_html: { value: "" }, hint: "Optional" %>
         <%= f.input :password %>
         <%= f.input :password_confirmation %>
 
@@ -23,9 +28,3 @@
     </div>
   </div>
 </div>
-
-<%= render "secondary_links" %>
-
-<% content_for(:page_title) do %>
-  Sign up - <%= Danbooru.config.app_name %>
-<% end %>

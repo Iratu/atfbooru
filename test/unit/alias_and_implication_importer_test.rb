@@ -48,28 +48,6 @@ class AliasAndImplicationImporterTest < ActiveSupport::TestCase
       end
     end
 
-    context "#estimate_update_count" do
-      setup do
-        FactoryBot.create(:post, tag_string: "aaa")
-        FactoryBot.create(:post, tag_string: "bbb")
-        FactoryBot.create(:post, tag_string: "ccc")
-        FactoryBot.create(:post, tag_string: "ddd")
-        FactoryBot.create(:post, tag_string: "eee")
-
-        @script = "create alias aaa -> 000\n" +
-          "create implication bbb -> 111\n" +
-          "remove alias ccc -> 222\n" +
-          "remove implication ddd -> 333\n" +
-          "mass update eee -> 444\n"
-      end
-
-      subject { AliasAndImplicationImporter.new(@script, nil) }
-
-      should "return the correct count" do
-        assert_equal(3, subject.estimate_update_count)
-      end
-    end
-
     context "given a valid list" do
       setup do
         @list = "create alias abc -> def\ncreate implication aaa -> bbb\n"
@@ -110,14 +88,14 @@ class AliasAndImplicationImporterTest < ActiveSupport::TestCase
     end
 
     should "rename an aliased tag's artist entry and wiki page" do
-      tag1 = FactoryBot.create(:tag, :name => "aaa", :category => 1)
-      tag2 = FactoryBot.create(:tag, :name => "bbb")
-      artist = FactoryBot.create(:artist, :name => "aaa", :notes => "testing")
+      tag1 = create(:tag, name: "aaa", category: 1)
+      tag2 = create(:tag, name: "bbb")
+      wiki = create(:wiki_page, title: "aaa")
+      artist = create(:artist, name: "aaa")
       @importer = AliasAndImplicationImporter.new("create alias aaa -> bbb", "", "1")
       @importer.process!
-      artist.reload
-      assert_equal("bbb", artist.name)
-      assert_equal("testing", artist.notes)
+      assert_equal("bbb", artist.reload.name)
+      assert_equal("bbb", wiki.reload.title)
     end
 
     context "remove alias and remove implication commands" do

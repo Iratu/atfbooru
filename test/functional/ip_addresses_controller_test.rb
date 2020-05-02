@@ -34,6 +34,23 @@ class IpAddressesControllerTest < ActionDispatch::IntegrationTest
         get_auth ip_addresses_path(search: { user_id: @user.id, group_by: "ip_addr" }), @mod
         assert_response :success
       end
+
+      should "not allow non-moderators to view IP addresses" do
+        get_auth ip_addresses_path, @user
+        assert_response 403
+      end
+    end
+
+    context "show action" do
+      should "be visible to mods" do
+        get_auth ip_address_path("1.1.1.1"), @mod
+        assert_response :success
+      end
+
+      should "not be visible to members" do
+        get_auth ip_address_path("1.1.1.1"), @user
+        assert_response 403
+      end
     end
   end
 end

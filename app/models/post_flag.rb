@@ -1,18 +1,16 @@
 class PostFlag < ApplicationRecord
-  class Error < Exception; end
+  class Error < StandardError; end
 
   module Reasons
     UNAPPROVED = "Unapproved in three days"
     REJECTED = "Unapproved in three days after returning to moderation queue%"
-    BANNED = "Artist requested removal"
   end
 
   COOLDOWN_PERIOD = 3.days
-  CREATION_THRESHOLD = 10 # in 30 days
 
-  belongs_to_creator :class_name => "User"
+  belongs_to :creator, class_name: "User"
   belongs_to :post
-  validates_presence_of :reason
+  validates :reason, presence: true, length: { in: 1..140 }
   validate :validate_creator_is_not_limited, on: :create
   validate :validate_post
   validates_uniqueness_of :creator_id, :scope => :post_id, :on => :create, :unless => :is_deletion, :message => "have already flagged this post"
@@ -22,30 +20,37 @@ class PostFlag < ApplicationRecord
   scope :by_users, -> { where.not(creator: User.system) }
   scope :by_system, -> { where(creator: User.system) }
   scope :in_cooldown, -> { by_users.where("created_at >= ?", COOLDOWN_PERIOD.ago) }
+  scope :resolved, -> { where(is_resolved: true) }
+  scope :unresolved, -> { where(is_resolved: false) }
+  scope :recent, -> { where("post_flags.created_at >= ?", 1.day.ago) }
+  scope :old, -> { where("post_flags.created_at <= ?", 3.days.ago) }
 
   module SearchMethods
-    def duplicate
-      where("to_tsvector('english', post_flags.reason) @@ to_tsquery('dup | duplicate | sample | smaller')")
+    def creator_matches(creator, searcher)
+      return none if creator.nil?
+
+      policy = Pundit.policy!([searcher, nil], PostFlag.new(creator: creator))
+
+      if policy.can_view_flagger?
+        where(creator: creator).where.not(post: searcher.posts)
+      else
+        none
+      end
     end
 
-    def not_duplicate
-      where("to_tsvector('english', post_flags.reason) @@ to_tsquery('!dup & !duplicate & !sample & !smaller')")
-    end
-
-    def resolved
-      where("is_resolved = ?", true)
-    end
-
-    def unresolved
-      where("is_resolved = ?", false)
-    end
-
-    def recent
-      where("created_at >= ?", 1.day.ago)
-    end
-
-    def old
-      where("created_at <= ?", 3.days.ago)
+    def category_matches(category)
+      case category
+      when "normal"
+        where("reason NOT IN (?) AND reason NOT LIKE ?", [Reasons::UNAPPROVED], Reasons::REJECTED)
+      when "unapproved"
+        where(reason: Reasons::UNAPPROVED)
+      when "rejected"
+        where("reason LIKE ?", Reasons::REJECTED)
+      when "deleted"
+        where("reason = ? OR reason LIKE ?", Reasons::UNAPPROVED, Reasons::REJECTED)
+      else
+        none
+      end
     end
 
     def search(params)
@@ -54,53 +59,32 @@ class PostFlag < ApplicationRecord
       q = q.search_attributes(params, :post, :is_resolved, :reason)
       q = q.text_attribute_matches(:reason, params[:reason_matches])
 
-      # XXX
       if params[:creator_id].present?
-        if CurrentUser.can_view_flagger?(params[:creator_id].to_i)
-          q = q.where.not(post_id: CurrentUser.user.posts)
-          q = q.where("creator_id = ?", params[:creator_id].to_i)
-        else
-          q = q.none
-        end
+        flagger = User.find(params[:creator_id])
+        q = q.creator_matches(flagger, CurrentUser.user)
+      elsif params[:creator_name].present?
+        flagger = User.find_by_name(params[:creator_name])
+        q = q.creator_matches(flagger, CurrentUser.user)
       end
 
-      # XXX
-      if params[:creator_name].present?
-        flagger_id = User.name_to_id(params[:creator_name].strip)
-        if flagger_id && CurrentUser.can_view_flagger?(flagger_id)
-          q = q.where.not(post_id: CurrentUser.user.posts)
-          q = q.where("creator_id = ?", flagger_id)
-        else
-          q = q.none
-        end
-      end
-
-      case params[:category]
-      when "normal"
-        q = q.where("reason NOT IN (?) AND reason NOT LIKE ?", [Reasons::UNAPPROVED, Reasons::BANNED], Reasons::REJECTED)
-      when "unapproved"
-        q = q.where(reason: Reasons::UNAPPROVED)
-      when "banned"
-        q = q.where(reason: Reasons::BANNED)
-      when "rejected"
-        q = q.where("reason LIKE ?", Reasons::REJECTED)
-      when "deleted"
-        q = q.where("reason = ? OR reason LIKE ?", Reasons::UNAPPROVED, Reasons::REJECTED)
-      when "duplicate"
-        q = q.duplicate
+      if params[:category]
+        q = q.category_matches(params[:category])
       end
 
       q.apply_default_order(params)
     end
   end
 
-  def api_attributes
-    attributes = super + [:category]
-    attributes -= [:creator_id] unless CurrentUser.can_view_flagger_on_post?(self)
-    attributes
+  module ApiMethods
+    def api_attributes
+      attributes = super + [:category]
+      attributes -= [:creator_id] unless Pundit.policy!([CurrentUser.user, nil], self).can_view_flagger?
+      attributes
+    end
   end
 
   extend SearchMethods
+  include ApiMethods
 
   def category
     case reason
@@ -108,8 +92,6 @@ class PostFlag < ApplicationRecord
       :unapproved
     when /#{Reasons::REJECTED.gsub("%", ".*")}/
       :rejected
-    when Reasons::BANNED
-      :banned
     else
       :normal
     end
@@ -122,19 +104,7 @@ class PostFlag < ApplicationRecord
   def validate_creator_is_not_limited
     return if is_deletion
 
-    if creator.no_flagging?
-      errors[:creator] << "cannot flag posts"
-    end
-
-    if creator_id != User.system.id && creator.post_flags.where("created_at > ?", 30.days.ago).count >= CREATION_THRESHOLD
-      report = Reports::PostFlags.new(user_id: post.uploader_id, date_range: 90.days.ago)
-
-      if report.attackers.include?(creator_id)
-        errors[:creator] << "cannot flag posts uploaded by this user"
-      end
-    end
-
-    if CurrentUser.can_approve_posts?
+    if creator.can_approve_posts?
       # do nothing
     elsif creator.created_at > 1.week.ago
       errors[:creator] << "cannot flag within the first week of sign up"
@@ -165,10 +135,10 @@ class PostFlag < ApplicationRecord
   end
 
   def uploader_id
-    @uploader_id ||= Post.find(post_id).uploader_id
+    post.uploader_id
   end
 
-  def not_uploaded_by?(userid)
-    uploader_id != userid
+  def self.available_includes
+    [:post]
   end
 end

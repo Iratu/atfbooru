@@ -1,74 +1,49 @@
 class DmailsController < ApplicationController
-  respond_to :html, :xml, :json
-  before_action :member_only, except: [:index, :show, :destroy, :mark_all_as_read]
-  before_action :gold_only, only: [:ham, :spam]
+  respond_to :html, :xml, :js, :json
 
   def new
     if params[:respond_to_id]
-      parent = Dmail.find(params[:respond_to_id])
-      check_privilege(parent)
+      parent = authorize Dmail.find(params[:respond_to_id]), :show?
       @dmail = parent.build_response(:forward => params[:forward])
     else
-      @dmail = Dmail.new(create_params)
+      @dmail = authorize Dmail.new(permitted_attributes(Dmail))
     end
 
     respond_with(@dmail)
   end
 
   def index
-    if params[:folder] && params[:set_default_folder]
-      cookies.permanent[:dmail_folder] = params[:folder]
-    end
-    @dmails = Dmail.active.visible.paginated_search(params, count_pages: true)
+    @dmails = authorize Dmail.visible(CurrentUser.user).paginated_search(params, count_pages: true)
+    @dmails = @dmails.includes(:owner, :to, :from) if request.format.html?
+
     respond_with(@dmails)
   end
 
   def show
-    @dmail = Dmail.find(params[:id])
-    check_privilege(@dmail)
-    @dmail.mark_as_read!
+    @dmail = authorize Dmail.find(params[:id])
+
+    if request.format.html? && @dmail.owner == CurrentUser.user
+      @dmail.update!(is_read: true)
+    end
+
     respond_with(@dmail)
   end
 
   def create
-    @dmail = Dmail.create_split(create_params)
+    @dmail = authorize(Dmail).create_split(from: CurrentUser.user, creator_ip_addr: CurrentUser.ip_addr, **permitted_attributes(Dmail))
     respond_with(@dmail)
   end
 
-  def destroy
-    @dmail = Dmail.find(params[:id])
-    check_privilege(@dmail)
-    @dmail.mark_as_read!
-    @dmail.destroy
-    redirect_to dmails_path, :notice => "Message destroyed"
+  def update
+    @dmail = authorize Dmail.find(params[:id])
+    @dmail.update(permitted_attributes(@dmail))
+    flash[:notice] = "Dmail updated"
+
+    respond_with(@dmail)
   end
 
   def mark_all_as_read
-    Dmail.visible.unread.each do |x|
-      x.update_column(:is_read, true)
-    end
-    CurrentUser.user.update(has_mail: false, unread_dmail_count: 0)
-  end
-
-  def spam
-    @dmail = Dmail.find(params[:id])
-    @dmail.update_column(:is_spam, true)
-  end
-
-  def ham
-    @dmail = Dmail.find(params[:id])
-    @dmail.update_column(:is_spam, false)
-  end
-
-  private
-
-  def check_privilege(dmail)
-    if !dmail.visible_to?(CurrentUser.user, params[:key])
-      raise User::PrivilegeError
-    end
-  end
-
-  def create_params
-    params.fetch(:dmail, {}).permit(:title, :body, :to_name, :to_id)
+    @dmails = authorize(CurrentUser.user.dmails).mark_all_as_read
+    respond_with(@dmails)
   end
 end

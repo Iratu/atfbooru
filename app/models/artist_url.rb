@@ -27,6 +27,9 @@ class ArtistUrl < ApplicationRecord
       # url = url.sub(%r!^(http://seiga.nicovideo.jp/user/illust/\d+)\?.+!, '\1/')
       url = url.sub(%r!^http://pictures.hentai-foundry.com//!, "http://pictures.hentai-foundry.com/")
 
+      # XXX should be handled by pixiv strategy.
+      url = url.sub(%r!\Ahttps?://www\.pixiv\.net/(?:en/)?users/(\d+)\z!i, 'https://www.pixiv.net/member.php?id=\1')
+
       # the strategy won't always work for twitter because it looks for a status
       url = url.downcase if url =~ %r!^https?://(?:mobile\.)?twitter\.com!
 
@@ -122,5 +125,9 @@ class ArtistUrl < ApplicationRecord
     errors[:url] << "'#{uri}' must begin with http:// or https:// " if !uri.scheme.in?(%w[http https])
   rescue Addressable::URI::InvalidURIError => error
     errors[:url] << "'#{uri}' is malformed: #{error}"
+  end
+
+  def self.available_includes
+    [:artist]
   end
 end

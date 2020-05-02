@@ -1,6 +1,4 @@
-import Cookie from './cookie'
 import CurrentUser from './current_user'
-import Favorite from './favorites'
 import Post from './posts.js.erb'
 import Utility from './utility'
 
@@ -27,13 +25,14 @@ PostModeMenu.show_notice = function(i) {
 
 PostModeMenu.change_tag_script = function(e) {
   if ($("#mode-box select").val() === "tag-script") {
-    var old_tag_script_id = Cookie.get("current_tag_script_id") || "1";
+    var old_tag_script_id = localStorage.getItem("current_tag_script_id") || "1";
 
-    var new_tag_script_id = String.fromCharCode(e.which);
-    var new_tag_script = Cookie.get("tag-script-" + new_tag_script_id);
+    var keycode = e.which >= 96 ? e.which - 48 : e.which;
+    var new_tag_script_id = String.fromCharCode(keycode);
+    var new_tag_script = localStorage.getItem("tag-script-" + new_tag_script_id);
 
     $("#tag-script-field").val(new_tag_script);
-    Cookie.put("current_tag_script_id", new_tag_script_id);
+    localStorage.setItem("current_tag_script_id", new_tag_script_id);
     if (old_tag_script_id !== new_tag_script_id) {
       PostModeMenu.show_notice(new_tag_script_id);
     }
@@ -43,11 +42,12 @@ PostModeMenu.change_tag_script = function(e) {
 }
 
 PostModeMenu.initialize_selector = function() {
-  if (Cookie.get("mode") === "") {
-    Cookie.put("mode", "view");
+  let mode = localStorage.getItem("mode");
+  if (mode === null) {
+    localStorage.setItem("mode", "view");
     $("#mode-box select").val("view");
   } else {
-    $("#mode-box select").val(Cookie.get("mode"));
+    $("#mode-box select").val(mode);
   }
 
   $("#mode-box select").on("change.danbooru", function(e) {
@@ -57,36 +57,21 @@ PostModeMenu.initialize_selector = function() {
 }
 
 PostModeMenu.initialize_preview_link = function() {
-  $(".post-preview a").on("click.danbooru", PostModeMenu.click);
+  $(document).on("click.danbooru", ".post-preview a", PostModeMenu.click);
 }
 
 PostModeMenu.initialize_edit_form = function() {
   $("#quick-edit-div").hide();
-  $("#quick-edit-form input[value=Cancel]").on("click.danbooru", function(e) {
+
+  $(document).on("click.danbooru", "#quick-edit-form button[name=cancel]", function(e) {
     PostModeMenu.close_edit_form();
     e.preventDefault();
   });
 
-  $("#quick-edit-form").on("submit.danbooru", function(e) {
-    $.ajax({
-      type: "put",
-      url: $("#quick-edit-form").attr("action"),
-      data: {
-        post: {
-          tag_string: $("#post_tag_string").val()
-        }
-      },
-      complete: function() {
-        $.rails.enableFormElements($("#quick-edit-form"));
-      },
-      success: function(data) {
-        Post.update_data(data);
-        Utility.notice("Post #" + data.id + " updated");
-        PostModeMenu.close_edit_form();
-      }
-    });
-
+  $(document).on("click.danbooru", "#quick-edit-form input[type=submit]", async function(e) {
     e.preventDefault();
+    let post_id = $("#quick-edit-form").data("post-id");
+    await Post.update(post_id, "quick-edit", { post: { tag_string: $("#post_tag_string").val() }});
   });
 }
 
@@ -102,8 +87,8 @@ PostModeMenu.initialize_tag_script_field = function() {
     var script = $(this).val();
 
     if (script) {
-      var current_script_id = Cookie.get("current_tag_script_id");
-      Cookie.put("tag-script-" + current_script_id, script);
+      var current_script_id = localStorage.getItem("current_tag_script_id");
+      localStorage.setItem("tag-script-" + current_script_id, script);
     } else {
       $("#mode-box select").val("view");
       PostModeMenu.change();
@@ -120,15 +105,15 @@ PostModeMenu.change = function() {
   var $body = $(document.body);
   $body.removeClass((i, classNames) => classNames.split(/ /).filter(name => /^mode-/.test(name)).join(" "));
   $body.addClass("mode-" + s);
-  Cookie.put("mode", s, 1);
+  localStorage.setItem("mode", s, 1);
 
   if (s === "tag-script") {
-    var current_script_id = Cookie.get("current_tag_script_id");
+    var current_script_id = localStorage.getItem("current_tag_script_id");
     if (!current_script_id) {
       current_script_id = "1";
-      Cookie.put("current_tag_script_id", current_script_id);
+      localStorage.setItem("current_tag_script_id", current_script_id);
     }
-    var script = Cookie.get("tag-script-" + current_script_id);
+    var script = localStorage.getItem("tag-script-" + current_script_id);
 
     $("#tag-script-field").val(script).show();
     PostModeMenu.show_notice(current_script_id);
@@ -140,7 +125,7 @@ PostModeMenu.change = function() {
 PostModeMenu.open_edit = function(post_id) {
   var $post = $("#post_" + post_id);
   $("#quick-edit-div").slideDown("fast");
-  $("#quick-edit-form").attr("action", "/posts/" + post_id + ".json");
+  $("#quick-edit-form").attr("data-post-id", post_id);
   $("#post_tag_string").val($post.data("tags") + " ").focus().selectEnd();
 
   /* Set height of tag edit box to fit content. */
@@ -155,26 +140,18 @@ PostModeMenu.click = function(e) {
   var post_id = $(e.target).closest("article").data("id");
 
   if (s === "add-fav") {
-    Favorite.create(post_id);
+    Post.tag(post_id, "fav:me");
   } else if (s === "remove-fav") {
-    Favorite.destroy(post_id);
+    Post.tag(post_id, "-fav:me");
   } else if (s === "edit") {
     PostModeMenu.open_edit(post_id);
   } else if (s === 'vote-down') {
-    Post.vote("down", post_id);
+    Post.tag(post_id, "downvote:me");
   } else if (s === 'vote-up') {
-    Post.vote("up", post_id);
-  } else if (s === 'lock-rating') {
-    Post.update(post_id, {"post[is_rating_locked]": "1"});
-  } else if (s === 'lock-note') {
-    Post.update(post_id, {"post[is_note_locked]": "1"});
-  } else if (s === 'approve') {
-    Post.approve(post_id);
-  } else if (s === 'ban') {
-    Post.ban(post_id);
+    Post.tag(post_id, "upvote:me");
   } else if (s === "tag-script") {
-    var current_script_id = Cookie.get("current_tag_script_id");
-    var tag_script = Cookie.get("tag-script-" + current_script_id);
+    var current_script_id = localStorage.getItem("current_tag_script_id");
+    var tag_script = localStorage.getItem("tag-script-" + current_script_id);
     Post.tag(post_id, tag_script);
   } else {
     return;

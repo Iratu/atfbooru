@@ -1,5 +1,14 @@
 div.list-of-forum-posts {
+  div.moderation-forums-notice {
+    font-weight: bold;
+    color: var(--moderation-report-text-color);
+  }
+
   article.forum-post {
+    &[data-is-reported="true"] {
+      border: var(--moderation-report-border);
+    }
+
     a.voted {
       font-weight: bold;
     }
@@ -31,23 +40,59 @@ div.list-of-forum-posts {
 }
 
 div#c-forum-topics {
-  span.new {
-    font-size: 80%;
-    color: var(--forum-new-topic-color);
-    margin-right: 0.5em;
-  }
-
-  span.locked-topic {
-    color: var(--muted-text-color);
-  }
-
-  span.level-topic {
-    color: var(--forum-level-restricted-topic-color);
-    font-weight: bold;
-  }
-
-  tr.forum-topic-row td:last-child {
+  td.status-column {
     white-space: nowrap;
+    text-align: right;
+  }
+
+  td.creator-column, td.updated-by-column {
+    white-space: nowrap;
+  }
+
+  .topic-status {
+    margin-right: 0.25em;
+    vertical-align: bottom;
+
+    &.label {
+      font-size: 0.7em;
+      text-transform: uppercase;
+      border-radius: 3px;
+      padding: 4px;
+      color: white;
+    }
+
+    &.icon {
+      color: var(--muted-text-color);
+      font-size: 1em;
+    }
+
+    &.new {
+      background-color: var(--forum-topic-status-new-color);
+    }
+
+    &.pending {
+      background-color: var(--forum-topic-status-pending-color);
+    }
+
+    &.approved {
+      background-color: var(--forum-topic-status-approved-color);
+    }
+
+    &.rejected {
+      background-color: var(--forum-topic-status-rejected-color);
+    }
+  }
+
+  #a-index {
+    .updated-at-column {
+      white-space: nowrap;
+    }
+
+    .creator-column, .updated-by-column, .updated-at-column {
+      @media screen and (max-width: 660px) {
+        display: none;
+      }
+    }
   }
 }
 

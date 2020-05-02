@@ -5,15 +5,36 @@ module Sources::Strategies
 
     # https://pbs.twimg.com/media/EBGbJe_U8AA4Ekb.jpg
     # https://pbs.twimg.com/media/EBGbJe_U8AA4Ekb?format=jpg&name=900x900
-    BASE_IMAGE_URL = %r!\Ahttps?://pbs\.twimg\.com/media!i
+    # https://pbs.twimg.com/tweet_video_thumb/ETkN_L3X0AMy1aT.jpg
+    # https://pbs.twimg.com/ext_tw_video_thumb/1243725361986375680/pu/img/JDA7g7lcw7wK-PIv.jpg
+    # https://pbs.twimg.com/amplify_video_thumb/1215590775364259840/img/lolCkEEioFZTb5dl.jpg
+    BASE_IMAGE_URL = %r!\Ahttps?://pbs\.twimg\.com/(?<media_type>media|tweet_video_thumb|ext_tw_video_thumb|amplify_video_thumb)!i
     FILENAME1 = %r!(?<file_name>[a-zA-Z0-9_-]+)\.(?<file_ext>\w+)!i
     FILENAME2 = %r!(?<file_name>[a-zA-Z0-9_-]+)\?.*format=(?<file_ext>\w+)!i
-    IMAGE_URL = %r!#{BASE_IMAGE_URL}/#{Regexp.union(FILENAME1, FILENAME2)}!i
+    FILEPATH1 = %r!(?<file_path>\d+/[\w_-]+/img)!i
+    FILEPATH2 = %r!(?<file_path>\d+/img)!i
+    IMAGE_URL1 = %r!#{BASE_IMAGE_URL}/#{Regexp.union(FILENAME1, FILENAME2)}!i
+    IMAGE_URL2 = %r!#{BASE_IMAGE_URL}/#{Regexp.union(FILEPATH1, FILEPATH2)}/#{FILENAME1}!i
 
     # Twitter provides a list but it's inaccurate; some names ('intent') aren't
     # included and other names in the list aren't actually reserved.
     # https://developer.twitter.com/en/docs/developer-utilities/configuration/api-reference/get-help-configuration
     RESERVED_USERNAMES = %w[home i intent search]
+
+    # List of hashtag suffixes attached to tag other names
+    # Ex: 西住みほ生誕祭2019 should be checked as 西住みほ
+    # The regexes will not match if there is nothing preceding
+    # the pattern to avoid creating empty strings.
+    COMMON_TAG_REGEXES = [
+      /(?<!\A)生誕祭(?:\d*)\z/,
+      /(?<!\A)誕生祭(?:\d*)\z/,
+      /(?<!\A)版もうひとつの深夜の真剣お絵描き60分一本勝負(?:_\d+)?\z/,
+      /(?<!\A)版深夜の真剣お絵描き60分一本勝負(?:_\d+)?\z/,
+      /(?<!\A)深夜の真剣お絵描き60分一本勝負(?:_\d+)?\z/,
+      /(?<!\A)版深夜のお絵描き60分一本勝負(?:_\d+)?\z/,
+      /(?<!\A)版真剣お絵描き60分一本勝(?:_\d+)?\z/,
+      /(?<!\A)版お絵描き60分一本勝負(?:_\d+)?\z/
+    ]
 
     def self.enabled?
       Danbooru.config.twitter_api_key.present? && Danbooru.config.twitter_api_secret.present?
@@ -46,8 +67,10 @@ module Sources::Strategies
     end
 
     def image_urls
-      if url =~ IMAGE_URL
-        ["https://pbs.twimg.com/media/#{$~[:file_name]}.#{$~[:file_ext]}:orig"]
+      if url =~ IMAGE_URL1
+        ["https://pbs.twimg.com/#{$~[:media_type]}/#{$~[:file_name]}.#{$~[:file_ext]}:orig"]
+      elsif url =~ IMAGE_URL2
+        ["https://pbs.twimg.com/#{$~[:media_type]}/#{$~[:file_path]}/#{$~[:file_name]}.#{$~[:file_ext]}:orig"]
       elsif api_response.present?
         api_response.dig(:extended_entities, :media).to_a.map do |media|
           if media[:type] == "photo"
@@ -65,8 +88,14 @@ module Sources::Strategies
     end
 
     def preview_urls
-      image_urls.map do |x|
-        x.sub(%r!\.(jpg|jpeg|png|gif)(?::orig)?\z!i, '.\1:small')
+      if api_response.dig(:extended_entities, :media).present?
+        api_response.dig(:extended_entities, :media).to_a.map do |media|
+          media[:media_url_https] + ":small"
+        end
+      else
+        image_urls.map do |url|
+          url.gsub(/:orig\z/, ":small")
+        end
       end
     end
 
@@ -120,6 +149,16 @@ module Sources::Strategies
       api_response.dig(:entities, :hashtags).to_a.map do |hashtag|
         [hashtag[:text], "https://twitter.com/hashtag/#{hashtag[:text]}"]
       end
+    end
+
+    def normalize_tag(tag)
+      COMMON_TAG_REGEXES.each do |rg|
+        norm_tag = tag.gsub(rg, "")
+        if norm_tag != tag
+          return norm_tag
+        end
+      end
+      tag
     end
 
     def dtext_artist_commentary_desc

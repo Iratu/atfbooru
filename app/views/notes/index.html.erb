@@ -1,8 +1,10 @@
+<% meta_description "See thousands of translated anime & hentai comics on #{Danbooru.config.app_name}." %>
+
 <div id="c-notes">
   <div id="a-index">
     <h1>Notes</h1>
 
-    <%= table_for @notes, class: "striped autofit" do |t| %>
+    <%= table_for @notes, {class: "striped autofit"} do |t| %>
       <% t.column "Post" do |note| %>
         <%= link_to note.post_id, note.post %>
       <% end %>
@@ -10,15 +12,13 @@
         <%= link_to "#{note.id}.#{note.version}", post_path(note.post_id, anchor: "note-#{note.id}") %>
         <%= link_to "»", note_versions_path(search: { note_id: note.id }) %>
       <% end %>
-      <% t.column "Body", class: "col-expand" do |note| %>
+      <% t.column "Body", td: { class: "col-expand" } do |note| %>
         <%= note.body %>
         <% unless note.is_active? %>
           <span class="inactive">(deleted)</span>
         <% end %>
       <% end %>
       <% t.column "Created" do |note| %>
-        <%= link_to_user note.creator %>
-        <%= link_to "»", notes_path(search: { creator_name: note.creator.name }) %>
         <div><%= time_ago_in_words_tagged(note.created_at) %></div>
       <% end %>
     <% end %>

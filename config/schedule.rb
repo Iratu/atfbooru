@@ -4,14 +4,18 @@ env "RAILS_LOG_TO_STDOUT", "true"
 
 set :output, "log/whenever.log"
 
-every 1.hour do
-  runner "Maintenance.hourly"
+every :hour do
+  rake "maintenance:hourly"
 end
 
-every 1.day do
-  runner "Maintenance.daily"
+every :day do
+  rake "maintenance:daily"
 end
 
-every 1.week, :at => "1:30 am" do
-  runner "Maintenance.weekly"
+every :sunday do
+  rake "maintenance:weekly"
+end
+
+every :month do
+  rake "maintenance:monthly"
 end

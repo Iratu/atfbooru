@@ -7,17 +7,12 @@
 
   <section id="tag-box">
     <h1>Tags</h1>
-    <%= @post_set.presenter.tag_list_html(current_query: params[:tags], show_extra_links: CurrentUser.user.is_gold?) %>
-  </section>
-
-  <section id="post-share">
-    <h1>Share</h1>
-    <%= render "posts/partials/index/share" %>
+    <%= @post_set.presenter.tag_list_html(current_query: params[:tags], show_extra_links: policy(Post).show_extra_links?) %>
   </section>
 
   <%= render "posts/partials/index/options" %>
 
-  <%= render "posts/partials/index/related" %>
+  <%= render "posts/partials/index/related", post_set: @post_set %>
 <% end %>
 
 <% content_for(:content) do %>
@@ -28,9 +23,9 @@
       <li><%= link_to "Artist", artist_path(@post_set.artist), :id => "show-excerpt-link" %></li>
     <% elsif @post_set.wiki_page.present? %>
       <li><%= link_to "Wiki", wiki_page_path(@post_set.wiki_page), :id => "show-excerpt-link" %></li>
-    <% elsif @post_set.has_pool? %>
+    <% elsif @post_set.pool.present? %>
       <li><%= link_to "Pool", pool_path(@post_set.pool), :id => "show-excerpt-link" %></li>
-    <% elsif @post_set.has_favgroup? %>
+    <% elsif @post_set.favgroup.present? %>
       <li><%= link_to "Favorite Group", favorite_group_path(@post_set.favgroup), :id => "show-excerpt-link" %></li>
     <% elsif @post_set.has_blank_wiki? %>
       <li><%= link_to "Wiki", new_wiki_page_path(wiki_page: { title: @post_set.tag_string }), id: "show-excerpt-link" %></li>
@@ -44,8 +39,6 @@
   <%= render "posts/partials/index/posts", :post_set => @post_set %>
 <% end %>
 
-<%= post_search_count_js %>
-
 <div id="saved-searches-nav">
   <%= render "saved_searches/interface" %>
 </div>
@@ -56,20 +49,14 @@
   <%= render "posts/partials/common/secondary_links" %>
 <% end %>
 
-<% content_for(:page_title) do %>
-  <% if @post_set.tag_string.present? %>
-    <%= @post_set.humanized_tag_string %> - <%= Danbooru.config.app_name %>
+<% if post_search_counts_enabled? && @post_set.query.is_simple_tag? && @post_set.current_page == 1 %>
+  <% if @post_set.post_count == 0 %>
+    <%= missed_post_search_count_js(@post_set) %>
   <% else %>
-    <%= Danbooru.config.app_name %>
+    <%= post_search_count_js(@post_set) %>
   <% end %>
 <% end %>
 
 <% content_for(:html_header) do %>
-  <%= tag.link href: posts_path(format: "atom", tags: params[:tags]), rel: "alternate", title: "ATOM", type: "application/atom+xml" %>
-  <%= tag.link rel: "next", href: next_page_url %>
-  <% if prev_page_url %>
-    <%= tag.link rel: "prev", href: prev_page_url %>
-  <% end %>
-  <%= missed_post_search_count_js %>
   <%= render "posts/partials/index/seo_meta_tags" %>
 <% end %>

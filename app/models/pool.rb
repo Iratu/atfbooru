@@ -1,48 +1,25 @@
 class Pool < ApplicationRecord
-  class RevertError < Exception; end
+  class RevertError < StandardError; end
   POOL_ORDER_LIMIT = 1000
 
   array_attribute :post_ids, parse: /\d+/, cast: :to_i
-  belongs_to_creator
 
   validates_uniqueness_of :name, case_sensitive: false, if: :name_changed?
   validate :validate_name, if: :name_changed?
   validates_inclusion_of :category, :in => %w(series collection)
-  validate :updater_can_remove_posts
   validate :updater_can_edit_deleted
   before_validation :normalize_post_ids
   before_validation :normalize_name
   after_save :create_version
   after_create :synchronize!
 
-  api_attributes including: [:creator_name, :post_count]
+  api_attributes including: [:post_count]
+  deletable
+
+  scope :series, -> { where(category: "series") }
+  scope :collection, -> { where(category: "collection") }
 
   module SearchMethods
-    def deleted
-      where("pools.is_deleted = true")
-    end
-
-    def undeleted
-      where("pools.is_deleted = false")
-    end
-
-    def series
-      where("pools.category = ?", "series")
-    end
-
-    def collection
-      where("pools.category = ?", "collection")
-    end
-
-    def series_first
-      order(Arel.sql("(case pools.category when 'series' then 0 else 1 end), pools.name"))
-    end
-
-    def selected_first(current_pool_id)
-      return all if current_pool_id.blank?
-      reorder(Arel.sql("(case pools.id when #{current_pool_id.to_i} then 0 else 1 end), pools.name"))
-    end
-
     def name_matches(name)
       name = normalize_name_for_search(name)
       name = "*#{name}*" unless name =~ /\*/
@@ -51,7 +28,8 @@ class Pool < ApplicationRecord
 
     def post_tags_match(query)
       posts = Post.tag_match(query).select(:id).reorder(nil)
-      joins("CROSS JOIN unnest(post_ids) AS post_id").group(:id).where("post_id IN (?)", posts)
+      pools = Pool.joins("CROSS JOIN unnest(post_ids) AS post_id").group(:id).where("post_id IN (?)", posts)
+      where(id: pools)
     end
 
     def default_order
@@ -61,7 +39,7 @@ class Pool < ApplicationRecord
     def search(params)
       q = super
 
-      q = q.search_attributes(params, :creator, :is_active, :is_deleted, :name, :description, :post_ids)
+      q = q.search_attributes(params, :is_deleted, :name, :description, :post_ids)
       q = q.text_attribute_matches(:description, params[:description_matches])
 
       if params[:post_tags_match]
@@ -78,7 +56,6 @@ class Pool < ApplicationRecord
         q = q.collection
       end
 
-      params[:order] ||= params.delete(:sort)
       case params[:order]
       when "name"
         q = q.order("pools.name")
@@ -95,14 +72,6 @@ class Pool < ApplicationRecord
   end
 
   extend SearchMethods
-
-  def self.name_to_id(name)
-    if name =~ /^\d+$/
-      name.to_i
-    else
-      select_value_sql("SELECT id FROM pools WHERE lower(name) = ?", name.downcase.tr(" ", "_")).to_i
-    end
-  end
 
   def self.normalize_name(name)
     name.gsub(/[_[:space:]]+/, "_").gsub(/\A_|_\z/, "")
@@ -127,8 +96,8 @@ class Pool < ApplicationRecord
   end
 
   def versions
-    if PoolArchive.enabled?
-      PoolArchive.where("pool_id = ?", id).order("id asc")
+    if PoolVersion.enabled?
+      PoolVersion.where("pool_id = ?", id).order("id asc")
     else
       raise "Archive service not configured"
     end
@@ -177,12 +146,8 @@ class Pool < ApplicationRecord
     post_ids.find_index(post_id).to_i + 1
   end
 
-  def deletable_by?(user)
-    user.is_builder?
-  end
-
   def updater_can_edit_deleted
-    if is_deleted? && !deletable_by?(CurrentUser.user)
+    if is_deleted? && !Pundit.policy!([CurrentUser.user, nil], self).update?
       errors[:base] << "You cannot update pools that are deleted"
     end
   end
@@ -207,7 +172,6 @@ class Pool < ApplicationRecord
 
   def remove!(post)
     return unless contains?(post.id)
-    return unless CurrentUser.user.can_remove_from_pools?
 
     with_lock do
       reload
@@ -272,13 +236,13 @@ class Pool < ApplicationRecord
     post_ids[n]
   end
 
-  def cover_post_id
-    post_ids.first
+  def cover_post
+    post_count > 0 ? Post.find(post_ids.first) : nil
   end
 
   def create_version(updater: CurrentUser.user, updater_ip_addr: CurrentUser.ip_addr)
-    if PoolArchive.enabled?
-      PoolArchive.queue(self, updater, updater_ip_addr)
+    if PoolVersion.enabled?
+      PoolVersion.queue(self, updater, updater_ip_addr)
     else
       Rails.logger.warn("Archive service is not configured. Pool versions will not be saved.")
     end
@@ -286,10 +250,6 @@ class Pool < ApplicationRecord
 
   def last_page
     (post_count / CurrentUser.user.per_page.to_f).ceil
-  end
-
-  def creator_name
-    creator.name
   end
 
   def validate_name
@@ -312,13 +272,6 @@ class Pool < ApplicationRecord
       errors[:name] << "cannot be blank"
     when /\A[0-9]+\z/
       errors[:name] << "cannot contain only digits"
-    end
-  end
-
-  def updater_can_remove_posts
-    removed = post_ids_was - post_ids
-    if removed.any? && !CurrentUser.user.can_remove_from_pools?
-      errors[:base] << "You cannot removes posts from pools within the first week of sign up"
     end
   end
 end

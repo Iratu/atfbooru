@@ -1,17 +1,16 @@
-require 'danbooru/has_bit_flags'
-
 class Post < ApplicationRecord
-  class ApprovalError < Exception; end
-  class DisapprovalError < Exception; end
-  class RevertError < Exception; end
-  class SearchError < Exception; end
-  class DeletionError < Exception; end
-  class TimeoutError < Exception; end
+  class ApprovalError < StandardError; end
+  class DisapprovalError < StandardError; end
+  class RevertError < StandardError; end
+  class SearchError < StandardError; end
+  class DeletionError < StandardError; end
+  class TimeoutError < StandardError; end
 
   # Tags to copy when copying notes.
   NOTE_COPY_TAGS = %w[translated partially_translated check_translation translation_request reverse_translation]
 
-  before_validation :initialize_uploader, :on => :create
+  deletable
+
   before_validation :merge_old_changes
   before_validation :normalize_tags
   before_validation :strip_source
@@ -27,6 +26,7 @@ class Post < ApplicationRecord
   validate :has_enough_tags
   validate :post_is_not_its_own_parent
   validate :updater_can_change_rating
+  validate :uploader_is_not_limited, on: :create
   before_save :update_tag_post_counts
   before_save :set_tag_counts
   before_create :autoban
@@ -49,6 +49,7 @@ class Post < ApplicationRecord
   has_many :votes, :class_name => "PostVote", :dependent => :destroy
   has_many :notes, :dependent => :destroy
   has_many :comments, -> {order("comments.id")}, :dependent => :destroy
+  has_many :moderation_reports, through: :comments
   has_many :children, -> {order("posts.id")}, :class_name => "Post", :foreign_key => "parent_id"
   has_many :approvals, :class_name => "PostApproval", :dependent => :destroy
   has_many :disapprovals, :class_name => "PostDisapproval", :dependent => :destroy
@@ -57,8 +58,18 @@ class Post < ApplicationRecord
 
   attr_accessor :old_tag_string, :old_parent_id, :old_source, :old_rating, :has_constraints, :disable_versioning, :view_count
 
-  if PostArchive.enabled?
-    has_many :versions, -> { Rails.env.test? ? order("post_versions.updated_at ASC, post_versions.id ASC") : order("post_versions.updated_at ASC") }, :class_name => "PostArchive", :dependent => :destroy
+  scope :pending, -> { where(is_pending: true) }
+  scope :flagged, -> { where(is_flagged: true) }
+  scope :banned, -> { where(is_banned: true) }
+  scope :active, -> { where(is_pending: false, is_deleted: false, is_flagged: false) }
+  scope :pending_or_flagged, -> { pending.or(flagged) }
+
+  scope :unflagged, -> { where(is_flagged: false) }
+  scope :has_notes, -> { where.not(last_noted_at: nil) }
+  scope :for_user, ->(user_id) { where(uploader_id: user_id) }
+
+  if PostVersion.enabled?
+    has_many :versions, -> { Rails.env.test? ? order("post_versions.updated_at ASC, post_versions.id ASC") : order("post_versions.updated_at ASC") }, class_name: "PostVersion", dependent: :destroy
   end
 
   module FileMethods
@@ -260,39 +271,28 @@ class Post < ApplicationRecord
     def resize_percentage
       100 * large_image_width.to_f / image_width.to_f
     end
+
+    # XXX
+    def current_image_size
+      has_large? && CurrentUser.default_image_size == "large" ? "large" : "original"
+    end
   end
 
   module ApprovalMethods
     def is_approvable?(user = CurrentUser.user)
-      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && uploader != user && !approved_by?(user)
+      !is_status_locked? && (is_pending? || is_flagged? || is_deleted?) && uploader != user
     end
 
-    def flag!(reason, options = {})
-      flag = flags.create(:reason => reason, :is_resolved => false, :is_deletion => options[:is_deletion])
+    def flag!(reason, is_deletion: false)
+      flag = flags.create(reason: reason, is_resolved: false, is_deletion: is_deletion, creator: CurrentUser.user)
 
       if flag.errors.any?
         raise PostFlag::Error.new(flag.errors.full_messages.join("; "))
       end
     end
 
-    def appeal!(reason)
-      if is_status_locked?
-        raise PostAppeal::Error.new("Post is locked and cannot be appealed")
-      end
-
-      appeal = appeals.create(:reason => reason)
-
-      if appeal.errors.any?
-        raise PostAppeal::Error.new(appeal.errors.full_messages.join("; "))
-      end
-    end
-
     def approve!(approver = CurrentUser.user)
       approvals.create(user: approver)
-    end
-
-    def approved_by?(user)
-      approver == user || approvals.where(user: user).exists?
     end
 
     def disapproved_by?(user)
@@ -339,7 +339,7 @@ class Post < ApplicationRecord
       end
 
       case source
-      when %r{\Ahttps?://twitter.com/[^/]+/status/(\d+)\z}i
+      when %r{\Ahttps?://(?:mobile\.)?twitter.com/[^/]+/status/(\d+)(?:/(?:photo/\d)?|\?s=\d+)?\z}i
         "https://twitter.com/i/web/status/#{$1}"
 
       when %r{\Ahttps?://lohas\.nicoseiga\.jp/priv/(\d+)\?e=\d+&h=[a-f0-9]+}i,
@@ -529,11 +529,11 @@ class Post < ApplicationRecord
 
   module TagMethods
     def tag_array
-      @tag_array ||= Tag.scan_tags(tag_string)
+      @tag_array ||= tag_string.split
     end
 
     def tag_array_was
-      @tag_array_was ||= Tag.scan_tags(tag_string_in_database.presence || tag_string_before_last_save || "")
+      @tag_array_was ||= (tag_string_in_database.presence || tag_string_before_last_save || "").split
     end
 
     def tags
@@ -589,14 +589,15 @@ class Post < ApplicationRecord
     end
 
     def merge_old_changes
+      reset_tag_array_cache
       @removed_tags = []
 
       if old_tag_string
         # If someone else committed changes to this post before we did,
         # then try to merge the tag changes together.
-        current_tags = tag_array_was
-        new_tags = tag_array
-        old_tags = Tag.scan_tags(old_tag_string)
+        current_tags = tag_string_was.split
+        new_tags = PostQueryBuilder.new(tag_string).parse_tag_edit
+        old_tags = old_tag_string.split
 
         kept_tags = current_tags & new_tags
         @removed_tags = old_tags - kept_tags
@@ -633,9 +634,9 @@ class Post < ApplicationRecord
     end
 
     def normalize_tags
-      normalized_tags = Tag.scan_tags(tag_string)
+      normalized_tags = PostQueryBuilder.new(tag_string).parse_tag_edit
       normalized_tags = apply_casesensitive_metatags(normalized_tags)
-      normalized_tags = normalized_tags.map {|tag| tag.downcase}
+      normalized_tags = normalized_tags.map(&:downcase)
       normalized_tags = filter_metatags(normalized_tags)
       normalized_tags = remove_negated_tags(normalized_tags)
       normalized_tags = TagAlias.to_aliased(normalized_tags)
@@ -644,7 +645,7 @@ class Post < ApplicationRecord
       normalized_tags = remove_invalid_tags(normalized_tags)
       normalized_tags = Tag.convert_cosplay_tags(normalized_tags)
       normalized_tags += Tag.create_for_list(TagImplication.automatic_tags_for(normalized_tags))
-      normalized_tags = TagImplication.with_descendants(normalized_tags)
+      normalized_tags += TagImplication.tags_implied_by(normalized_tags).map(&:name)
       normalized_tags = normalized_tags.compact.uniq.sort
       normalized_tags = Tag.create_for_list(normalized_tags)
       set_tag_string(normalized_tags.join(" "))
@@ -670,8 +671,6 @@ class Post < ApplicationRecord
     end
 
     def add_automatic_tags(tags)
-      return tags if !Danbooru.config.enable_dimension_autotagging
-
       tags -= %w(incredibly_absurdres absurdres highres lowres huge_filesize flash webm mp4)
 
       if has_dimensions?
@@ -746,7 +745,7 @@ class Post < ApplicationRecord
         when /^newpool:(.+)$/i
           pool = Pool.find_by_name($1)
           if pool.nil?
-            pool = Pool.create(:name => $1, :description => "This pool was automatically generated")
+            pool = Pool.create(name: $1, description: "This pool was automatically generated")
           end
         end
       end
@@ -756,7 +755,7 @@ class Post < ApplicationRecord
     def filter_metatags(tags)
       @pre_metatags, tags = tags.partition {|x| x =~ /\A(?:rating|parent|-parent|-?locked):/i}
       tags = apply_categorization_metatags(tags)
-      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-child|-favgroup|favgroup|upvote|downvote):/i}
+      @post_metatags, tags = tags.partition {|x| x =~ /\A(?:-pool|pool|newpool|fav|-fav|child|-child|-favgroup|favgroup|upvote|downvote|status|-status|disapproved):/i}
       apply_pre_metatags
       return tags
     end
@@ -806,6 +805,22 @@ class Post < ApplicationRecord
         when /^(up|down)vote:(.+)$/i
           vote!($1)
 
+        when /^status:active$/i
+          raise User::PrivilegeError unless CurrentUser.is_approver?
+          approvals.create!(user: CurrentUser.user)
+
+        when /^status:banned$/i
+          raise User::PrivilegeError unless CurrentUser.is_approver?
+          ban!
+
+        when /^-status:banned$/i
+          raise User::PrivilegeError unless CurrentUser.is_approver?
+          unban!
+
+        when /^disapproved:(.+)$/i
+          raise User::PrivilegeError unless CurrentUser.is_approver?
+          disapprovals.create!(user: CurrentUser.user, reason: $1.downcase)
+
         when /^child:none$/i
           children.each do |post|
             post.update!(parent_id: nil)
@@ -821,21 +836,15 @@ class Post < ApplicationRecord
             post.update!(parent_id: id)
           end
 
-        when /^-favgroup:(\d+)$/i
-          favgroup = FavoriteGroup.where("id = ?", $1.to_i).for_creator(CurrentUser.user.id).first
-          favgroup&.remove!(id)
-
         when /^-favgroup:(.+)$/i
-          favgroup = FavoriteGroup.named($1).for_creator(CurrentUser.user.id).first
-          favgroup&.remove!(id)
-
-        when /^favgroup:(\d+)$/i
-          favgroup = FavoriteGroup.where("id = ?", $1.to_i).for_creator(CurrentUser.user.id).first
-          favgroup&.add!(id)
+          favgroup = FavoriteGroup.find_by_name_or_id!($1, CurrentUser.user)
+          raise User::PrivilegeError unless Pundit.policy!([CurrentUser.user, nil], favgroup).update?
+          favgroup&.remove!(self)
 
         when /^favgroup:(.+)$/i
-          favgroup = FavoriteGroup.named($1).for_creator(CurrentUser.user.id).first
-          favgroup&.add!(id)
+          favgroup = FavoriteGroup.find_by_name_or_id!($1, CurrentUser.user)
+          raise User::PrivilegeError unless Pundit.policy!([CurrentUser.user, nil], favgroup).update?
+          favgroup&.add!(self)
 
         end
       end
@@ -941,7 +950,7 @@ class Post < ApplicationRecord
 
     def add_favorite!(user)
       Favorite.add(post: self, user: user)
-      vote!("up", user) if user.is_voter?
+      vote!("up", user) if Pundit.policy!([user, nil], PostVote).create?
     rescue PostVote::Error
     end
 
@@ -951,33 +960,22 @@ class Post < ApplicationRecord
 
     def remove_favorite!(user)
       Favorite.remove(post: self, user: user)
-      unvote!(user) if user.is_voter?
+      unvote!(user) if Pundit.policy!([user, nil], PostVote).create?
     rescue PostVote::Error
     end
 
     # users who favorited this post, ordered by users who favorited it first
     def favorited_users
       favorited_user_ids = fav_string.scan(/\d+/).map(&:to_i)
-      visible_users = User.find(favorited_user_ids).reject(&:hide_favorites?)
+      visible_users = User.find(favorited_user_ids).select do |user|
+        Pundit.policy!([CurrentUser.user, nil], user).can_see_favorites?
+      end
       ordered_users = visible_users.index_by(&:id).slice(*favorited_user_ids).values
       ordered_users
     end
 
-    def favorite_groups(active_id = nil)
-      @favorite_groups ||= begin
-        groups = []
-
-        if active_id.present?
-          active_group = FavoriteGroup.where(:id => active_id.to_i).first
-          groups << active_group if active_group&.contains?(self.id)
-        end
-
-        groups += CurrentUser.user.favorite_groups.select do |favgroup|
-          favgroup.contains?(self.id)
-        end
-
-        groups.uniq
-      end
+    def favorite_groups
+      FavoriteGroup.for_post(id)
     end
 
     def remove_from_favorites
@@ -989,31 +987,18 @@ class Post < ApplicationRecord
 
     def remove_from_fav_groups
       FavoriteGroup.for_post(id).find_each do |favgroup|
-        favgroup.remove!(id)
+        favgroup.remove!(self)
       end
-    end
-  end
-
-  module UploaderMethods
-    def initialize_uploader
-      if uploader_id.blank?
-        self.uploader_id = CurrentUser.id
-        self.uploader_ip_addr = CurrentUser.ip_addr
-      end
-    end
-
-    def uploader_name
-      uploader.name
     end
   end
 
   module PoolMethods
     def pools
-      Pool.where("pools.post_ids && array[?]", id).series_first
+      Pool.where("pools.post_ids && array[?]", id)
     end
 
     def has_active_pools?
-      !pools.undeleted.empty?
+      pools.undeleted.present?
     end
 
     def belongs_to_pool?(pool)
@@ -1037,7 +1022,6 @@ class Post < ApplicationRecord
 
     def remove_pool!(pool)
       return unless belongs_to_pool?(pool)
-      return unless CurrentUser.user.can_remove_from_pools?
 
       with_lock do
         self.pool_string = pool_string.gsub(/(?:\A| )pool:#{pool.id}(?:\Z| )/, " ").strip
@@ -1059,7 +1043,7 @@ class Post < ApplicationRecord
     end
 
     def vote!(vote, voter = CurrentUser.user)
-      unless voter.is_voter?
+      unless Pundit.policy!([voter, nil], PostVote).create?
         raise PostVote::Error.new("You do not have permission to vote")
       end
 
@@ -1085,8 +1069,8 @@ class Post < ApplicationRecord
     def fast_count(tags = "", timeout: 1_000, raise_on_timeout: false, skip_cache: false)
       tags = tags.to_s
       tags += " rating:s" if CurrentUser.safe_mode?
-      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !Tag.has_metatag?(tags, "status", "-status")
-      tags = Tag.normalize_query(tags)
+      tags += " -status:deleted" if CurrentUser.hide_deleted_posts? && !PostQueryBuilder.new(tags).has_metatag?("status")
+      tags = PostQueryBuilder.new(tags).normalize_query(normalize_aliases: true)
 
       # Optimize some cases. these are just estimates but at these
       # quantities being off by a few hundred doesn't matter much
@@ -1151,7 +1135,7 @@ class Post < ApplicationRecord
     end
 
     def get_count_from_cache(tags)
-      if Tag.is_simple_tag?(tags)
+      if PostQueryBuilder.new(tags).is_simple_tag?
         count = Tag.find_by(name: tags).try(:post_count)
       else
         # this will only have a value for multi-tag searches or single metatag searches
@@ -1245,10 +1229,6 @@ class Post < ApplicationRecord
       end
     end
 
-    def parent_exists?
-      Post.exists?(parent_id)
-    end
-
     def has_visible_children?
       return true if has_active_children?
       return true if has_children? && CurrentUser.user.show_deleted_children?
@@ -1258,12 +1238,6 @@ class Post < ApplicationRecord
 
     def has_visible_children
       has_visible_children?
-    end
-
-    def children_ids
-      if has_children?
-        children.map {|p| p.id}.join(' ')
-      end
     end
   end
 
@@ -1319,31 +1293,13 @@ class Post < ApplicationRecord
         # XXX This must happen *after* the `is_deleted` flag is set to true (issue #3419).
         give_favorites_to_parent(options) if options[:move_favorites]
 
+        is_automatic = (reason == "Unapproved in three days")
+        uploader.upload_limit.update_limit!(self, incremental: is_automatic)
+
         unless options[:without_mod_action]
           ModAction.log("deleted post ##{id}, reason: #{reason}", :post_delete)
         end
       end
-    end
-
-    def undelete!
-      if is_status_locked?
-        self.errors.add(:is_status_locked, "; cannot undelete post")
-        return false
-      end
-
-      if !CurrentUser.is_admin?
-        if approved_by?(CurrentUser.user)
-          raise ApprovalError.new("You have previously approved this post and cannot undelete it")
-        elsif uploader_id == CurrentUser.id
-          raise ApprovalError.new("You cannot undelete a post you uploaded")
-        end
-      end
-
-      self.is_deleted = false
-      self.approver_id = CurrentUser.id
-      flags.each {|x| x.resolve!}
-      save
-      ModAction.log("undeleted post ##{id}", :post_undelete)
     end
 
     def replace!(params)
@@ -1374,7 +1330,7 @@ class Post < ApplicationRecord
 
     def create_new_version
       User.where(id: CurrentUser.id).update_all("post_update_count = post_update_count + 1")
-      PostArchive.queue(self) if PostArchive.enabled?
+      PostVersion.queue(self) if PostVersion.enabled?
     end
 
     def revert_to(target)
@@ -1439,22 +1395,11 @@ class Post < ApplicationRecord
   module ApiMethods
     def api_attributes
       attributes = super
-      attributes += [:uploader_name, :has_large, :has_visible_children, :children_ids, :is_favorited?] + TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
+      attributes += [:has_large, :has_visible_children, :is_favorited?] + TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
       attributes += [:file_url, :large_file_url, :preview_file_url] if visible?
       attributes -= [:md5, :file_ext] if !visible?
       attributes -= [:fav_string] if !CurrentUser.is_moderator?
       attributes
-    end
-
-    def associated_attributes
-      [:pixiv_ugoira_frame_data]
-    end
-
-    def as_json(options = {})
-      options ||= {}
-      options[:include] ||= []
-      options[:include] += associated_attributes
-      super(options)
     end
 
     def legacy_attributes
@@ -1598,34 +1543,6 @@ class Post < ApplicationRecord
       from(relation.arel.as("posts"))
     end
 
-    def pending
-      where(is_pending: true)
-    end
-
-    def flagged
-      where(is_flagged: true)
-    end
-
-    def pending_or_flagged
-      pending.or(flagged)
-    end
-
-    def undeleted
-      where("is_deleted = ?", false)
-    end
-
-    def deleted
-      where("is_deleted = ?", true)
-    end
-
-    def has_notes
-      where("last_noted_at is not null")
-    end
-
-    def for_user(user_id)
-      where("uploader_id = ?", user_id)
-    end
-
     def available_for_moderation(hidden = false, user = CurrentUser.user)
       return none if user.is_anonymous?
 
@@ -1645,6 +1562,30 @@ class Post < ApplicationRecord
 
     def tag_match(query)
       PostQueryBuilder.new(query).build
+    end
+
+    def search(params)
+      q = super
+
+      q = q.search_attributes(params,
+        :approver, :uploader, :rating, :source, :pixiv_id, :fav_count, :score, :up_score,
+        :down_score, :md5, :file_ext, :file_size, :image_width, :image_height, :tag_count,
+        :parent, :has_children, :has_active_children, :is_note_locked, :is_rating_locked,
+        :is_status_locked, :is_pending, :is_flagged, :is_deleted, :is_banned,
+        :last_comment_bumped_at, :last_commented_at, :last_noted_at
+      )
+
+      if params[:tags].present?
+        q = q.tag_match(params[:tags])
+      end
+
+      if params[:order].present?
+        q = PostQueryBuilder.new(nil).search_order(q, params[:order])
+      else
+        q = q.apply_default_order(params)
+      end
+
+      q
     end
   end
 
@@ -1704,6 +1645,10 @@ class Post < ApplicationRecord
           errors.add(:rating, "is locked and cannot be changed. Unlock the post first.")
         end
       end
+    end
+
+    def uploader_is_not_limited
+      errors[:uploader] << uploader.upload_limit.limit_reason if uploader.upload_limit.limited?
     end
 
     def added_tags_are_valid
@@ -1773,7 +1718,6 @@ class Post < ApplicationRecord
   include PresenterMethods
   include TagMethods
   include FavoriteMethods
-  include UploaderMethods
   include PoolMethods
   include VoteMethods
   extend CountMethods
@@ -1786,20 +1730,15 @@ class Post < ApplicationRecord
   include PixivMethods
   include IqdbMethods
   include ValidationMethods
-  include Danbooru::HasBitFlags
 
-  BOOLEAN_ATTRIBUTES = %w(
-    has_embedded_notes
-    has_cropped
-  )
-  has_bit_flags BOOLEAN_ATTRIBUTES
+  has_bit_flags ["has_embedded_notes", "has_cropped"]
 
   def safeblocked?
-    CurrentUser.safe_mode? && (rating != "s" || has_tag?("toddlercon|toddler|diaper|tentacle|rape|bestiality|beastiality|lolita|loli|nude|shota|pussy|penis"))
+    CurrentUser.safe_mode? && (rating != "s" || Danbooru.config.safe_mode_restricted_tags.any? { |tag| tag.in?(tag_array) })
   end
 
   def levelblocked?
-    !Danbooru.config.can_user_see_post?(CurrentUser.user, self)
+    !CurrentUser.is_gold? && Danbooru.config.restricted_tags.any? { |tag| tag.in?(tag_array) }
   end
 
   def banblocked?
@@ -1807,17 +1746,13 @@ class Post < ApplicationRecord
   end
 
   def visible?
-    return false if safeblocked?
-    return false if levelblocked?
-    return false if banblocked?
-    return true
+    !safeblocked? && !levelblocked? && !banblocked?
   end
 
   def reload(options = nil)
     super
     reset_tag_array_cache
     @pools = nil
-    @favorite_groups = nil
     @tag_categories = nil
     @typed_tags = nil
     self
@@ -1843,5 +1778,13 @@ class Post < ApplicationRecord
     end
 
     save
+  end
+
+  def html_data_attributes
+    super + [:has_large?, :current_image_size]
+  end
+
+  def self.available_includes
+    [:uploader, :updater, :approver, :parent, :upload, :artist_commentary, :flags, :appeals, :notes, :comments, :children, :approvals, :replacements, :pixiv_ugoira_frame_data]
   end
 end

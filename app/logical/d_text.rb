@@ -7,7 +7,7 @@ class DText
   def self.format_text(text, data: nil, **options)
     return nil if text.nil?
     data = preprocess([text]) if data.nil?
-    text = parse_embedded_tag_request_text(text)
+    text = parse_embedded_tag_request(text)
     html = DTextRagel.parse(text, **options)
     html = postprocess(html, *data)
     html
@@ -16,15 +16,16 @@ class DText
   end
 
   def self.preprocess(dtext_messages)
-    dtext_messages = dtext_messages.map { |message| parse_embedded_tag_request_text(message) }
+    dtext_messages = dtext_messages.map { |message| parse_embedded_tag_request(message) }
     names = dtext_messages.map { |message| parse_wiki_titles(message) }.flatten.uniq
     wiki_pages = WikiPage.where(title: names)
     tags = Tag.where(name: names)
+    artists = Artist.where(name: names)
 
-    [wiki_pages, tags]
+    [wiki_pages, tags, artists]
   end
 
-  def self.postprocess(html, wiki_pages, tags)
+  def self.postprocess(html, wiki_pages, tags, artists)
     fragment = Nokogiri::HTML.fragment(html)
 
     fragment.css("a.dtext-wiki-link").each do |node|
@@ -34,22 +35,34 @@ class DText
       name = WikiPage.normalize_title(name)
       wiki = wiki_pages.find { |wiki| wiki.title == name }
       tag = tags.find { |tag| tag.name == name }
+      artist = artists.find { |artist| artist.name == name }
 
-      if wiki.blank?
-        node["class"] += " dtext-wiki-does-not-exist"
-        node["title"] = "This wiki page does not exist"
-      end
+      if tag.present? && tag.category == Tag.categories.artist
+        node["href"] = "/artists/show_or_new?name=#{CGI.escape(name)}"
 
-      if WikiPage.is_meta_wiki?(name)
-        # skip (meta wikis aren't expected to have a tag)
-      elsif tag.blank?
-        node["class"] += " dtext-tag-does-not-exist"
-        node["title"] = "This wiki page does not have a tag"
-      elsif tag.post_count <= 0
-        node["class"] += " dtext-tag-empty"
-        node["title"] = "This wiki page does not have a tag"
+        if artist.blank?
+          node["class"] += " dtext-artist-does-not-exist"
+          node["title"] = "This artist page does not exist"
+        end
+
+        node["class"] += " tag-type-#{Tag.categories.artist}"
       else
-        node["class"] += " tag-type-#{tag.category}"
+        if wiki.blank?
+          node["class"] += " dtext-wiki-does-not-exist"
+          node["title"] = "This wiki page does not exist"
+        end
+
+        if WikiPage.is_meta_wiki?(name)
+          # skip (meta wikis aren't expected to have a tag)
+        elsif tag.blank?
+          node["class"] += " dtext-tag-does-not-exist"
+          node["title"] = "This wiki page does not have a tag"
+        elsif tag.post_count <= 0
+          node["class"] += " dtext-tag-empty"
+          node["title"] = "This wiki page does not have a tag"
+        else
+          node["class"] += " tag-type-#{tag.category}"
+        end
       end
     end
 
@@ -61,17 +74,18 @@ class DText
     "[quote]\n#{creator_name} said:\n\n#{stripped_body}\n[/quote]\n\n"
   end
 
-  def self.parse_embedded_tag_request_text(text)
-    [TagAlias, TagImplication, BulkUpdateRequest].each do |tag_request|
-      text = text.gsub(tag_request.embedded_pattern) do |match|
-        obj = tag_request.find($~[:id])
-        tag_request_message(obj) || match
-      rescue ActiveRecord::RecordNotFound
-        match
-      end
-    end
-
+  def self.parse_embedded_tag_request(text)
+    text = parse_embedded_tag_request_type(text, TagAlias, /\[ta:(?<id>\d+)\]/m)
+    text = parse_embedded_tag_request_type(text, TagImplication, /\[ti:(?<id>\d+)\]/m)
+    text = parse_embedded_tag_request_type(text, BulkUpdateRequest, /\[bur:(?<id>\d+)\]/m)
     text
+  end
+
+  def self.parse_embedded_tag_request_type(text, tag_request, pattern)
+    text.gsub(pattern) do |match|
+      obj = tag_request.find_by_id($~[:id])
+      tag_request_message(obj) || match
+    end
   end
 
   def self.tag_request_message(obj)
@@ -249,9 +263,13 @@ class DText
   end
 
   # extract the first paragraph `needle` occurs in.
-  def self.excerpt(dtext, needle)
+  def self.extract_mention(dtext, needle)
     dtext = dtext.gsub(/\r\n|\r|\n/, "\n")
     excerpt = ActionController::Base.helpers.excerpt(dtext, needle, separator: "\n\n", radius: 1, omission: "")
     excerpt
+  end
+
+  def self.excerpt(text, length: 160)
+    strip_dtext(text).split(/\r\n|\r|\n/).first.to_s.truncate(length)
   end
 end

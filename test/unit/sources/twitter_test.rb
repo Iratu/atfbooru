@@ -26,13 +26,29 @@ module Sources
     end
 
     context "A video" do
-      setup do
+      should "get the correct urls" do
         @site = Sources::Strategies.find("https://twitter.com/CincinnatiZoo/status/859073537713328129")
+        assert_equal("https://video.twimg.com/ext_tw_video/859073467769126913/pu/vid/1280x720/cPGgVROXHy3yrK6u.mp4", @site.image_url)
+        assert_equal(["https://pbs.twimg.com/ext_tw_video_thumb/859073467769126913/pu/img/VKHGdXPsqKASBTvm.jpg:small"], @site.preview_urls)
+        assert_equal("https://twitter.com/CincinnatiZoo/status/859073537713328129", @site.canonical_url)
       end
 
-      should "get the correct urls" do
-        assert_equal("https://video.twimg.com/ext_tw_video/859073467769126913/pu/vid/1280x720/cPGgVROXHy3yrK6u.mp4", @site.image_url)
-        assert_equal("https://twitter.com/CincinnatiZoo/status/859073537713328129", @site.canonical_url)
+      should "work when given a video thumbnail" do
+        # https://twitter.com/Kekeflipnote/status/1241038667898118144
+        @site = Sources::Strategies.find("https://pbs.twimg.com/tweet_video_thumb/ETkN_L3X0AMy1aT.jpg:small")
+        assert_equal("https://pbs.twimg.com/tweet_video_thumb/ETkN_L3X0AMy1aT.jpg:orig", @site.image_url)
+      end
+
+      should "work when given an external video thumbnail" do
+        # https://twitter.com/chivedips/status/1243850897056133121
+        @site = Sources::Strategies.find("https://pbs.twimg.com/ext_tw_video_thumb/1243725361986375680/pu/img/JDA7g7lcw7wK-PIv.jpg:small")
+        assert_equal("https://pbs.twimg.com/ext_tw_video_thumb/1243725361986375680/pu/img/JDA7g7lcw7wK-PIv.jpg:orig", @site.image_url)
+      end
+
+      should "work when given an amplify video thumbnail" do
+        # https://twitter.com/UNITED_CINEMAS/status/1223138847417978881
+        @site = Sources::Strategies.find("https://pbs.twimg.com/amplify_video_thumb/1215590775364259840/img/lolCkEEioFZTb5dl.jpg:small")
+        assert_equal("https://pbs.twimg.com/amplify_video_thumb/1215590775364259840/img/lolCkEEioFZTb5dl.jpg:orig", @site.image_url)
       end
     end
 
@@ -43,6 +59,10 @@ module Sources
 
       should "get the image url" do
         assert_equal("https://video.twimg.com/tweet_video/C-1Tns7WsAAqvqn.mp4", @site.image_url)
+      end
+
+      should "get the preview urls" do
+        assert_equal(["https://pbs.twimg.com/tweet_video_thumb/C-1Tns7WsAAqvqn.jpg:small"], @site.preview_urls)
       end
     end
 
@@ -71,6 +91,7 @@ module Sources
 
       should "get the urls" do
         assert_equal("https://pbs.twimg.com/media/B7jfc1JCcAEyeJh.png:orig", @site.image_url)
+        assert_equal("https://pbs.twimg.com/media/B7jfc1JCcAEyeJh.png:small", @site.preview_url)
         assert_equal("https://twitter.com/Strangestone/status/556440271961858051", @site.page_url)
         assert_equal("https://twitter.com/Strangestone/status/556440271961858051", @site.canonical_url)
       end
@@ -103,8 +124,9 @@ module Sources
         assert_equal("nounproject", @site.artist_name)
       end
 
-      should "get the image url" do
+      should "get the image urls" do
         assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
+        assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:small", @site.preview_url)
       end
 
       should "get the canonical url" do
@@ -131,12 +153,10 @@ module Sources
         @site = Sources::Strategies.find("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:large", "https://twitter.com/nounproject/status/540944400767922176")
       end
 
-      should "get the artist name" do
+      should "get the source data" do
         assert_equal("nounproject", @site.artist_name)
-      end
-
-      should "get the image url" do
         assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
+        assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:small", @site.preview_url)
       end
     end
 
@@ -148,6 +168,8 @@ module Sources
       should "work" do
         assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig", @site.image_url)
         assert_equal(["https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:orig"], @site.image_urls)
+        assert_equal("https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:small", @site.preview_url)
+        assert_equal(["https://pbs.twimg.com/media/B4HSEP5CUAA4xyu.png:small"], @site.preview_urls)
         assert(@site.artist_name.blank?)
         assert(@site.profile_url.blank?)
         assert(@site.artists.empty?)
@@ -166,6 +188,8 @@ module Sources
       should "work" do
         assert_equal("https://pbs.twimg.com/media/EBGp2YdUYAA19Uj.jpg:orig", @site.image_url)
         assert_equal(["https://pbs.twimg.com/media/EBGp2YdUYAA19Uj.jpg:orig"], @site.image_urls)
+        assert_equal("https://pbs.twimg.com/media/EBGp2YdUYAA19Uj.jpg:small", @site.preview_url)
+        assert_equal(["https://pbs.twimg.com/media/EBGp2YdUYAA19Uj.jpg:small"], @site.preview_urls)
         assert_equal("https://pbs.twimg.com/media/EBGp2YdUYAA19Uj.jpg:orig", @site.canonical_url)
       end
 
@@ -257,6 +281,21 @@ module Sources
         assert_equal("tanso_panz", site.artist_name)
         assert_equal("https://twitter.com/tanso_panz", site.profile_url)
         assert_nil(site.image_url)
+      end
+    end
+
+    context "A tweet with hashtags" do
+      should "ignore common suffixes when translating hashtags" do
+        as(create(:user)) do
+          create(:tag, name: "nishizumi_miho", post_count: 1)
+          create(:wiki_page, title: "nishizumi_miho", other_names: "西住みほ")
+        end
+
+        site = Sources::Strategies.find("https://twitter.com/kasaishin100/status/1186658635226607616")
+
+        assert_includes(site.tags.map(&:first), "西住みほ生誕祭2019")
+        assert_includes(site.normalized_tags, "西住みほ")
+        assert_includes(site.translated_tags.map(&:name), "nishizumi_miho")
       end
     end
   end

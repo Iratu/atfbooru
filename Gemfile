@@ -14,7 +14,6 @@ gem 'ruby-vips'
 gem 'net-sftp'
 gem 'diff-lcs', :require => "diff/lcs/array"
 gem 'bcrypt', :require => "bcrypt"
-gem 'statistics2'
 gem 'capistrano', '~> 3.10'
 gem 'capistrano-rails'
 gem 'capistrano-rbenv'
@@ -45,6 +44,9 @@ gem 'puma'
 gem 'scenic'
 gem 'ipaddress'
 gem 'http'
+gem 'activerecord-hierarchical_query'
+gem 'pundit'
+gem 'mail'
 
 # needed for looser jpeg header compat
 gem 'ruby-imagespec', :require => "image_spec", :git => "https://github.com/r888888888/ruby-imagespec.git", :branch => "exif-fixes"
@@ -70,10 +72,8 @@ group :development do
 end
 
 group :development, :test do
-  gem 'awesome_print'
   gem 'pry-byebug'
   gem 'pry-rails'
-  gem 'pry-inline'
   gem 'listen'
 end
 

@@ -1,57 +1,49 @@
 class PoolsController < ApplicationController
   respond_to :html, :xml, :json, :js
-  before_action :member_only, :except => [:index, :show, :gallery]
-  before_action :builder_only, :only => [:destroy]
 
   def new
-    @pool = Pool.new
+    @pool = authorize Pool.new(permitted_attributes(Pool))
     respond_with(@pool)
   end
 
   def edit
-    @pool = Pool.find(params[:id])
-    if @pool.is_deleted && !@pool.deletable_by?(CurrentUser.user)
-      raise User::PrivilegeError
-    end
+    @pool = authorize Pool.find(params[:id])
     respond_with(@pool)
   end
 
   def index
-    @pools = Pool.includes(:creator).paginated_search(params, count_pages: true)
+    @pools = authorize Pool.paginated_search(params, count_pages: true)
 
-    if params[:redirect].to_s.truthy? && @pools.one? && Pool.normalize_name_for_search(@pools.first.name) == Pool.normalize_name_for_search(params[:search][:name_matches])
-      redirect_to @pools.first
-    else
-      respond_with @pools
-    end
+    respond_with(@pools)
   end
 
   def gallery
     limit = params[:limit].presence || CurrentUser.user.per_page
     search = search_params.presence || ActionController::Parameters.new(category: "series")
 
-    @pools = Pool.search(search).paginate(params[:page], limit: limit, search_count: params[:search])
-    @post_set = PostSets::PoolGallery.new(@pools)
+    @pools = authorize Pool.search(search).paginate(params[:page], limit: limit, search_count: params[:search])
+    respond_with(@pools)
   end
 
   def show
     limit = params[:limit].presence || CurrentUser.user.per_page
 
-    @pool = Pool.find(params[:id])
+    @pool = authorize Pool.find(params[:id])
     @posts = @pool.posts.paginate(params[:page], limit: limit, count: @pool.post_count)
     respond_with(@pool)
   end
 
   def create
-    @pool = Pool.create(pool_params)
+    @pool = authorize Pool.new(permitted_attributes(Pool))
+    @pool.save
     flash[:notice] = @pool.valid? ? "Pool created" : @pool.errors.full_messages.join("; ")
     respond_with(@pool)
   end
 
   def update
     # need to do this in order for synchronize! to work correctly
-    @pool = Pool.find(params[:id])
-    @pool.attributes = pool_params
+    @pool = authorize Pool.find(params[:id])
+    @pool.attributes = permitted_attributes(@pool)
     @pool.synchronize
     @pool.save
     unless @pool.errors.any?
@@ -61,10 +53,7 @@ class PoolsController < ApplicationController
   end
 
   def destroy
-    @pool = Pool.find(params[:id])
-    if !@pool.deletable_by?(CurrentUser.user)
-      raise User::PrivilegeError
-    end
+    @pool = authorize Pool.find(params[:id])
     @pool.update_attribute(:is_deleted, true)
     @pool.create_mod_action_for_delete
     flash[:notice] = "Pool deleted"
@@ -72,10 +61,7 @@ class PoolsController < ApplicationController
   end
 
   def undelete
-    @pool = Pool.find(params[:id])
-    if !@pool.deletable_by?(CurrentUser.user)
-      raise User::PrivilegeError
-    end
+    @pool = authorize Pool.find(params[:id])
     @pool.update_attribute(:is_deleted, false)
     @pool.create_mod_action_for_undelete
     flash[:notice] = "Pool undeleted"
@@ -83,7 +69,7 @@ class PoolsController < ApplicationController
   end
 
   def revert
-    @pool = Pool.find(params[:id])
+    @pool = authorize Pool.find(params[:id])
     @version = @pool.versions.find(params[:version_id])
     @pool.revert_to!(@version)
     flash[:notice] = "Pool reverted"
@@ -94,8 +80,11 @@ class PoolsController < ApplicationController
 
   private
 
-  def pool_params
-    permitted_params = %i[name description category is_active post_ids post_ids_string]
-    params.require(:pool).permit(*permitted_params, post_ids: [])
+  def item_matches_params(pool)
+    if params[:search][:name_matches]
+      Pool.normalize_name_for_search(pool.name) == Pool.normalize_name_for_search(params[:search][:name_matches])
+    else
+      true
+    end
   end
 end

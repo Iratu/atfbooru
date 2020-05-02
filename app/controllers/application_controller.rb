@@ -1,4 +1,7 @@
 class ApplicationController < ActionController::Base
+  include Pundit
+  helper_method :search_params
+
   class ApiLimitError < StandardError; end
 
   self.responder = ApplicationResponder
@@ -8,6 +11,7 @@ class ApplicationController < ActionController::Base
   before_action :set_current_user
   before_action :normalize_search
   before_action :api_check
+  before_action :ip_ban_check
   before_action :set_variant
   before_action :enable_cors
   before_action :cause_error
@@ -20,6 +24,43 @@ class ApplicationController < ActionController::Base
     rescue_from(*klasses) do |exception|
       render_error_page(status, exception)
     end
+  end
+
+  private
+
+  def respond_with(subject, *options, &block)
+    if params[:action] == "index" && is_redirect?(subject)
+      redirect_to_show(subject)
+      return
+    end
+
+    if subject.respond_to?(:includes) && (request.format.json? || request.format.xml?)
+      associations = ParameterBuilder.includes_parameters(params[:only], model_name)
+      subject = subject.includes(associations)
+    end
+
+    @current_item = subject
+    super
+  end
+
+  def set_version_comparison(default_type = "previous")
+    params[:type] = %w[previous subsequent current].include?(params[:type]) ? params[:type] : default_type
+  end
+
+  def model_name
+    controller_name.classify
+  end
+
+  def redirect_to_show(items)
+    redirect_to send("#{controller_path.singularize}_path", items.first, format: request.format.symbol)
+  end
+
+  def is_redirect?(items)
+    action_methods.include?("show") && params[:redirect].to_s.truthy? && items.one? && item_matches_params(items.first)
+  end
+
+  def item_matches_params(*)
+    true
   end
 
   protected
@@ -54,7 +95,7 @@ class ApplicationController < ActionController::Base
       render_error_page(401, exception, template: "sessions/new")
     when ActionController::InvalidAuthenticityToken, ActionController::UnpermittedParameters, ActionController::InvalidCrossOriginRequest
       render_error_page(403, exception)
-    when User::PrivilegeError
+    when User::PrivilegeError, Pundit::NotAuthorizedError
       render_error_page(403, exception, template: "static/access_denied", message: "Access denied")
     when ActiveRecord::RecordNotFound
       render_error_page(404, exception, message: "That record was not found.")
@@ -121,12 +162,16 @@ class ApplicationController < ActionController::Base
     render_error_page(status, error)
   end
 
-  User::Roles.each do |role|
-    define_method("#{role}_only") do
-      if !CurrentUser.user.send("is_#{role}?") || CurrentUser.user.is_banned? || IpBan.is_banned?(CurrentUser.ip_addr)
-        raise User::PrivilegeError
-      end
-    end
+  def ip_ban_check
+    raise User::PrivilegeError if !request.get? && IpBan.hit!(:full, CurrentUser.ip_addr)
+  end
+
+  def pundit_user
+    [CurrentUser.user, request]
+  end
+
+  def pundit_params_for(record)
+    params.fetch(PolicyFinder.new(record).param_key, {})
   end
 
   # Remove blank `search` params from the url.

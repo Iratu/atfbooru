@@ -125,6 +125,10 @@ table tfoot {
   font-size: 0.8em;
 }
 
+.text-small {
+  font-size: 0.8em;
+}
+
 .fixed-width-container {
   max-width: 70em;
 }
@@ -145,6 +149,16 @@ ul.list-inline {
   &, li {
     display: inline;
   }
+}
+
+.fit-width {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.fit-height {
+  max-height: 90vh;
+  height: auto !important;
 }
 
 .mobile-only {

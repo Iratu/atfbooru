@@ -21,50 +21,83 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         should "render for an empty tag" do
           get posts_path, params: { tags: "does_not_exist" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 0
         end
 
         should "render for an artist tag" do
-          create(:post, tag_string: "artist:bkub")
+          create(:post, tag_string: "artist:bkub", rating: "s")
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
 
           artist = create(:artist, name: "bkub")
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Artist"
 
           artist.update(is_banned: true)
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Artist"
 
-          artist.update(is_banned: false, is_active: false)
+          artist.update(is_banned: false, is_deleted: true)
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
 
           as_user { create(:wiki_page, title: "bkub") }
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
         end
 
         should "render for a tag with a wiki page" do
-          create(:post, tag_string: "char:fumimi")
+          create(:post, tag_string: "char:fumimi", rating: "s")
           get posts_path, params: { tags: "fumimi" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
 
           as_user { @wiki = create(:wiki_page, title: "fumimi") }
           get posts_path, params: { tags: "fumimi" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
 
           as_user { @wiki.update(is_deleted: true) }
           get posts_path, params: { tags: "bkub" }
           assert_response :success
+          assert_select "#show-excerpt-link", count: 0
+        end
+
+        should "render for a wildcard tag search" do
+          create(:post, tag_string: "1girl solo")
+          get posts_path(tags: "*girl*")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 0
+        end
+
+        should "render for a search:all search" do
+          create(:saved_search, user: @user)
+          get posts_path(tags: "search:all")
+          assert_response :success
+        end
+
+        should "show a notice for a single tag search with a pending BUR" do
+          create(:bulk_update_request, script: "create alias foo -> bar")
+          get_auth posts_path(tags: "foo"), @user
+          assert_select ".tag-change-notice"
         end
       end
 
       context "with a multi-tag search" do
         should "render" do
-          create(:post, tag_string: "1girl solo")
+          as(create(:user)) do
+            create(:post, tag_string: "1girl solo")
+            create(:wiki_page, title: "1girl")
+          end
+
           get posts_path, params: {:tags => "1girl solo"}
           assert_response :success
+          assert_select "#show-excerpt-link", count: 0
         end
 
         should "render an error when searching for too many tags" do
@@ -79,6 +112,76 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
 
           assert_response 410
           assert_select "h1", "Search Error"
+        end
+      end
+
+      context "with a pool: search" do
+        setup do
+          CurrentUser.user = create(:user)
+          CurrentUser.ip_addr = "127.0.0.1"
+        end
+
+        teardown do
+          CurrentUser.user = nil
+          CurrentUser.ip_addr = nil
+        end
+
+        should "render for a pool: search" do
+          pool1 = create(:pool)
+          pool2 = create(:pool)
+          create(:post, tag_string: "solo pool:#{pool1.id}", rating: "s")
+          create(:wiki_page, title: "solo")
+
+          get posts_path(tags: "pool:#{pool1.id}")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Pool"
+
+          get posts_path(tags: "pool:#{pool1.id} rating:s")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Pool"
+
+          get posts_path(tags: "pool:#{pool1.id} solo")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
+
+          get posts_path(tags: "pool:#{pool1.id} -pool:#{pool2.id}")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 0
+        end
+      end
+
+      context "with a favgroup: search" do
+        setup do
+          CurrentUser.user = create(:user)
+          CurrentUser.ip_addr = "127.0.0.1"
+        end
+
+        teardown do
+          CurrentUser.user = nil
+          CurrentUser.ip_addr = nil
+        end
+
+        should "render for a favgroup: search" do
+          wiki = create(:wiki_page, title: "solo")
+          post1 = create(:post, tag_string: "solo", rating: "s")
+          favgroup1 = create(:favorite_group, post_ids: [post1.id])
+          favgroup2 = create(:favorite_group)
+
+          get posts_path(tags: "favgroup:#{favgroup1.id}")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Favorite Group"
+
+          get posts_path(tags: "favgroup:#{favgroup1.id} rating:s")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Favorite Group"
+
+          get posts_path(tags: "favgroup:#{favgroup1.id} solo")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 1, text: "Wiki"
+
+          get posts_path(tags: "favgroup:#{favgroup1.id} -favgroup:#{favgroup2.id}")
+          assert_response :success
+          assert_select "#show-excerpt-link", count: 0
         end
       end
 
@@ -103,6 +206,13 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
           assert_response :success
 
           get posts_path(format: :json), params: { random: "1" }
+          assert_response :success
+        end
+
+        should "render with multiple posts" do
+          @posts = create_list(:post, 2)
+
+          get posts_path, params: { random: "1" }
           assert_response :success
         end
       end
@@ -130,6 +240,43 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
           assert_select "entry", 0
         end
       end
+
+      context "with deleted posts" do
+        setup do
+          @post.update!(is_deleted: true)
+        end
+
+        should "not show deleted posts normally" do
+          get posts_path
+          assert_response :success
+          assert_select "#post_#{@post.id}", 0
+        end
+
+        should "show deleted posts when searching for status:deleted" do
+          get posts_path(tags: "status:deleted")
+          assert_response :success
+          assert_select "#post_#{@post.id}", 1
+        end
+      end
+
+      context "with restricted posts" do
+        setup do
+          Danbooru.config.stubs(:restricted_tags).returns(["tagme"])
+          as(@user) { @post.update!(tag_string: "tagme") }
+        end
+
+        should "not show restricted posts if user doesn't have permission" do
+          get posts_path
+          assert_response :success
+          assert_select "#post_#{@post.id}", 0
+        end
+
+        should "show restricted posts if user has permission" do
+          get_auth posts_path, create(:gold_user)
+          assert_response :success
+          assert_select "#post_#{@post.id}", 1
+        end
+      end
     end
 
     context "show_seq action" do
@@ -149,12 +296,73 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         get random_posts_path, params: { tags: "aaaa" }
         assert_redirected_to(post_path(@post, tags: "aaaa"))
       end
+
+      should "return a 404 when no random posts can be found" do
+        get random_posts_path, params: { tags: "qoigjegoi" }
+        assert_response 404
+      end
     end
 
     context "show action" do
       should "render" do
         get post_path(@post), params: {:id => @post.id}
         assert_response :success
+      end
+
+      context "with everything" do
+        setup do
+          @admin = create(:admin_user, can_approve_posts: true)
+          @builder = create(:builder_user, can_approve_posts: true)
+
+          as(@user) do
+            @post.update!(tag_string: "1girl solo highres blah 2001")
+            Tag.find_by_name("1girl").update(post_count: 20_000)
+            Tag.find_by_name("solo").update(post_count: 2_000)
+            Tag.find_by_name("blah").update(post_count: 1)
+
+            @pool = create(:pool)
+            @pool.add!(@post)
+
+            @favgroup = create(:favorite_group)
+            @favgroup.add!(@post)
+
+            @comment = create(:comment, post: @post, creator: @admin)
+            create(:comment_vote, comment: @comment, user: @user)
+
+            create(:note, post: @post)
+            create(:artist_commentary, post: @post)
+            create(:post_flag, post: @post, creator: @user)
+            create(:post_appeal, post: @post, creator: @user)
+            create(:post_vote, post: @post, user: @user)
+            create(:favorite, post: @post, user: @user)
+            create(:moderation_report, model: @comment, creator: @builder)
+          end
+        end
+
+        should "render for an anonymous user" do
+          get post_path(@post)
+          assert_response :success
+        end
+
+        should "render for a member" do
+          get_auth post_path(@post), @user
+          assert_response :success
+        end
+
+        should "render for a builder" do
+          get_auth post_path(@post), @builder
+          assert_response :success
+        end
+
+        should "render for an admin" do
+          get_auth post_path(@post), @admin
+          assert_response :success
+        end
+
+        should "render for a builder with a search query" do
+          get_auth post_path(@post, q: "tagme"), @builder
+          assert_response :success
+        end
       end
 
       context "with pools" do
@@ -169,7 +377,7 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
 
       context "with only deleted comments" do
         setup do
-          as(@user) { create(:comment, post: @post, is_deleted: true) }
+          as(@user) { create(:comment, creator: @user, post: @post, is_deleted: true) }
         end
 
         should "not show deleted comments to regular members" do
@@ -194,7 +402,7 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
 
       context "with only downvoted comments" do
         should "not show thresholded comments" do
-          comment = as(@user) { create(:comment, post: @post, score: -10) }
+          comment = as(@user) { create(:comment, creator: @user, post: @post, score: -10) }
           get_auth post_path(@post), @user, params: { id: @post.id }
 
           assert_response :success
@@ -206,9 +414,9 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
 
       context "with a mix of comments" do
         should "not show deleted or thresholded comments " do
-          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "good") }
-          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "bad", score: -10) }
-          as(@user) { create(:comment, post: @post, do_not_bump_post: true, body: "ugly", is_deleted: true) }
+          as(@user) { create(:comment, creator: @user, post: @post, do_not_bump_post: true, body: "good") }
+          as(@user) { create(:comment, creator: @user, post: @post, do_not_bump_post: true, body: "bad", score: -10) }
+          as(@user) { create(:comment, creator: @user, post: @post, do_not_bump_post: true, body: "ugly", is_deleted: true) }
 
           get_auth post_path(@post), @user, params: { id: @post.id }
 
@@ -241,7 +449,6 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
           assert_nil(response.parsed_body["md5"])
           assert_nil(response.parsed_body["file_url"])
           assert_nil(response.parsed_body["fav_string"])
-          assert_equal(@post.uploader_name, response.parsed_body["uploader_name"])
         end
       end
     end
@@ -259,11 +466,25 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         put_auth post_path(@post), @user, params: {:post => {:last_noted_at => 1.minute.ago}}
         assert_nil(@post.reload.last_noted_at)
       end
+
+      should "not allow unprivileged users to update restricted posts" do
+        as(@user) { @post.update!(is_banned: true) }
+        put_auth post_path(@post), @user, params: { post: { tag_string: "blah" }}
+        assert_response 403
+        assert_not_equal("blah", @post.reload.tag_string)
+      end
+
+      should "not allow unverified users to update posts" do
+        @user.update!(requires_verification: true, is_verified: false)
+        put_auth post_path(@post), @user, params: { post: { tag_string: "blah" }}
+        assert_response 403
+        assert_not_equal("blah", @post.reload.tag_string)
+      end
     end
 
     context "revert action" do
       setup do
-        PostArchive.sqs_service.stubs(:merge?).returns(false)
+        PostVersion.sqs_service.stubs(:merge?).returns(false)
         as_user do
           @post.update(tag_string: "zzz")
         end
@@ -287,6 +508,42 @@ class PostsControllerTest < ActionDispatch::IntegrationTest
         @post.reload
         assert_not_equal(@post.tag_string, @post2.tag_string)
         assert_response :missing
+      end
+    end
+
+    context "copy_notes action" do
+      setup do
+        as(@user) do
+          @src = create(:post, image_width: 100, image_height: 100, tag_string: "translated partially_translated", has_embedded_notes: true)
+          @dst = create(:post, image_width: 200, image_height: 200, tag_string: "translation_request")
+          create(:note, post: @src, x: 10, y: 10, width: 10, height: 10, body: "test")
+          create(:note, post: @src, x: 10, y: 10, width: 10, height: 10, body: "deleted", is_active: false)
+        end
+      end
+
+      should "copy notes and tags" do
+        put_auth copy_notes_post_path(@src), @user, params: { other_post_id: @dst.id }
+        assert_response :success
+
+        assert_equal(1, @dst.reload.notes.active.length)
+        assert_equal(true, @dst.has_embedded_notes)
+        assert_equal("lowres partially_translated translated", @dst.tag_string)
+      end
+
+      should "rescale notes" do
+        put_auth copy_notes_post_path(@src), @user, params: { other_post_id: @dst.id }
+        assert_response :success
+
+        note = @dst.notes.active.first
+        assert_equal([20, 20, 20, 20], [note.x, note.y, note.width, note.height])
+      end
+    end
+
+    context "mark_as_translated action" do
+      should "mark the post as translated" do
+        put_auth mark_as_translated_post_path(@post), @user, params: { post: { check_translation: false, partially_translated: false }}
+        assert_redirected_to @post
+        assert(@post.reload.has_tag?("translated"))
       end
     end
   end

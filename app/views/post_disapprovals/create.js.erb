@@ -1,0 +1,6 @@
+if ($("#c-posts #a-show").length) {
+  location.reload();
+} else if ($("#c-modqueue").length) {
+  $("#c-modqueue #post-<%= @post_disapproval.post.id %>").hide();
+  Danbooru.notice("Post was hidden");
+}
