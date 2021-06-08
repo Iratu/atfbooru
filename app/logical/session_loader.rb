@@ -10,12 +10,31 @@ class SessionLoader
   end
 
   def login(name, password)
-    user = User.find_by_name(name)&.authenticate_password(password)
-    return nil unless user
+    user = User.find_by_name(name)
 
-    session[:user_id] = user.id
-    user.update_column(:last_ip_addr, request.remote_ip)
-    user
+    if user.present? && user.authenticate_password(password)
+      session[:user_id] = user.id
+      session[:last_authenticated_at] = Time.now.utc.to_s
+
+      UserEvent.build_from_request(user, :login, request)
+      user.last_logged_in_at = Time.now
+      user.last_ip_addr = request.remote_ip
+      user.save!
+
+      user
+    elsif user.nil?
+      nil # username incorrect
+    else
+      UserEvent.create_from_request!(user, :failed_login, request)
+      nil # password incorrect
+    end
+  end
+
+  def logout
+    session.delete(:user_id)
+    session.delete(:last_authenticated_at)
+    return if CurrentUser.user.is_anonymous?
+    UserEvent.create_from_request!(CurrentUser.user, :logout, request)
   end
 
   def load
@@ -34,6 +53,7 @@ class SessionLoader
     update_last_logged_in_at
     update_last_ip_addr
     set_time_zone
+    set_country
     set_safe_mode
     initialize_session_cookies
     CurrentUser.user.unban! if CurrentUser.user.ban_expired?
@@ -42,7 +62,7 @@ class SessionLoader
   end
 
   def has_api_authentication?
-    request.authorization.present? || params[:login].present? || params[:api_key].present?
+    request.authorization.present? || params[:login].present? || (params[:api_key].present? && params[:api_key].is_a?(String))
   end
 
   private
@@ -69,12 +89,15 @@ class SessionLoader
     authenticate_api_key(login, api_key)
   end
 
-  def authenticate_api_key(name, api_key)
-    user = User.find_by_name(name)&.authenticate_api_key(api_key)
+  def authenticate_api_key(name, key)
+    user, api_key = User.find_by_name(name)&.authenticate_api_key(key)
     raise AuthenticationFailure if user.blank?
+    update_api_key(api_key)
+    raise User::PrivilegeError if !api_key.has_permission?(request.remote_ip, request.params[:controller], request.params[:action])
     CurrentUser.user = user
   end
 
+  # XXX use rails 6.1 signed ids (https://github.com/rails/rails/blob/6-1-stable/activerecord/CHANGELOG.md)
   def load_param_user(signed_user_id)
     session[:user_id] = Danbooru::MessageVerifier.new(:login).verify(signed_user_id)
     load_session_user
@@ -87,7 +110,7 @@ class SessionLoader
 
   def update_last_logged_in_at
     return if CurrentUser.is_anonymous?
-    return if CurrentUser.last_logged_in_at && CurrentUser.last_logged_in_at > 1.week.ago
+    return if CurrentUser.last_logged_in_at && CurrentUser.last_logged_in_at > 1.hour.ago
     CurrentUser.user.update_attribute(:last_logged_in_at, Time.now)
   end
 
@@ -97,8 +120,19 @@ class SessionLoader
     CurrentUser.user.update_attribute(:last_ip_addr, @request.remote_ip)
   end
 
+  def update_api_key(api_key)
+    api_key.increment!(:uses, touch: :last_used_at)
+    api_key.update!(last_ip_address: request.remote_ip)
+  end
+
   def set_time_zone
     Time.zone = CurrentUser.user.time_zone
+  end
+
+  # Depends on Cloudflare
+  # https://support.cloudflare.com/hc/en-us/articles/200168236-Configuring-Cloudflare-IP-Geolocation
+  def set_country
+    CurrentUser.country = request.headers["CF-IPCountry"]
   end
 
   def set_safe_mode

@@ -23,6 +23,16 @@ class DmailTest < ActiveSupport::TestCase
         assert_equal(1, dmail.moderation_reports.count)
         assert_equal(true, dmail.reload.is_deleted?)
       end
+
+      should "not mark dmails sent to oneself as spam" do
+        @user = create(:user, created_at: 2.weeks.ago, email_address: build(:email_address, address: "akismet-guaranteed-spam@example.com"))
+
+        SpamDetector.stubs(:enabled?).returns(true)
+        dmail = create(:dmail, owner: @user, from: @user, to: @user, creator_ip_addr: "127.0.0.1")
+
+        assert_equal(0, dmail.moderation_reports.count)
+        assert_equal(false, dmail.reload.is_deleted?)
+      end
     end
 
     context "search" do
@@ -69,7 +79,7 @@ class DmailTest < ActiveSupport::TestCase
     should "create a copy for each user" do
       @new_user = FactoryBot.create(:user)
       assert_difference("Dmail.count", 2) do
-        Dmail.create_split(from: CurrentUser.user, creator_ip_addr: "127.0.0.1", to_id: @new_user.id, title: "foo", body: "foo")
+        Dmail.create_split(from: CurrentUser.user, creator_ip_addr: "127.0.0.1", to: @new_user, title: "foo", body: "foo")
       end
     end
 
@@ -101,6 +111,46 @@ class DmailTest < ActiveSupport::TestCase
           dmail = Dmail.create_automated(to_name: "this_name_does_not_exist", title: "test", body: "test")
           assert_equal(["must exist"], dmail.errors[:to])
         end
+      end
+    end
+
+    context "sending a dmail" do
+      should "fail if the user has sent too many dmails recently" do
+        10.times do
+          Dmail.create_split(from: @user, to: create(:user), title: "blah", body: "blah", creator_ip_addr: "127.0.0.1")
+        end
+
+        assert_no_difference("Dmail.count") do
+          @dmail = Dmail.create_split(from: @user, to: create(:user), title: "blah", body: "blah", creator_ip_addr: "127.0.0.1")
+
+          assert_equal(false, @dmail.valid?)
+          assert_equal(["You can't send dmails to more than 10 users per hour"], @dmail.errors[:base])
+        end
+      end
+    end
+
+    context "destroying a dmail" do
+      setup do
+        @recipient = create(:user)
+        @dmail = Dmail.create_split(from: @user, to: @recipient, creator_ip_addr: "127.0.0.1", title: "foo", body: "foo")
+        @modreport = create(:moderation_report, model: @dmail)
+      end
+
+      should "update both users' unread dmail counts" do
+        assert_equal(0, @user.reload.unread_dmail_count)
+        assert_equal(1, @recipient.reload.unread_dmail_count)
+
+        @user.dmails.last.destroy!
+        @recipient.dmails.last.destroy!
+
+        assert_equal(0, @user.reload.unread_dmail_count)
+        assert_equal(0, @recipient.reload.unread_dmail_count)
+      end
+
+      should "destroy any associated moderation reports" do
+        assert_equal(1, @dmail.moderation_reports.count)
+        @dmail.destroy!
+        assert_equal(0, @dmail.moderation_reports.count)
       end
     end
 

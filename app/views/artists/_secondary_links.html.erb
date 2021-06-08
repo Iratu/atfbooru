@@ -7,7 +7,7 @@
   <% end %>
   <%= subnav_link_to "Recent changes", artist_versions_path %>
   <%= subnav_link_to "URLs", artist_urls_path %>
-  <% if @artist && !@artist.new_record? %>
+  <% if @artist && !@artist.new_record? && (!@artist.is_banned? || policy(@artist).can_view_banned?) %>
     <li>|</li>
     <%= subnav_link_to "Posts (#{@artist.tag.try(:post_count).to_i})", posts_path(:tags => @artist.name) %>
     <%= subnav_link_to "Show", artist_path(@artist) %>
@@ -15,7 +15,7 @@
       <%= subnav_link_to "Edit", edit_artist_path(@artist), :"data-shortcut" => "e" %>
     <% end %>
     <%= subnav_link_to "History", artist_versions_path(:search => {:artist_id => @artist.id}) %>
-    <% if policy(@artist).update? %>
+    <% if current_page?(action: :edit) && policy(@artist).update? %>
       <% if @artist.is_deleted? %>
         <%= subnav_link_to "Undelete", artist_path(@artist, format: "js"), method: :put, data: {confirm: "Are you sure you want to undelete this artist?", params: "artist[is_deleted]=false"}, remote: true %>
       <% else %>

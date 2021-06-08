@@ -17,9 +17,10 @@
 
     &.dz-image-preview img {
       margin: 1em 0;
+      object-fit: contain;
     }
 
-    .dz-details  {
+    .dz-details {
       margin-bottom: 1em;
 
       .dz-filename, .dz-size {

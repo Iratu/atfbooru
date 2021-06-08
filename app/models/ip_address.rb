@@ -1,7 +1,7 @@
 class IpAddress < ApplicationRecord
   belongs_to :model, polymorphic: true
   belongs_to :user
-  attribute :ip_addr, IpAddressType.new
+  attribute :ip_addr, :ip_address
 
   def self.model_types
     %w[Post User Comment Dmail ArtistVersion ArtistCommentaryVersion NoteVersion WikiPageVersion]
@@ -12,8 +12,7 @@ class IpAddress < ApplicationRecord
   end
 
   def self.search(params)
-    q = super
-    q = q.search_attributes(params, :user, :model_type, :model_id, :ip_addr)
+    q = search_attributes(params, :ip_addr, :user, :model)
     q.order(created_at: :desc)
   end
 
@@ -38,20 +37,15 @@ class IpAddress < ApplicationRecord
   end
 
   def lookup
-    @lookup ||= IpLookup.new(ip_addr)
+    @lookup ||= ip_addr.ip_lookup
   end
 
   def to_s
-    # include the subnet mask only when the IP denotes a subnet.
-    (ip_addr.size > 1) ? ip_addr.to_string : ip_addr.to_s
+    ip_addr.to_s
   end
 
   def readonly?
     true
-  end
-
-  def html_data_attributes
-    super & attributes.keys.map(&:to_sym)
   end
 
   def self.available_includes

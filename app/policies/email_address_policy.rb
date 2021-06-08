@@ -1,14 +1,23 @@
 class EmailAddressPolicy < ApplicationPolicy
+  def index?
+    user.is_moderator?
+  end
+
   def show?
-    record.user_id == user.id
+    record.user_id == user.id || (user.is_moderator? && record.user.level < user.level)
   end
 
   def update?
     # XXX here record is a user, not the email address.
-    record.id == user.id
+    record.id == user.id && !user.is_banned?
   end
 
   def verify?
-    record.valid_key?(request.params[:email_verification_key])
+    record.user_id == user.id
+  end
+
+  def send_confirmation?
+    # XXX record is a user, not the email address.
+    record.id == user.id
   end
 end

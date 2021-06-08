@@ -2,7 +2,18 @@ require 'test_helper'
 
 class PostQueryBuilderTest < ActiveSupport::TestCase
   def assert_tag_match(posts, query)
-    assert_equal(posts.map(&:id), Post.tag_match(query).pluck(:id))
+    assert_equal(posts.map(&:id), Post.user_tag_match(query).pluck(:id))
+  end
+
+  def assert_fast_count(count, query, query_options = {}, fast_count_options = {})
+    assert_equal(count, PostQueryBuilder.new(query, **query_options).normalized_query.fast_count(**fast_count_options))
+  end
+
+  def assert_parse_equals(expected, query)
+    assert_equal(expected, PostQueryBuilder.new(query).split_query)
+
+    # parsing, serializing, then parsing again should produce the same result.
+    assert_equal(PostQueryBuilder.new(query).to_s, PostQueryBuilder.new(PostQueryBuilder.new(query).to_s).to_s)
   end
 
   setup do
@@ -180,9 +191,15 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_tag_match([post1], "fav:#{user1.name}")
       assert_tag_match([post2], "fav:#{user2.name}")
       assert_tag_match([], "fav:#{user3.name}")
+
+      assert_tag_match([], "fav:#{user1.name} fav:#{user2.name}")
+      assert_tag_match([post1], "fav:#{user1.name} -fav:#{user2.name}")
+      assert_tag_match([post3], "-fav:#{user1.name} -fav:#{user2.name}")
+
       assert_tag_match([], "fav:dne")
 
       assert_tag_match([post3, post2], "-fav:#{user1.name}")
+      assert_tag_match([post3], "-fav:#{user1.name} -fav:#{user2.name}")
       assert_tag_match([post3, post2, post1], "-fav:dne")
 
       as(user3) do
@@ -192,10 +209,11 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
     end
 
     should "return posts for the ordfav:<name> metatag" do
-      post1 = create(:post, tag_string: "fav:#{CurrentUser.name}")
-      post2 = create(:post, tag_string: "fav:#{CurrentUser.name}")
+      post1 = create(:post, tag_string: "fav:#{CurrentUser.user.name}")
+      post2 = create(:post, tag_string: "fav:#{CurrentUser.user.name}")
 
-      assert_tag_match([post2, post1], "ordfav:#{CurrentUser.name}")
+      assert_tag_match([post2, post1], "ordfav:#{CurrentUser.user.name}")
+      assert_tag_match([], "ordfav:does_not_exist")
     end
 
     should "return posts for the pool:<name> metatag" do
@@ -271,6 +289,19 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_tag_match([parent], "-child:none")
       assert_tag_match([child], "-child:any")
       assert_tag_match([child, parent], "-child:garbage")
+    end
+
+    should "return posts when using the status of the parent/child" do
+      parent_of_deleted = create(:post)
+      deleted = create(:post, is_deleted: true, tag_string: "parent:#{parent_of_deleted.id}")
+      child_of_deleted = create(:post, tag_string: "parent:#{deleted.id}")
+      all = [child_of_deleted, deleted, parent_of_deleted]
+
+      assert_tag_match([child_of_deleted], "parent:deleted")
+      assert_tag_match(all - [child_of_deleted], "-parent:deleted")
+
+      assert_tag_match([parent_of_deleted], "child:deleted")
+      assert_tag_match(all - [parent_of_deleted], "-child:deleted")
     end
 
     should "return posts for the favgroup:<name> metatag" do
@@ -567,22 +598,26 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       flagged = create(:post, is_flagged: true)
       deleted = create(:post, is_deleted: true)
       banned  = create(:post, is_banned: true)
-      all = [banned, deleted, flagged, pending]
+      appealed = create(:post, is_deleted: true)
+      appeal = create(:post_appeal, post: appealed)
+      all = [appealed, banned, deleted, flagged, pending]
 
-      assert_tag_match([flagged, pending], "status:modqueue")
+      assert_tag_match([appealed, flagged, pending], "status:modqueue")
       assert_tag_match([pending], "status:pending")
       assert_tag_match([flagged], "status:flagged")
-      assert_tag_match([deleted], "status:deleted")
+      assert_tag_match([appealed], "status:appealed")
+      assert_tag_match([appealed, deleted], "status:deleted")
       assert_tag_match([banned],  "status:banned")
       assert_tag_match([banned], "status:active")
       assert_tag_match([banned], "status:active status:banned")
       assert_tag_match(all, "status:any")
       assert_tag_match(all, "status:all")
 
-      assert_tag_match(all - [flagged, pending], "-status:modqueue")
+      assert_tag_match(all - [flagged, pending, appealed], "-status:modqueue")
       assert_tag_match(all - [pending], "-status:pending")
       assert_tag_match(all - [flagged], "-status:flagged")
-      assert_tag_match(all - [deleted], "-status:deleted")
+      assert_tag_match(all - [appealed], "-status:appealed")
+      assert_tag_match(all - [deleted, appealed], "-status:deleted")
       assert_tag_match(all - [banned],  "-status:banned")
       assert_tag_match(all - [banned], "-status:active")
 
@@ -594,12 +629,21 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       flagged = create(:post, is_flagged: true)
       pending = create(:post, is_pending: true)
       disapproved = create(:post, is_pending: true)
+      appealed = create(:post, is_deleted: true)
 
       create(:post_flag, post: flagged, creator: create(:user, created_at: 2.weeks.ago))
+      create(:post_appeal, post: appealed)
       create(:post_disapproval, user: CurrentUser.user, post: disapproved, reason: "disinterest")
 
-      assert_tag_match([pending, flagged], "status:unmoderated")
+      assert_tag_match([appealed, pending, flagged], "status:unmoderated")
       assert_tag_match([disapproved], "-status:unmoderated")
+    end
+
+    should "return nothing for the -status:any metatag" do
+      create(:post)
+
+      assert_tag_match([], "-status:any")
+      assert_tag_match([], "-status:all")
     end
 
     should "respect the 'Deleted post filter' option when using the status: metatag" do
@@ -612,6 +656,7 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_tag_match([deleted], "status:deleted")
       assert_tag_match([undeleted, deleted], "status:any")
       assert_tag_match([undeleted, deleted], "status:all")
+      assert_tag_match([deleted], "status:banned status:deleted")
 
       assert_tag_match([], "-status:banned")
       assert_tag_match([deleted], "-status:active")
@@ -625,6 +670,8 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_tag_match([deleted], "status:deleted")
       assert_tag_match([undeleted, deleted], "status:any")
       assert_tag_match([undeleted, deleted], "status:all")
+
+      assert_fast_count(2, "status:banned")
     end
 
     should "return posts for the filetype:<ext> metatag" do
@@ -692,7 +739,11 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
 
       assert_tag_match([post3], "source:none")
       assert_tag_match([post3], "source:NONE")
+      assert_tag_match([post3], 'source:""')
+      assert_tag_match([post3], "source:''")
       assert_tag_match([post2, post1], "-source:none")
+      assert_tag_match([post2, post1], "-source:''")
+      assert_tag_match([post2, post1], '-source:""')
 
       assert_tag_match([], "source:'none'")
       assert_tag_match([], "source:none source:abcde")
@@ -750,8 +801,9 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       create(:saved_search, query: "aaa", labels: ["zzz"], user: CurrentUser.user)
       create(:saved_search, query: "bbb", user: CurrentUser.user)
 
-      Redis.any_instance.stubs(:exists).with("search:aaa").returns(true)
-      Redis.any_instance.stubs(:exists).with("search:bbb").returns(true)
+      Danbooru.config.stubs(:redis_url).returns("redis://localhost:6379")
+      Redis.any_instance.stubs(:exists?).with("search:aaa").returns(true)
+      Redis.any_instance.stubs(:exists?).with("search:bbb").returns(true)
       Redis.any_instance.stubs(:smembers).with("search:aaa").returns([@post1.id])
       Redis.any_instance.stubs(:smembers).with("search:bbb").returns([@post2.id])
 
@@ -811,13 +863,13 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
         upvoted   = create(:post, tag_string: "upvote:self")
         downvoted = create(:post, tag_string: "downvote:self")
 
-        assert_tag_match([upvoted], "upvote:#{CurrentUser.name}")
-        assert_tag_match([downvoted], "downvote:#{CurrentUser.name}")
-        assert_tag_match([], "upvote:nobody upvote:#{CurrentUser.name}")
-        assert_tag_match([], "downvote:nobody downvote:#{CurrentUser.name}")
+        assert_tag_match([upvoted], "upvote:#{CurrentUser.user.name}")
+        assert_tag_match([downvoted], "downvote:#{CurrentUser.user.name}")
+        assert_tag_match([], "upvote:nobody upvote:#{CurrentUser.user.name}")
+        assert_tag_match([], "downvote:nobody downvote:#{CurrentUser.user.name}")
 
-        assert_tag_match([downvoted], "-upvote:#{CurrentUser.name}")
-        assert_tag_match([upvoted], "-downvote:#{CurrentUser.name}")
+        assert_tag_match([downvoted], "-upvote:#{CurrentUser.user.name}")
+        assert_tag_match([upvoted], "-downvote:#{CurrentUser.user.name}")
       end
     end
 
@@ -827,14 +879,14 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
         disapproved = create(:post, is_pending: true)
         disapproval = create(:post_disapproval, user: CurrentUser.user, post: disapproved, reason: "disinterest")
 
-        assert_tag_match([disapproved], "disapproved:#{CurrentUser.name}")
-        assert_tag_match([disapproved], "disapproved:#{CurrentUser.name.upcase}")
+        assert_tag_match([disapproved], "disapproved:#{CurrentUser.user.name}")
+        assert_tag_match([disapproved], "disapproved:#{CurrentUser.user.name.upcase}")
         assert_tag_match([disapproved], "disapproved:disinterest")
         assert_tag_match([disapproved], "disapproved:DISINTEREST")
         assert_tag_match([], "disapproved:breaks_rules")
         assert_tag_match([], "disapproved:breaks_rules disapproved:disinterest")
 
-        assert_tag_match([pending], "-disapproved:#{CurrentUser.name}")
+        assert_tag_match([pending], "-disapproved:#{CurrentUser.user.name}")
         assert_tag_match([pending], "-disapproved:disinterest")
         assert_tag_match([disapproved, pending], "-disapproved:breaks_rules")
       end
@@ -980,11 +1032,22 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_tag_match([post2], "-kitten")
     end
 
+    should "resolve abbreviations to the actual tag" do
+      tag1 = create(:tag, name: "hair_ribbon", post_count: 300_000)
+      tag2 = create(:tag, name: "hakurei_reimu", post_count: 50_000)
+      ta1 = create(:tag_alias, antecedent_name: "/hr", consequent_name: "hakurei_reimu")
+      post1 = create(:post, tag_string: "hair_ribbon")
+      post2 = create(:post, tag_string: "hakurei_reimu")
+
+      assert_tag_match([post2], "/hr")
+      assert_tag_match([post1], "-/hr")
+    end
+
     should "fail for more than 6 tags" do
       post1 = create(:post, rating: "s")
 
-      assert_raise(::Post::SearchError) do
-        Post.tag_match("a b c rating:s width:10 height:10 user:bob")
+      assert_raise(PostQueryBuilder::TagLimitError) do
+        Post.user_tag_match("a b c rating:s width:10 height:10 user:bob")
       end
     end
 
@@ -1011,7 +1074,6 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
   context "Parsing:" do
     should "split a query" do
       assert_equal(%w(aaa bbb), PostQueryBuilder.new("aaa bbb").split_query)
-      assert_equal(%w(~aaa -bbb* -bbb*), PostQueryBuilder.new("~AAa -BBB* -bbb*").split_query)
     end
 
     should "not strip out valid characters when scanning" do
@@ -1041,25 +1103,147 @@ class PostQueryBuilderTest < ActiveSupport::TestCase
       assert_equal(false, PostQueryBuilder.new('source:"foo bar baz"').is_simple_tag?)
       assert_equal(false, PostQueryBuilder.new("foo bar").is_simple_tag?)
     end
+
+    should "parse quoted metatags correctly" do
+      assert_parse_equals(%w[status:"active" source:"https"], %q(status:'active' source:'https'))
+      assert_parse_equals(%w[source:"https" status:"active"], %q(source:'https' status:'active'))
+      assert_parse_equals(%w[status:"active" source:"https"], %q(status:"active" source:'https'))
+      assert_parse_equals(%w[status:"active" source:"https"], %q(status:'active' source:"https"))
+      assert_parse_equals(%w[status:"active" source:https], %q(status:'active' source:https))
+      assert_parse_equals(%w[status:active source:"https"], %q(status:active source:'https'))
+
+      assert_parse_equals(%w[limit:"5" status:"active" source:"x"], %q(limit:"5" status:"active" source:"x"))
+      assert_parse_equals(%w[source:"" limit:"1" status:"deleted"], %q(source:"" limit:'1' status:'deleted'))
+
+      assert_parse_equals(['source:"bar baz"', 'don\'t_say_"lazy"'], %q(source:"bar baz" don't_say_"lazy"))
+      assert_parse_equals(['source:"bar baz"', 'don\'t_say_"lazy"'], %q(source:"bar baz" don't_say_"lazy"))
+      assert_parse_equals(['source:"bar baz"', 'don\'t_say_"lazy"'], %q(source:'bar baz' don't_say_"lazy"))
+
+      assert_parse_equals([%q(source:"foo")], %q(source:"\f\o\o"))
+      assert_parse_equals([%q(source:"foo")], %q(source:'\f\o\o'))
+      assert_parse_equals([%q(source:foo\bar)], %q(source:foo\bar))
+      assert_parse_equals([%q(source:"foo)], %q(source:"foo))
+      assert_parse_equals([%q(source:'foo)], %q(source:'foo))
+      assert_parse_equals([%q(source:"foo bar")], %q(source:foo\ bar))
+      assert_parse_equals([%q(source:"\"foo bar\\\\")], %q(source:"foo\ bar\\))
+
+      assert_parse_equals(['source:"don\'t_say_\\"lazy\\""', 'don\'t_say_"lazy"'], %q(source:"don't_say_\"lazy\"" don't_say_"lazy"))
+      assert_parse_equals(['source:"don\'t_say_\\"lazy\\""', 'don\'t_say_"lazy"'], %q(source:'don\'t_say_"lazy"' don't_say_"lazy"))
+    end
   end
 
-  context "The normalize_query method" do
+  context "The normalized_query method" do
     should "work" do
       create(:tag_alias, antecedent_name: "gray", consequent_name: "grey")
 
-      assert_equal("foo", PostQueryBuilder.new("foo").normalize_query)
-      assert_equal("foo", PostQueryBuilder.new(" foo ").normalize_query)
-      assert_equal("foo", PostQueryBuilder.new("FOO").normalize_query)
-      assert_equal("foo", PostQueryBuilder.new("foo foo").normalize_query)
-      assert_equal("gray", PostQueryBuilder.new("gray").normalize_query)
-      assert_equal("grey", PostQueryBuilder.new("gray").normalize_query(normalize_aliases: true))
-      assert_equal("aaa bbb", PostQueryBuilder.new("bbb aaa").normalize_query)
-      assert_equal("-aaa bbb", PostQueryBuilder.new("bbb -aaa").normalize_query)
-      assert_equal("~aaa ~bbb", PostQueryBuilder.new("~bbb ~aaa").normalize_query)
-      assert_equal("bbb commentary:true", PostQueryBuilder.new("bbb commentary:true").normalize_query)
-      assert_equal('bbb commentary:"true"', PostQueryBuilder.new("bbb commentary:'true'").normalize_query)
-      assert_equal('-commentary:true bbb', PostQueryBuilder.new("bbb -commentary:true").normalize_query)
-      assert_equal('-commentary:"true" bbb', PostQueryBuilder.new("bbb -commentary:'true'").normalize_query)
+      assert_equal("foo", PostQueryBuilder.new("foo").normalized_query.to_s)
+      assert_equal("foo", PostQueryBuilder.new(" foo ").normalized_query.to_s)
+      assert_equal("foo", PostQueryBuilder.new("FOO").normalized_query.to_s)
+      assert_equal("foo", PostQueryBuilder.new("foo foo").normalized_query.to_s)
+      assert_equal("grey", PostQueryBuilder.new("gray").normalized_query.to_s)
+      assert_equal("aaa bbb", PostQueryBuilder.new("bbb aaa").normalized_query.to_s)
+      assert_equal("-aaa bbb", PostQueryBuilder.new("bbb -aaa").normalized_query.to_s)
+      assert_equal("~aaa ~bbb", PostQueryBuilder.new("~bbb ~aaa").normalized_query.to_s)
+      assert_equal("commentary:true bbb", PostQueryBuilder.new("bbb commentary:true").normalized_query.to_s)
+      assert_equal('commentary:"true" bbb', PostQueryBuilder.new("bbb commentary:'true'").normalized_query.to_s)
+      assert_equal('-commentary:true bbb', PostQueryBuilder.new("bbb -commentary:true").normalized_query.to_s)
+      assert_equal('-commentary:"true" bbb', PostQueryBuilder.new("bbb -commentary:'true'").normalized_query.to_s)
+    end
+  end
+
+  context "#fast_count" do
+    setup do
+      create(:tag, name: "grey_skirt", post_count: 100)
+      create(:tag_alias, antecedent_name: "gray_skirt", consequent_name: "grey_skirt")
+      create(:post, tag_string: "aaa", score: 42)
+    end
+
+    context "for a single basic tag" do
+      should "return the post_count from the tags table" do
+        assert_fast_count(100, "grey_skirt")
+      end
+    end
+
+    context "for a aliased tag" do
+      should "return the post count of the consequent tag" do
+        assert_fast_count(100, "gray_skirt")
+      end
+    end
+
+    context "for a single metatag" do
+      should "return the correct cached count" do
+        build(:tag, name: "score:42", post_count: -100).save(validate: false)
+        PostQueryBuilder.new("score:42").set_cached_count(100)
+        assert_fast_count(100, "score:42")
+      end
+
+      should "return the correct cached count for a pool:<id> search" do
+        build(:tag, name: "pool:1234", post_count: -100).save(validate: false)
+        PostQueryBuilder.new("pool:1234").set_cached_count(100)
+        assert_fast_count(100, "pool:1234")
+      end
+    end
+
+    context "for a multi-tag search" do
+      should "return the cached count, if it exists" do
+        PostQueryBuilder.new("score:42 aaa").set_cached_count(100)
+        assert_fast_count(100, "aaa score:42")
+      end
+
+      should "return the true count, if not cached" do
+        assert_fast_count(1, "aaa score:42")
+      end
+
+      should "set the expiration time" do
+        Cache.expects(:put).with(PostQueryBuilder.new("score:42 aaa").count_cache_key, 1, 180)
+        assert_fast_count(1, "aaa score:42")
+      end
+
+      should "work with the hide_deleted_posts option turned on" do
+        create(:post, tag_string: "aaa", score: 42, is_deleted: true)
+        assert_fast_count(1, "aaa score:42", { hide_deleted_posts: true })
+        assert_fast_count(2, "aaa score:42", { hide_deleted_posts: false })
+      end
+    end
+
+    context "a blank search" do
+      should "should execute a search" do
+        assert_fast_count(1, "", {}, { estimate_count: false })
+        assert_nothing_raised { PostQueryBuilder.new("").normalized_query.fast_count(estimate_count: true) }
+      end
+
+      should "return 0 for a nonexisting tag" do
+        assert_fast_count(0, "bbb")
+      end
+
+      context "in safe mode" do
+        should "work for a blank search" do
+          assert_fast_count(0, "", { safe_mode: true }, { estimate_count: false })
+          assert_nothing_raised { PostQueryBuilder.new("", safe_mode: true).normalized_query.fast_count(estimate_count: true) }
+        end
+
+        should "work for a nil search" do
+          assert_fast_count(0, nil, { safe_mode: true }, { estimate_count: false })
+          assert_nothing_raised { PostQueryBuilder.new("", safe_mode: true).normalized_query.fast_count(estimate_count: true) }
+        end
+
+        should "not fail for a two tag search by a member" do
+          post1 = create(:post, tag_string: "aaa bbb rating:s")
+          post2 = create(:post, tag_string: "aaa bbb rating:e")
+
+          assert_fast_count(1, "aaa bbb", { safe_mode: true })
+        end
+      end
+    end
+
+    context "for a user-dependent metatag" do
+      should "cache the count separately for different users" do
+        @user = create(:user, enable_private_favorites: true)
+        @post = as(@user) { create(:post, tag_string: "fav:#{@user.name}") }
+
+        assert_equal(1, PostQueryBuilder.new("fav:#{@user.name}", @user).fast_count)
+        assert_equal(0, PostQueryBuilder.new("fav:#{@user.name}").fast_count)
+      end
     end
   end
 end

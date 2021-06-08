@@ -16,7 +16,6 @@ class CommentTest < ActiveSupport::TestCase
     context "that mentions a user" do
       setup do
         @post = FactoryBot.create(:post)
-        Danbooru.config.stubs(:member_comment_limit).returns(100)
       end
 
       context "added in an edit" do
@@ -71,7 +70,7 @@ class CommentTest < ActiveSupport::TestCase
 
           dmail = Dmail.last
           assert_equal(<<-EOS.strip_heredoc, dmail.body)
-            @#{@comment.creator.name} mentioned you in a \"comment\":/posts/#{@comment.post_id}#comment-#{@comment.id} on post ##{@comment.post_id}:
+            @#{@comment.creator.name} mentioned you in comment ##{@comment.id} on post ##{@comment.post_id}:
 
             [quote]
             Hey @#{@user2.name} check this out!
@@ -82,10 +81,6 @@ class CommentTest < ActiveSupport::TestCase
     end
 
     context "created by an unlimited user" do
-      setup do
-        Danbooru.config.stubs(:member_comment_limit).returns(100)
-      end
-
       context "that is then deleted" do
         setup do
           @post = FactoryBot.create(:post)
@@ -140,55 +135,6 @@ class CommentTest < ActiveSupport::TestCase
           c2 = FactoryBot.create(:comment, :post => post)
           post.reload
           assert_equal(c2.created_at.to_s, post.last_commented_at.to_s)
-        end
-      end
-
-      should "not record the user id of the voter" do
-        user = FactoryBot.create(:user)
-        post = FactoryBot.create(:post)
-        c1 = FactoryBot.create(:comment, :post => post)
-        CurrentUser.scoped(user, "127.0.0.1") do
-          c1.vote!("up")
-          c1.reload
-          assert_not_equal(user.id, c1.updater_id)
-        end
-      end
-
-      should "not allow duplicate votes" do
-        user = FactoryBot.create(:user)
-        post = FactoryBot.create(:post)
-        c1 = FactoryBot.create(:comment, :post => post)
-
-        assert_nothing_raised { c1.vote!("down") }
-        exception = assert_raises(ActiveRecord::RecordInvalid) { c1.vote!("down") }
-        assert_equal("Validation failed: You have already voted for this comment", exception.message)
-        assert_equal(1, CommentVote.count)
-        assert_equal(-1, CommentVote.last.score)
-
-        c2 = FactoryBot.create(:comment, :post => post)
-        assert_nothing_raised { c2.vote!("down") }
-        assert_equal(2, CommentVote.count)
-      end
-
-      should "not allow upvotes by the creator" do
-        user = FactoryBot.create(:user)
-        post = FactoryBot.create(:post)
-        c1 = create(:comment, post: post, creator: CurrentUser.user)
-
-        exception = assert_raises(ActiveRecord::RecordInvalid) { c1.vote!("up") }
-        assert_equal("Validation failed: You cannot upvote your own comments", exception.message)
-      end
-
-      should "allow undoing of votes" do
-        user = FactoryBot.create(:user)
-        post = FactoryBot.create(:post)
-        comment = FactoryBot.create(:comment, :post => post)
-        CurrentUser.scoped(user, "127.0.0.1") do
-          comment.vote!("up")
-          comment.unvote!
-          comment.reload
-          assert_equal(0, comment.score)
-          assert_nothing_raised {comment.vote!("down")}
         end
       end
 

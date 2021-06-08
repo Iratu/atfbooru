@@ -12,6 +12,14 @@ class IpBan < ApplicationRecord
     partial: 100
   }, _suffix: "ban"
 
+  def self.visible(user)
+    if user.is_moderator?
+      all
+    else
+      none
+    end
+  end
+
   def self.ip_matches(ip_addr)
     where("ip_addr >>= ?", ip_addr)
   end
@@ -25,14 +33,19 @@ class IpBan < ApplicationRecord
   end
 
   def self.search(params)
-    q = super
-    q = q.search_attributes(params, :creator, :reason)
+    q = search_attributes(params, :id, :created_at, :updated_at, :ip_addr, :reason, :is_deleted, :category, :hit_count, :last_hit_at, :creator)
+    q = q.text_attribute_matches(:reason, params[:reason_matches])
 
-    if params[:ip_addr].present?
-      q = q.where("ip_addr = ?", params[:ip_addr])
+    case params[:order]
+    when /\A(created_at|updated_at|last_hit_at)(?:_(asc|desc))?\z/i
+      column = $1
+      dir = $2 || :desc
+      q = q.order(Arel.sql("#{column} #{dir} NULLS LAST")).order(id: :desc)
+    else
+      q = q.apply_default_order(params)
     end
 
-    q.apply_default_order(params)
+    q
   end
 
   def create_mod_action
@@ -47,19 +60,19 @@ class IpBan < ApplicationRecord
 
   def validate_ip_addr
     if ip_addr.blank?
-      errors[:ip_addr] << "is invalid"
+      errors.add(:ip_addr, "is invalid")
     elsif ip_addr.private? || ip_addr.loopback? || ip_addr.link_local?
-      errors[:ip_addr] << "must be a public address"
+      errors.add(:ip_addr, "must be a public address")
     elsif full_ban? && ip_addr.ipv4? && ip_addr.prefix < 24
-      errors[:ip_addr] << "may not have a subnet bigger than /24"
+      errors.add(:ip_addr, "may not have a subnet bigger than /24")
     elsif partial_ban? && ip_addr.ipv4? && ip_addr.prefix < 8
-      errors[:ip_addr] << "may not have a subnet bigger than /8"
+      errors.add(:ip_addr, "may not have a subnet bigger than /8")
     elsif full_ban? && ip_addr.ipv6? && ip_addr.prefix < 64
-      errors[:ip_addr] << "may not have a subnet bigger than /64"
+      errors.add(:ip_addr, "may not have a subnet bigger than /64")
     elsif partial_ban? && ip_addr.ipv6? && ip_addr.prefix < 20
-      errors[:ip_addr] << "may not have a subnet bigger than /20"
-    elsif new_record? && IpBan.active.ip_matches(subnetted_ip).exists?
-      errors[:ip_addr] << "is already banned"
+      errors.add(:ip_addr, "may not have a subnet bigger than /20")
+    elsif new_record? && IpBan.active.where(category: category).ip_matches(subnetted_ip).exists?
+      errors.add(:ip_addr, "is already banned")
     end
   end
 

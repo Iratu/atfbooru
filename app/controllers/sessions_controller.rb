@@ -6,13 +6,16 @@ class SessionsController < ApplicationController
     @user = User.new
   end
 
+  def confirm_password
+  end
+
   def create
     name, password, url = params.fetch(:session, params).slice(:name, :password, :url).values
     user = SessionLoader.new(request).login(name, password)
 
     if user
       url = posts_path unless url&.start_with?("/")
-      respond_with(user, location: url, methods: [:api_token])
+      respond_with(user, location: url)
     else
       flash.now[:notice] = "Password was incorrect"
       raise SessionLoader::AuthenticationFailure
@@ -20,7 +23,7 @@ class SessionsController < ApplicationController
   end
 
   def destroy
-    session.delete(:user_id)
+    SessionLoader.new(request).logout
     redirect_to(posts_path, :notice => "You are now logged out")
   end
 

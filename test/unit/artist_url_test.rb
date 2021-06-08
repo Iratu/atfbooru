@@ -24,10 +24,18 @@ class ArtistUrlTest < ActiveSupport::TestCase
     end
 
     should "disallow invalid urls" do
-      url = FactoryBot.build(:artist_url, url: "www.example.com")
+      urls = [
+        FactoryBot.build(:artist_url, url: "www.example.com"),
+        FactoryBot.build(:artist_url, url: ":www.example.com"),
+        FactoryBot.build(:artist_url, url: "http://http://www.example.com"),
+      ]
 
-      assert_equal(false, url.valid?)
-      assert_match(/must begin with http/, url.errors.full_messages.join)
+      assert_equal(false, urls[0].valid?)
+      assert_match(/must begin with http/, urls[0].errors.full_messages.join)
+      assert_equal(false, urls[1].valid?)
+      assert_match(/is malformed/, urls[1].errors.full_messages.join)
+      assert_equal(false, urls[2].valid?)
+      assert_match(/that does not contain a dot/, urls[2].errors.full_messages.join)
     end
 
     should "always add a trailing slash when normalized" do
@@ -112,11 +120,11 @@ class ArtistUrlTest < ActiveSupport::TestCase
     should "normalize fc2 urls" do
       url = FactoryBot.create(:artist_url, :url => "http://blog55.fc2.com/monet")
       assert_equal("http://blog55.fc2.com/monet", url.url)
-      assert_equal("http://blog.fc2.com/monet/", url.normalized_url)
+      assert_equal("http://monet.blog.fc2.com/", url.normalized_url)
 
       url = FactoryBot.create(:artist_url, :url => "http://blog-imgs-55.fc2.com/monet")
       assert_equal("http://blog-imgs-55.fc2.com/monet", url.url)
-      assert_equal("http://blog.fc2.com/monet/", url.normalized_url)
+      assert_equal("http://monet.blog.fc2.com/", url.normalized_url)
     end
 
     should "normalize deviant art artist urls" do
@@ -134,7 +142,7 @@ class ArtistUrlTest < ActiveSupport::TestCase
 
     should "normalize hentai foundry artist urls" do
       url = FactoryBot.create(:artist_url, :url => "http://pictures.hentai-foundry.com//a/AnimeFlux/219123.jpg")
-      assert_equal("http://pictures.hentai-foundry.com/a/AnimeFlux/219123.jpg/", url.normalized_url)
+      assert_equal("http://www.hentai-foundry.com/user/AnimeFlux/", url.normalized_url)
     end
 
     should "normalize pixiv urls" do

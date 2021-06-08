@@ -9,32 +9,53 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "index action" do
       setup do
-        as_user do
-          @wiki_page_abc = create(:wiki_page, :title => "abc")
-          @wiki_page_def = create(:wiki_page, :title => "def")
+        as(@user) do
+          @tagme = create(:wiki_page, title: "tagme")
+          @deleted = create(:wiki_page, title: "deleted", is_deleted: true)
+          @vocaloid = create(:wiki_page, title: "vocaloid")
+          @miku = create(:wiki_page, title: "hatsune_miku", other_names: ["初音ミク"], body: "miku is a [[vocaloid]]")
+          @picasso = create(:wiki_page, title: "picasso")
+          create(:artist, name: "picasso", is_banned: true)
+          create(:character_tag, name: "hatsune_miku")
         end
       end
 
-      should "list all wiki_pages" do
+      should "render" do
         get wiki_pages_path
         assert_response :success
       end
 
-      should "list all wiki_pages (with search)" do
-        get wiki_pages_path, params: {:search => {:title => "abc"}}
+      should "render for a sitemap" do
+        get wiki_pages_path(format: :sitemap)
         assert_response :success
-        assert_select "tr td:first-child", text: "abc"
-      end
-
-      should "list wiki_pages without tags with order=post_count" do
-        get wiki_pages_path, params: {:search => {:title => "abc", :order => "post_count"}}
-        assert_response :success
-        assert_select "tr td:first-child", text: "abc"
+        assert_equal(WikiPage.count, response.parsed_body.css("urlset url loc").size)
       end
 
       should "redirect the legacy title param to the show page" do
-        get wiki_pages_path(title: "abc")
-        assert_redirected_to wiki_pages_path(search: { title_normalize: "abc" }, redirect: true)
+        get wiki_pages_path(title: "tagme")
+        assert_redirected_to wiki_pages_path(search: { title_normalize: "tagme" }, redirect: true)
+      end
+
+      should respond_to_search({}).with { [@picasso, @miku, @vocaloid, @deleted, @tagme] }
+      should respond_to_search(title: "tagme").with { @tagme }
+      should respond_to_search(title: "tagme", order: "post_count").with { @tagme }
+      should respond_to_search(title_normalize: "TAGME  ").with { @tagme }
+
+      should respond_to_search(hide_deleted: "true").with { [@picasso, @miku, @vocaloid, @tagme] }
+      should respond_to_search(linked_to: "vocaloid").with { @miku }
+      should respond_to_search(not_linked_to: "vocaloid").with { [@picasso, @vocaloid, @deleted, @tagme] }
+
+      should respond_to_search(other_names_match: "初音ミク").with { @miku }
+      should respond_to_search(other_names_match: "初*").with { @miku }
+      should respond_to_search(other_names_present: "true").with { @miku }
+      should respond_to_search(other_names_present: "false").with { [@picasso, @vocaloid, @deleted, @tagme] }
+
+      context "using includes" do
+        should respond_to_search(has_tag: "true").with { @miku }
+        should respond_to_search(tag: { category: Tag.categories.character }).with { @miku }
+        should respond_to_search(has_dtext_links: "true").with { @miku }
+        should respond_to_search(has_artist: "true").with { @picasso }
+        should respond_to_search(artist: {is_banned: "true"}).with { @picasso }
       end
     end
 
@@ -47,9 +68,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "show action" do
       setup do
-        as_user do
-          @wiki_page = create(:wiki_page)
-        end
+        @wiki_page = as(@user) { create(:wiki_page) }
       end
 
       should "redirect to the title for an id" do
@@ -90,15 +109,6 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         assert_response 404
       end
 
-      should "render for a negated tag" do
-        as_user do
-          @wiki_page.update(title: "-aaa")
-        end
-
-        get wiki_page_path(@wiki_page.id)
-        assert_redirected_to wiki_page_path(@wiki_page.title)
-      end
-
       should "work for a title containing dots" do
         as(@user) { create(:wiki_page, title: "...") }
 
@@ -111,13 +121,19 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
         get wiki_page_path("....xml")
         assert_response :success
       end
+
+      should "mark banned artists as noindex" do
+        @artist = create(:artist, name: @wiki_page.title, is_banned: true)
+        get wiki_page_path(@wiki_page.title)
+
+        assert_response :success
+        assert_select "meta[name=robots][content=noindex]"
+      end
     end
 
     context "show_or_new action" do
       setup do
-        as_user do
-          @wiki_page = create(:wiki_page)
-        end
+        @wiki_page = as(@user) { create(:wiki_page) }
       end
 
       should "redirect when given a title" do
@@ -167,7 +183,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "update action" do
       setup do
-        as_user do
+        as(@user) do
           @tag = create(:tag, name: "foo", post_count: 42)
           @wiki_page = create(:wiki_page, title: "foo")
           @builder = create(:builder_user)
@@ -219,9 +235,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "destroy action" do
       setup do
-        as_user do
-          @wiki_page = create(:wiki_page)
-        end
+        @wiki_page = as(@user) { create(:wiki_page) }
         @mod = create(:mod_user)
       end
 
@@ -234,7 +248,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
 
     context "revert action" do
       setup do
-        as_user do
+        as(@user) do
           @wiki_page = create(:wiki_page, body: "1")
           travel(1.day)
           @wiki_page.update(body: "1 2")
@@ -252,9 +266,7 @@ class WikiPagesControllerTest < ActionDispatch::IntegrationTest
       end
 
       should "not allow reverting to a previous version of another wiki page" do
-        as_user do
-          @wiki_page_2 = create(:wiki_page)
-        end
+        @wiki_page_2 = as(@user) { create(:wiki_page) }
 
         put_auth revert_wiki_page_path(@wiki_page), @user, params: { :version_id => @wiki_page_2.versions.first.id }
         @wiki_page.reload

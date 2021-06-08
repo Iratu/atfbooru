@@ -1,22 +1,20 @@
 class BulkUpdateRequest < ApplicationRecord
   attr_accessor :title
   attr_accessor :reason
-  attr_reader :skip_secondary_validations
 
   belongs_to :user
   belongs_to :forum_topic, optional: true
   belongs_to :forum_post, optional: true
   belongs_to :approver, optional: true, class_name: "User"
 
-  before_validation :normalize_text
-  before_validation :update_tags
+  validates_presence_of :reason, on: :create
   validates_presence_of :script
   validates_presence_of :title, if: ->(rec) {rec.forum_topic_id.blank?}
   validates_presence_of :forum_topic, if: ->(rec) {rec.forum_topic_id.present?}
   validates_inclusion_of :status, :in => %w(pending approved rejected)
-  validate :script_formatted_correctly
-  validate :validate_script, :on => :create
+  validate :validate_script, if: :script_changed?
 
+  before_save :update_tags, if: :script_changed?
   after_create :create_forum_topic
 
   scope :pending_first, -> { order(Arel.sql("(case status when 'pending' then 0 when 'approved' then 1 else 2 end)")) }
@@ -33,9 +31,7 @@ class BulkUpdateRequest < ApplicationRecord
     end
 
     def search(params = {})
-      q = super
-
-      q = q.search_attributes(params, :user, :approver, :forum_topic_id, :forum_post_id, :script, :tags)
+      q = search_attributes(params, :id, :created_at, :updated_at, :script, :tags, :user, :forum_topic, :forum_post, :approver)
       q = q.text_attribute_matches(:script, params[:script_matches])
 
       if params[:status].present?
@@ -62,35 +58,25 @@ class BulkUpdateRequest < ApplicationRecord
 
   module ApprovalMethods
     def forum_updater
-      @forum_updater ||= begin
-        post = if forum_topic
-          forum_post || forum_topic.forum_posts.first
-        else
-          nil
-        end
-        ForumUpdater.new(forum_topic, forum_post: post)
-      end
+      @forum_updater ||= ForumUpdater.new(forum_topic)
     end
 
     def approve!(approver)
       transaction do
         CurrentUser.scoped(approver) do
-          AliasAndImplicationImporter.new(script, forum_topic_id, "1", true).process!
-          update!(status: "approved", approver: approver, skip_secondary_validations: true)
+          processor.validate!(:approval)
+          processor.process!(approver)
+          update!(status: "approved", approver: approver)
           forum_updater.update("The #{bulk_update_request_link} (forum ##{forum_post.id}) has been approved by @#{approver.name}.")
         end
-      end
-    rescue AliasAndImplicationImporter::Error => x
-      self.approver = approver
-      CurrentUser.scoped(approver) do
-        forum_updater.update("The #{bulk_update_request_link} (forum ##{forum_post.id}) has failed: #{x}")
       end
     end
 
     def create_forum_topic
       CurrentUser.as(user) do
+        body = "[bur:#{id}]\n\n#{reason}"
         self.forum_topic = ForumTopic.create(title: title, category_id: 1, creator: user) unless forum_topic.present?
-        self.forum_post = forum_topic.forum_posts.create(body: reason_with_link, creator: user) unless forum_post.present?
+        self.forum_post = forum_topic.forum_posts.create(body: body, creator: user) unless forum_post.present?
         save
       end
     end
@@ -103,62 +89,29 @@ class BulkUpdateRequest < ApplicationRecord
     end
 
     def bulk_update_request_link
-      %{"bulk update request ##{id}":/bulk_update_requests?search%5Bid%5D=#{id}}
+      %{"bulk update request ##{id}":#{Routes.bulk_update_requests_path(search: { id: id })}}
     end
   end
 
-  module ValidationMethods
-    def script_formatted_correctly
-      AliasAndImplicationImporter.tokenize(script)
-    rescue StandardError => e
-      errors[:base] << e.message
-    end
-
-    def validate_script
-      AliasAndImplicationImporter.new(script, forum_topic_id, "1", skip_secondary_validations).validate!
-    rescue RuntimeError => e
-      errors[:base] << e.message
+  def validate_script
+    if processor.invalid?(:request)
+      errors.add(:base, processor.errors.full_messages.join("; "))
     end
   end
 
   extend SearchMethods
   include ApprovalMethods
-  include ValidationMethods
-
-  def reason_with_link
-    "[bur:#{id}]\n\nReason: #{reason}"
-  end
-
-  def script_with_links
-    tokens = AliasAndImplicationImporter.tokenize(script)
-    lines = tokens.map do |token|
-      case token[0]
-      when :create_alias, :create_implication, :remove_alias, :remove_implication
-        "#{token[0].to_s.tr("_", " ")} [[#{token[1]}]] -> [[#{token[2]}]]"
-
-      when :mass_update
-        "mass update {{#{token[1]}}} -> #{token[2]}"
-
-      when :change_category
-        "category [[#{token[1]}]] -> #{token[2]}"
-
-      else
-        raise "Unknown token: #{token[0]}"
-      end
-    end
-    lines.join("\n")
-  end
-
-  def normalize_text
-    self.script = script.downcase
-  end
 
   def update_tags
-    self.tags = AliasAndImplicationImporter.new(script, nil).affected_tags
+    self.tags = processor.affected_tags
   end
 
-  def skip_secondary_validations=(v)
-    @skip_secondary_validations = v.to_s.truthy?
+  def processor
+    @processor ||= BulkUpdateRequestProcessor.new(self)
+  end
+
+  def is_tag_move_allowed?
+    processor.is_tag_move_allowed?
   end
 
   def is_pending?

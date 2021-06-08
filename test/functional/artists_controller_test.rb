@@ -4,11 +4,8 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
   def assert_artist_found(expected_artist, source_url = nil)
     if source_url
       get_auth artists_path(format: "json", search: { url_matches: source_url }), @user
-      if response.body =~ /Net::OpenTimeout/
-        skip "Remote connection to #{source_url} failed"
-        return
-      end
     end
+
     assert_response :success
     json = JSON.parse(response.body)
     assert_equal(1, json.size, "Testing URL: #{source_url}")
@@ -17,10 +14,6 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
 
   def assert_artist_not_found(source_url)
     get_auth artists_path(format: "json", search: { url_matches: source_url }), @user
-    if response.body =~ /Net::OpenTimeout/
-      skip "Remote connection to #{source_url} failed"
-      return
-    end
 
     assert_response :success
     json = JSON.parse(response.body)
@@ -31,10 +24,12 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
     setup do
       @admin = create(:admin_user)
       @user = create(:user)
-      as_user do
+      as(@user) do
         @artist = create(:artist)
         @masao = create(:artist, name: "masao", url_string: "http://www.pixiv.net/member.php?id=32777")
         @artgerm = create(:artist, name: "artgerm", url_string: "http://artgerm.deviantart.com/")
+        @wiki = create(:wiki_page, title: "artgerm")
+        @post = create(:post, tag_string: "masao")
       end
     end
 
@@ -53,6 +48,30 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
         @artist.update(name: "-aaa")
         get artist_path(@artist.id)
         assert_response :success
+      end
+
+      should "show active wikis" do
+        as(@user) { create(:wiki_page, title: @artist.name) }
+        get artist_path(@artist.id)
+
+        assert_response :success
+        assert_select ".artist-wiki", count: 1
+      end
+
+      should "not show deleted wikis" do
+        as(@user) { create(:wiki_page, title: @artist.name, is_deleted: true) }
+        get artist_path(@artist.id)
+
+        assert_response :success
+        assert_select ".artist-wiki", count: 0
+      end
+
+      should "mark banned artists as noindex" do
+        @artist = create(:artist, is_banned: true)
+        get artist_path(@artist.id)
+
+        assert_response :success
+        assert_select "meta[name=robots][content=noindex]"
       end
     end
 
@@ -96,10 +115,13 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
 
     context "ban action" do
       should "ban an artist" do
-        put_auth ban_artist_path(@artist.id), @admin
+        perform_enqueued_jobs do
+          put_auth ban_artist_path(@artist.id), @admin
+        end
+
         assert_redirected_to(@artist)
         assert_equal(true, @artist.reload.is_banned?)
-        assert_equal(true, TagImplication.exists?(antecedent_name: @artist.name, consequent_name: "banned_artist"))
+        assert_equal(true, TagImplication.exists?(antecedent_name: @artist.name, consequent_name: "banned_artist", status: "active"))
       end
 
       should "not allow non-admins to ban artists" do
@@ -111,7 +133,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
 
     context "unban action" do
       should "unban an artist" do
-        @artist.ban!(banner: @admin)
+        as(@admin) { @artist.ban!(banner: @admin) }
         put_auth unban_artist_path(@artist.id), @admin
 
         assert_redirected_to(@artist)
@@ -121,26 +143,48 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
     end
 
     context "index action" do
-      should "get the index page" do
+      should "render" do
         get artists_path
         assert_response :success
       end
 
+      should "get the sitemap" do
+        get artists_path(format: :sitemap)
+        assert_response :success
+        assert_equal(Artist.count, response.parsed_body.css("urlset url loc").size)
+      end
+
       context "when searching the index page" do
+        setup do
+          @deleted = create(:artist, is_deleted: true)
+          @banned = create(:artist, is_banned: true)
+        end
+
         should "find artists by name" do
           get artists_path(name: "masao", format: "json")
           assert_artist_found("masao")
         end
 
-        should "find artists by image URL" do
-          get artists_path(search: { url_matches: "http://i2.pixiv.net/img04/img/syounen_no_uta/46170939_m.jpg" }, format: "json")
-          assert_artist_found("masao")
+        should respond_to_search({}).with { [@banned, @deleted, @artgerm, @masao, @artist] }
+        should respond_to_search(name: "masao").with { @masao }
+        should respond_to_search(is_banned: "true").with { @banned }
+        should respond_to_search(is_deleted: "true").with { @deleted }
+        should respond_to_search(url_matches: "http://i2.pixiv.net/img04/img/syounen_no_uta/46170939_m.jpg").with { @masao }
+        should respond_to_search(url_matches: "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=46170939").with { @masao }
+
+        context "ignoring whitespace" do
+          should respond_to_search(url_matches: " http://www.pixiv.net/member_illust.php?mode=medium&illust_id=46170939 ").with { @masao }
         end
 
-        should "find artists by page URL" do
-          url = "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=46170939"
-          get artists_path(search: { url_matches: url }, format: "json")
-          assert_artist_found("masao")
+        context "using includes" do
+          should respond_to_search(has_wiki_page: "true").with { @artgerm }
+          should respond_to_search(has_wiki_page: "false").with { [@banned, @deleted, @masao, @artist] }
+          should respond_to_search(has_tag: "true").with { @masao }
+          should respond_to_search(has_tag: "false").with { [@banned, @deleted, @artgerm, @artist] }
+          should respond_to_search(has_urls: "true").with { [@artgerm, @masao] }
+          should respond_to_search(has_urls: "false").with { [@banned, @deleted, @artist] }
+          should respond_to_search(urls: {url: "http://www.pixiv.net/member.php?id=32777"}).with { @masao }
+          should respond_to_search(urls: {normalized_url: "http://www.deviantart.com/artgerm/"}).with { @artgerm }
         end
       end
     end
@@ -152,37 +196,6 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
           assert_response :redirect
           assert_equal("test", Artist.last.name)
         end
-      end
-    end
-
-    context "with an artist that has a wiki page" do
-      setup do
-        as(@admin) do
-          @artist = create(:artist, name: "aaa", url_string: "http://example.com")
-          @wiki_page = create(:wiki_page, title: "aaa", body: "testing")
-        end
-        @another_user = create(:user)
-      end
-
-      should "update the wiki with the artist" do
-        old_timestamp = @wiki_page.updated_at
-        travel(1.minute) do
-          put_auth artist_path(@artist.id), @user, params: {artist: { wiki_page_attributes: { body: "rex" }, url_string: "http://example.com\nhttp://monet.com"}}
-        end
-        @artist.reload
-        @wiki_page = @artist.wiki_page
-        assert_equal("rex", @artist.wiki_page.body)
-        assert_not_equal(old_timestamp, @wiki_page.updated_at)
-        assert_redirected_to(artist_path(@artist.id))
-      end
-
-      should "not touch the updated_at fields when nothing is changed" do
-        old_timestamp = @wiki_page.updated_at
-
-        travel(1.minute)
-        as(@another_user) { @artist.update(wiki_page_attributes: { body: "testing" }) }
-
-        assert_equal(old_timestamp.to_i, @artist.reload.wiki_page.updated_at.to_i)
       end
     end
 
@@ -204,7 +217,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
 
     context "revert action" do
       should "work" do
-        as_user do
+        as(@user) do
           @artist.update(name: "xyz")
           @artist.update(name: "abc")
         end
@@ -213,9 +226,7 @@ class ArtistsControllerTest < ActionDispatch::IntegrationTest
       end
 
       should "not allow reverting to a previous version of another artist" do
-        as_user do
-          @artist2 = create(:artist)
-        end
+        @artist2 = as(@user) { create(:artist) }
         put_auth artist_path(@artist.id), @user, params: {version_id: @artist2.versions.first.id}
         assert_redirected_to(artist_path(@artist.id))
         assert_not_equal(@artist.reload.name, @artist2.name)

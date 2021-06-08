@@ -1,12 +1,12 @@
-import Uploads from './uploads.js.erb';
+import SourceDataComponent from '../../../components/source_data_component/source_data_component.js';
 import Utility from './utility';
-import Post from './posts.js.erb';
 
 let RelatedTag = {};
 
 RelatedTag.initialize_all = function() {
   $(document).on("click.danbooru", ".related-tags-button", RelatedTag.on_click_related_tags_button);
-  $(document).on("click.danbooru", ".related-tags a.search-tag", RelatedTag.toggle_tag);
+  $(document).on("change.danbooru", ".related-tags input", RelatedTag.toggle_tag);
+  $(document).on("click.danbooru", ".related-tags a", RelatedTag.toggle_tag);
   $(document).on("click.danbooru", "#show-related-tags-link", RelatedTag.show);
   $(document).on("click.danbooru", "#hide-related-tags-link", RelatedTag.hide);
   $(document).on("keyup.danbooru.relatedTags", "#upload_tag_string, #post_tag_string", RelatedTag.update_selected);
@@ -17,7 +17,7 @@ RelatedTag.initialize_all = function() {
 
   // Initialize the recent/favorite/translated/artist tag columns once, the first time the related tags are shown.
   $(document).one("danbooru:show-related-tags", RelatedTag.initialize_recent_and_favorite_tags);
-  $(document).one("danbooru:show-related-tags", Uploads.fetch_data_manual);
+  $(document).one("danbooru:show-related-tags", SourceDataComponent.fetchData);
 
   // Show the related tags automatically when the "Edit" tab is opened, or by default on the uploads page.
   $(document).on("danbooru:open-post-edit-tab", RelatedTag.show);
@@ -90,22 +90,28 @@ RelatedTag.current_tag = function() {
 
 RelatedTag.update_selected = function(e) {
   var current_tags = RelatedTag.current_tags();
-  var $all_tags = $(".related-tags a.search-tag");
-  $all_tags.removeClass("selected");
-  $all_tags.each(function(i, tag) {
-    if (current_tags.includes(tag.textContent.replace(/ /g, "_"))) {
-      $(tag).addClass("selected");
+
+  $(".related-tags li").each((_, li) => {
+    let tag_name = $(li).text().trim().replace(/ /g, "_");
+
+    if (current_tags.includes(tag_name)) {
+      $(li).addClass("selected");
+      $(li).find("input").prop("checked", true);
+    } else {
+      $(li).removeClass("selected");
+      $(li).find("input").prop("checked", false);
     }
   });
 }
 
 RelatedTag.current_tags = function() {
-  return Utility.regexp_split($("#upload_tag_string,#post_tag_string").val().toLowerCase());
+  let tagString = $("#upload_tag_string,#post_tag_string").val().toLowerCase();
+  return Utility.splitWords(tagString);
 }
 
 RelatedTag.toggle_tag = function(e) {
   var $field = $("#upload_tag_string,#post_tag_string");
-  var tag = $(e.target).html().replace(/ /g, "_").replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
+  var tag = $(e.target).closest("li").text().trim().replace(/ /g, "_");
 
   if (RelatedTag.current_tags().includes(tag)) {
     var escaped_tag = Utility.regexp_escape(tag);
@@ -121,7 +127,8 @@ RelatedTag.toggle_tag = function(e) {
   setTimeout(function () { $field.prop('selectionStart', $field.val().length);}, 100);
   e.preventDefault();
 
-  Post.update_tag_count({ target: $field });
+  // Artificially trigger input event so the tag counter updates.
+  $field.trigger("input");
 }
 
 RelatedTag.show = function(e) {

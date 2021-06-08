@@ -16,15 +16,16 @@ class ForumTopic < ApplicationRecord
   has_many :forum_posts, foreign_key: "topic_id", dependent: :destroy, inverse_of: :topic
   has_many :forum_topic_visits
   has_one :forum_topic_visit_by_current_user, -> { where(user_id: CurrentUser.id) }, class_name: "ForumTopicVisit"
-  has_many :moderation_reports, through: :forum_posts
   has_one :original_post, -> { order(id: :asc) }, class_name: "ForumPost", foreign_key: "topic_id", inverse_of: :topic
   has_many :bulk_update_requests, :foreign_key => "forum_topic_id"
+  has_many :tag_aliases, :foreign_key => "forum_topic_id"
+  has_many :tag_implications, :foreign_key => "forum_topic_id"
 
-  validates_presence_of :title
+  validates :title, presence: true, length: { maximum: 200 }, if: :title_changed?
   validates_associated :original_post
   validates_inclusion_of :category_id, :in => CATEGORIES.keys
   validates_inclusion_of :min_level, :in => MIN_LEVELS.values
-  validates :title, :length => {:maximum => 255}
+
   accepts_nested_attributes_for :original_post
   after_update :update_orignal_post
   after_save(:if => ->(rec) {rec.is_locked? && rec.saved_change_to_is_locked?}) do |rec|
@@ -84,8 +85,7 @@ class ForumTopic < ApplicationRecord
     end
 
     def search(params)
-      q = super
-      q = q.search_attributes(params, :creator, :updater, :is_sticky, :is_locked, :is_deleted, :category_id, :title, :response_count)
+      q = search_attributes(params, :id, :created_at, :updated_at, :is_sticky, :is_locked, :is_deleted, :category_id, :title, :response_count, :creator, :updater, :forum_posts, :bulk_update_requests, :tag_aliases, :tag_implications)
       q = q.text_attribute_matches(:title, params[:title_matches], index_column: :text_index)
 
       if params[:is_private].to_s.truthy?
@@ -111,6 +111,8 @@ class ForumTopic < ApplicationRecord
       case params[:order]
       when "sticky"
         q = q.sticky_first
+      when "id"
+        q = q.order(id: :desc)
       else
         q = q.apply_default_order(params)
       end
@@ -184,10 +186,6 @@ class ForumTopic < ApplicationRecord
 
   def pretty_title
     title.gsub(/\A\[APPROVED\]|\[REJECTED\]/, "")
-  end
-
-  def html_data_attributes
-    super + [:is_read?]
   end
 
   def self.available_includes

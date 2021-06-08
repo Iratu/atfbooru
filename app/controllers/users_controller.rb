@@ -1,6 +1,5 @@
 class UsersController < ApplicationController
   respond_to :html, :xml, :json
-  skip_before_action :api_check
 
   def new
     @user = authorize User.new
@@ -26,8 +25,9 @@ class UsersController < ApplicationController
 
   def index
     if params[:name].present?
-      @user = User.find_by_name!(params[:name])
-      redirect_to user_path(@user)
+      @user = User.find_by_name(params[:name])
+      raise ActiveRecord::RecordNotFound if @user.blank?
+      redirect_to user_path(@user, variant: params[:variant])
       return
     end
 
@@ -37,18 +37,17 @@ class UsersController < ApplicationController
     respond_with(@users)
   end
 
-  def search
-  end
-
   def show
     @user = authorize User.find(params[:id])
-    respond_with(@user, methods: @user.full_attributes)
+    respond_with(@user, methods: @user.full_attributes) do |format|
+      format.html.tooltip { render layout: false }
+    end
   end
 
   def profile
     @user = authorize CurrentUser.user
 
-    if @user.is_member?
+    if !@user.is_anonymous?
       params[:action] = "show"
       respond_with(@user, methods: @user.full_attributes, template: "users/show")
     elsif request.format.html?
@@ -59,15 +58,20 @@ class UsersController < ApplicationController
   end
 
   def create
-    requires_verification = IpLookup.new(CurrentUser.ip_addr).is_proxy? || IpBan.hit!(:partial, CurrentUser.ip_addr)
+    user_verifier = UserVerifier.new(CurrentUser.user, request)
 
     @user = authorize User.new(
       last_ip_addr: CurrentUser.ip_addr,
-      requires_verification: requires_verification,
+      last_logged_in_at: Time.zone.now,
+      requires_verification: user_verifier.requires_verification?,
+      level: user_verifier.initial_level,
       name: params[:user][:name],
       password: params[:user][:password],
       password_confirmation: params[:user][:password_confirmation]
     )
+
+    user_verifier.log! if user_verifier.requires_verification?
+    UserEvent.build_from_request(@user, :user_creation, request)
 
     if params[:user][:email].present?
       @user.email_address = EmailAddress.new(address: params[:user][:email])
@@ -77,7 +81,7 @@ class UsersController < ApplicationController
       flash[:notice] = "Sign up failed"
     elsif @user.email_address&.invalid?(:deliverable)
       flash[:notice] = "Sign up failed: email address is invalid or doesn't exist"
-      @user.errors[:base] << @user.email_address.errors.full_messages.join("; ")
+      @user.errors.add(:base, @user.email_address.errors.full_messages.join("; "))
     elsif !@user.save
       flash[:notice] = "Sign up failed: #{@user.errors.full_messages.join("; ")}"
     else
@@ -105,7 +109,7 @@ class UsersController < ApplicationController
   end
 
   def custom_style
-    @css = CustomCss.parse(CurrentUser.user.custom_style)
+    @css = CurrentUser.user.custom_style
     expires_in 10.years
   end
 

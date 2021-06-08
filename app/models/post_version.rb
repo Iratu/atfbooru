@@ -15,12 +15,6 @@ class PostVersion < ApplicationRecord
 
   establish_connection database_url if enabled?
 
-  def self.check_for_retry(msg)
-    if msg =~ /can't get socket descriptor/ && msg =~ /post_versions/
-      connection.reconnect!
-    end
-  end
-
   module SearchMethods
     def changed_tags_include(tag)
       where_array_includes_all(:added_tags, [tag]).or(where_array_includes_all(:removed_tags, [tag]))
@@ -32,19 +26,30 @@ class PostVersion < ApplicationRecord
       end
     end
 
+    def changed_tags_include_any(tags)
+      where_array_includes_any(:added_tags, tags).or(where_array_includes_any(:removed_tags, tags))
+    end
+
     def tag_matches(string)
-      tag = string.split(/\S+/)[0]
+      tag = string.match(/\S+/)[0]
       return all if tag.nil?
       tag = "*#{tag}*" unless tag =~ /\*/
       where_ilike(:tags, tag)
     end
 
     def search(params)
-      q = super
-      q = q.search_attributes(params, :updater_id, :post_id, :tags, :added_tags, :removed_tags, :rating, :rating_changed, :parent_id, :parent_changed, :source, :source_changed, :version)
+      q = search_attributes(params, :id, :updated_at, :updater_id, :post_id, :tags, :added_tags, :removed_tags, :rating, :rating_changed, :parent_id, :parent_changed, :source, :source_changed, :version)
 
       if params[:changed_tags]
         q = q.changed_tags_include_all(params[:changed_tags].scan(/[^[:space:]]+/))
+      end
+
+      if params[:all_changed_tags]
+        q = q.changed_tags_include_all(params[:all_changed_tags].scan(/[^[:space:]]+/))
+      end
+
+      if params[:any_changed_tags]
+        q = q.changed_tags_include_any(params[:any_changed_tags].scan(/[^[:space:]]+/))
       end
 
       if params[:tag_matches]
@@ -265,10 +270,6 @@ class PostVersion < ApplicationRecord
     end
 
     post.save!
-  end
-
-  def api_attributes
-    super + [:obsolete_added_tags, :obsolete_removed_tags, :unchanged_tags]
   end
 
   def self.available_includes
