@@ -136,19 +136,17 @@ class PostTest < ActiveSupport::TestCase
     end
 
     context "Deleting a post" do
-      setup do
-        Danbooru.config.stubs(:blank_tag_search_fast_count).returns(nil)
-      end
-
       context "that is status locked" do
         setup do
           @post = FactoryBot.create(:post, is_status_locked: true)
         end
 
         should "fail" do
-          @post.delete!("test")
-          assert_equal(["Is status locked ; cannot delete post"], @post.errors.full_messages)
-          assert_equal(1, Post.where("id = ?", @post.id).count)
+          assert_raise(ActiveRecord::RecordInvalid) do
+            @post.delete!("test")
+          end
+
+          assert_equal(false, @post.reload.is_deleted?)
         end
       end
 
@@ -228,18 +226,6 @@ class PostTest < ActiveSupport::TestCase
           assert_equal(false, p1.has_children?)
         end
 
-        should "reassign favorites to the parent" do
-          p1 = FactoryBot.create(:post)
-          c1 = FactoryBot.create(:post, :parent_id => p1.id)
-          user = FactoryBot.create(:user)
-          c1.add_favorite!(user)
-          c1.expunge!
-          p1.reload
-          assert(!Favorite.exists?(:post_id => c1.id, :user_id => user.id))
-          assert(Favorite.exists?(:post_id => p1.id, :user_id => user.id))
-          assert_equal(0, c1.score)
-        end
-
         should "update the parent's has_children flag" do
           p1 = FactoryBot.create(:post)
           c1 = FactoryBot.create(:post, :parent_id => p1.id)
@@ -270,17 +256,6 @@ class PostTest < ActiveSupport::TestCase
           end
         end
 
-        should "reparent all children to the first child" do
-          @p1.expunge!
-          @c1.reload
-          @c2.reload
-          @c3.reload
-
-          assert_nil(@c1.parent_id)
-          assert_equal(@c1.id, @c2.parent_id)
-          assert_equal(@c1.id, @c3.parent_id)
-        end
-
         should "save a post version record for each child" do
           assert_difference(["@c1.versions.count", "@c2.versions.count", "@c3.versions.count"]) do
             @p1.expunge!
@@ -288,11 +263,6 @@ class PostTest < ActiveSupport::TestCase
             @c2.reload
             @c3.reload
           end
-        end
-
-        should "set the has_children flag on the new parent" do
-          @p1.expunge!
-          assert_equal(true, @c1.reload.has_children?)
         end
       end
     end
@@ -543,24 +513,23 @@ class PostTest < ActiveSupport::TestCase
     end
 
     context "A status locked post" do
-      setup do
-        @post = FactoryBot.create(:post, is_status_locked: true)
-      end
-
       should "not allow new flags" do
         assert_raises(PostFlag::Error) do
+          @post = create(:post, is_status_locked: true)
           @post.flag!("wrong")
         end
       end
 
       should "not allow new appeals" do
+        @post = create(:post, is_status_locked: true, is_deleted: true)
         @appeal = build(:post_appeal, post: @post)
 
         assert_equal(false, @appeal.valid?)
-        assert_equal(["Post is active"], @appeal.errors.full_messages)
+        assert_equal(["Post cannot be appealed"], @appeal.errors.full_messages)
       end
 
       should "not allow approval" do
+        @post = create(:post, is_status_locked: true, is_pending: true)
         approval = @post.approve!
         assert_includes(approval.errors.full_messages, "Post is locked and cannot be approved")
       end
@@ -573,29 +542,12 @@ class PostTest < ActiveSupport::TestCase
         @post = FactoryBot.create(:post)
       end
 
-      context "as a new user" do
-        setup do
-          @post.update(:tag_string => "aaa bbb ccc ddd tagme")
-          CurrentUser.user = FactoryBot.create(:user)
-        end
-
-        should "not allow you to remove tags" do
-          @post.update(tag_string: "aaa")
-          assert_equal(["You must have an account at least 1 week old to remove tags"], @post.errors.full_messages)
-        end
-
-        should "allow you to remove request tags" do
-          @post.update(tag_string: "aaa bbb ccc ddd")
-          @post.reload
-          assert_equal("aaa bbb ccc ddd", @post.tag_string)
-        end
-      end
-
       context "with a banned artist" do
         setup do
           CurrentUser.scoped(FactoryBot.create(:admin_user)) do
             @artist = FactoryBot.create(:artist)
             @artist.ban!
+            perform_enqueued_jobs
           end
           @post = FactoryBot.create(:post, :tag_string => @artist.name)
         end
@@ -646,6 +598,10 @@ class PostTest < ActiveSupport::TestCase
       context "tagged with a valid tag" do
         subject { @post }
 
+        setup do
+          create(:tag, name: "hakurei_reimu")
+        end
+
         should allow_value("touhou 100%").for(:tag_string)
         should allow_value("touhou FOO").for(:tag_string)
         should allow_value("touhou -foo").for(:tag_string)
@@ -666,6 +622,8 @@ class PostTest < ActiveSupport::TestCase
         # \u3000 = ideographic space, \u00A0 = no-break space
         should allow_value("touhou\u3000foo").for(:tag_string)
         should allow_value("touhou\u00A0foo").for(:tag_string)
+
+        should allow_value("/hr").for(:tag_string)
       end
 
       context "tagged with an invalid tag" do
@@ -706,6 +664,16 @@ class PostTest < ActiveSupport::TestCase
           assert_invalid_tag("東方")
           assert_invalid_tag("new")
           assert_invalid_tag("search")
+        end
+      end
+
+      context "tagged with an abbreviation" do
+        should "expand the abbreviation" do
+          create(:tag, name: "hair_ribbon", post_count: 300_000)
+          create(:tag, name: "hakurei_reimu", post_count: 50_000)
+
+          @post.update!(tag_string: "aaa /hr")
+          assert_equal("aaa hair_ribbon", @post.reload.tag_string)
         end
       end
 
@@ -958,6 +926,14 @@ class PostTest < ActiveSupport::TestCase
             @post.update(tag_string: "aaa -fav:self")
             assert_equal("", @post.fav_string)
           end
+
+          should "not fail when the fav: metatag is used twice" do
+            @post.update(tag_string: "aaa fav:self fav:me")
+            assert_equal("fav:#{@user.id}", @post.fav_string)
+
+            @post.update(tag_string: "aaa -fav:self -fav:me")
+            assert_equal("", @post.fav_string)
+          end
         end
 
         context "for a child" do
@@ -1100,6 +1076,13 @@ class PostTest < ActiveSupport::TestCase
             @post.update(:tag_string => "source:https://img18.pixiv.net/img/evazion/14901720.png")
             assert_equal(14901720, @post.pixiv_id)
           end
+
+          should "validate the max source length" do
+            @post.update(source: "X"*1201)
+
+            assert_equal(false, @post.valid?)
+            assert_equal(["is too long (maximum is 1200 characters)"], @post.errors[:source])
+          end
         end
 
         context "of" do
@@ -1179,19 +1162,19 @@ class PostTest < ActiveSupport::TestCase
           context "upvote:self or downvote:self" do
             context "by a member" do
               should "not upvote the post" do
-                assert_raises PostVote::Error do
-                  @post.update(:tag_string => "upvote:self")
+                assert_no_difference("PostVote.count") do
+                  @post.update(tag_string: "upvote:self")
                 end
 
-                assert_equal(0, @post.score)
+                assert_equal(0, @post.reload.score)
               end
 
               should "not downvote the post" do
-                assert_raises PostVote::Error do
-                  @post.update(:tag_string => "downvote:self")
+                assert_no_difference("PostVote.count") do
+                  @post.update(tag_string: "downvote:self")
                 end
 
-                assert_equal(0, @post.score)
+                assert_equal(0, @post.reload.score)
               end
             end
 
@@ -1229,6 +1212,27 @@ class PostTest < ActiveSupport::TestCase
           @post.update(:tag_string => "aaa translation_request -/tr")
 
           assert_equal("aaa", @post.tag_string)
+        end
+
+        should "resolve aliases before removing negated tags" do
+          create(:tag_alias, antecedent_name: "female_focus", consequent_name: "female")
+
+          @post.update!(tag_string: "blah female_focus -female")
+          assert_equal("blah", @post.tag_string)
+
+          @post.update!(tag_string: "blah female_focus -female_focus")
+          assert_equal("blah", @post.tag_string)
+        end
+
+        should "resolve abbreviations" do
+          create(:tag, name: "hair_ribbon", post_count: 300_000)
+          create(:tag, name: "hakurei_reimu", post_count: 50_000)
+
+          @post.update!(tag_string: "aaa hair_ribbon hakurei_reimu")
+          assert_equal("aaa hair_ribbon hakurei_reimu", @post.reload.tag_string)
+
+          @post.update!(tag_string: "aaa hair_ribbon hakurei_reimu -/hr")
+          assert_equal("aaa hakurei_reimu", @post.reload.tag_string)
         end
       end
 
@@ -1291,18 +1295,18 @@ class PostTest < ActiveSupport::TestCase
 
       context "with a .webm file extension" do
         setup do
-          FactoryBot.create(:tag_implication, antecedent_name: "webm", consequent_name: "animated")
+          FactoryBot.create(:tag_implication, antecedent_name: "video", consequent_name: "animated")
           @post.file_ext = "webm"
           @post.tag_string = ""
           @post.save
         end
 
         should "have the appropriate file type tag added automatically" do
-          assert_match(/webm/, @post.tag_string)
+          assert_match(/video/, @post.tag_string)
         end
 
         should "apply implications after adding the file type tag" do
-          assert(@post.has_tag?("animated"), "expected 'webm' to imply 'animated'")
+          assert(@post.has_tag?("animated"), "expected 'video' to imply 'animated'")
         end
       end
 
@@ -1336,6 +1340,14 @@ class PostTest < ActiveSupport::TestCase
           refute(@post.has_tag?("little_red_riding_hood"))
           refute(@post.has_tag?("cosplay"))
           assert(@post.warnings[:base].grep(/Couldn't add tag/).present?)
+        end
+
+        should "allow creating a _(cosplay) tag for an empty general tag" do
+          @tag = create(:tag, name: "hatsune_miku", post_count: 0, category: Tag.categories.general)
+          @post = create(:post, tag_string: "hatsune_miku_(cosplay)")
+
+          assert_equal("cosplay hatsune_miku hatsune_miku_(cosplay)", @post.reload.tag_string)
+          assert_equal(true, @tag.reload.character?)
         end
       end
 
@@ -1534,60 +1546,6 @@ class PostTest < ActiveSupport::TestCase
             assert_equal(46304396, @post.pixiv_id)
             @post.pixiv_id = nil
           end
-        end
-
-        should "normalize pixiv links" do
-          @post.update!(source: "http://i2.pixiv.net/img12/img/zenze/39749565.png")
-          assert_equal("https://www.pixiv.net/artworks/39749565", @post.normalized_source)
-
-          @post.update!(source: "http://i1.pixiv.net/img53/img/themare/39735353_big_p1.jpg")
-          assert_equal("https://www.pixiv.net/artworks/39735353", @post.normalized_source)
-
-          @post.update!(source: "http://i1.pixiv.net/c/150x150/img-master/img/2010/11/30/08/39/58/14901720_p0_master1200.jpg")
-          assert_equal("https://www.pixiv.net/artworks/14901720", @post.normalized_source)
-
-          @post.update!(source: "http://i1.pixiv.net/img-original/img/2010/11/30/08/39/58/14901720_p0.png")
-          assert_equal("https://www.pixiv.net/artworks/14901720", @post.normalized_source)
-
-          @post.update!(source: "http://i2.pixiv.net/img-zip-ugoira/img/2014/08/05/06/01/10/44524589_ugoira1920x1080.zip")
-          assert_equal("https://www.pixiv.net/artworks/44524589", @post.normalized_source)
-        end
-
-        should "normalize nicoseiga links" do
-          @post.source = "http://lohas.nicoseiga.jp/priv/3521156?e=1382558156&h=f2e089256abd1d453a455ec8f317a6c703e2cedf"
-          assert_equal("https://seiga.nicovideo.jp/seiga/im3521156", @post.normalized_source)
-          @post.source = "http://lohas.nicoseiga.jp/priv/b80f86c0d8591b217e7513a9e175e94e00f3c7a1/1384936074/3583893"
-          assert_equal("https://seiga.nicovideo.jp/seiga/im3583893", @post.normalized_source)
-        end
-
-        should "normalize twitpic links" do
-          @post.source = "http://d3j5vwomefv46c.cloudfront.net/photos/large/820960031.jpg?1384107199"
-          assert_equal("https://twitpic.com/dks0tb", @post.normalized_source)
-        end
-
-        should "normalize deviantart links" do
-          @post.source = "http://fc06.deviantart.net/fs71/f/2013/295/d/7/you_are_already_dead__by_mar11co-d6rgm0e.jpg"
-          assert_equal("https://www.deviantart.com/mar11co/art/You-Are-Already-Dead-408921710", @post.normalized_source)
-          @post.source = "http://fc00.deviantart.net/fs71/f/2013/337/3/5/35081351f62b432f84eaeddeb4693caf-d6wlrqs.jpg"
-          assert_equal("https://deviantart.com/deviation/417560500", @post.normalized_source)
-        end
-
-        should "normalize karabako links" do
-          @post.source = "http://www.karabako.net/images/karabako_38835.jpg"
-          assert_equal("http://www.karabako.net/post/view/38835", @post.normalized_source)
-        end
-
-        should "normalize twipple links" do
-          @post.source = "http://p.twpl.jp/show/orig/mI2c3"
-          assert_equal("http://p.twipple.jp/mI2c3", @post.normalized_source)
-        end
-
-        should "normalize hentai foundry links" do
-          @post.source = "http://pictures.hentai-foundry.com//a/AnimeFlux/219123.jpg"
-          assert_equal("https://www.hentai-foundry.com/pictures/user/AnimeFlux/219123", @post.normalized_source)
-
-          @post.source = "http://pictures.hentai-foundry.com/a/AnimeFlux/219123/Mobile-Suit-Equestria-rainbow-run.jpg"
-          assert_equal("https://www.hentai-foundry.com/pictures/user/AnimeFlux/219123", @post.normalized_source)
         end
       end
 
@@ -1884,181 +1842,63 @@ class PostTest < ActiveSupport::TestCase
 
   context "Voting:" do
     should "not allow members to vote" do
-      @user = FactoryBot.create(:user)
-      @post = FactoryBot.create(:post)
-      as_user do
-        assert_raises(PostVote::Error) { @post.vote!("up") }
-      end
+      user = create(:user)
+      post = create(:post)
+
+      assert_nothing_raised { post.vote!(1, user) }
+      assert_equal(0, post.votes.count)
+      assert_equal(0, post.reload.score)
     end
 
     should "not allow duplicate votes" do
-      user = FactoryBot.create(:gold_user)
-      post = FactoryBot.create(:post)
-      CurrentUser.scoped(user, "127.0.0.1") do
-        assert_nothing_raised {post.vote!("up")}
-        assert_raises(PostVote::Error) {post.vote!("up")}
-        post.reload
-        assert_equal(1, PostVote.count)
-        assert_equal(1, post.score)
-      end
+      user = create(:gold_user)
+      post = create(:post)
+
+      post.vote!(1, user)
+      post.vote!(1, user)
+
+      assert_equal(1, post.reload.score)
+      assert_equal(1, post.votes.count)
     end
 
     should "allow undoing of votes" do
-      user = FactoryBot.create(:gold_user)
-      post = FactoryBot.create(:post)
+      user = create(:gold_user)
+      post = create(:post)
 
       # We deliberately don't call post.reload until the end to verify that
       # post.unvote! returns the correct score even when not forcibly reloaded.
-      CurrentUser.scoped(user, "127.0.0.1") do
-        post.vote!("up")
-        assert_equal(1, post.score)
+      post.vote!(1, user)
+      assert_equal(1, post.score)
+      assert_equal(1, post.up_score)
+      assert_equal(0, post.down_score)
+      assert_equal(1, post.votes.positive.count)
 
-        post.unvote!
-        assert_equal(0, post.score)
+      post.unvote!(user)
+      assert_equal(0, post.score)
+      assert_equal(0, post.up_score)
+      assert_equal(0, post.down_score)
+      assert_equal(0, post.votes.count)
 
-        assert_nothing_raised {post.vote!("down")}
-        assert_equal(-1, post.score)
+      post.vote!(-1, user)
+      assert_equal(-1, post.score)
+      assert_equal(0, post.up_score)
+      assert_equal(-1, post.down_score)
+      assert_equal(1, post.votes.negative.count)
 
-        post.unvote!
-        assert_equal(0, post.score)
+      post.unvote!(user)
+      assert_equal(0, post.score)
+      assert_equal(0, post.up_score)
+      assert_equal(0, post.down_score)
+      assert_equal(0, post.votes.count)
 
-        assert_nothing_raised {post.vote!("up")}
-        assert_equal(1, post.score)
+      post.vote!(1, user)
+      assert_equal(1, post.score)
+      assert_equal(1, post.up_score)
+      assert_equal(0, post.down_score)
+      assert_equal(1, post.votes.positive.count)
 
-        post.reload
-        assert_equal(1, post.score)
-      end
-    end
-  end
-
-  context "Counting:" do
-    context "Creating a post" do
-      setup do
-        Danbooru.config.stubs(:blank_tag_search_fast_count).returns(nil)
-        Danbooru.config.stubs(:estimate_post_counts).returns(false)
-        FactoryBot.create(:tag_alias, :antecedent_name => "alias", :consequent_name => "aaa")
-        FactoryBot.create(:post, :tag_string => "aaa", "score" => 42)
-      end
-
-      context "a single basic tag" do
-        should "return the cached count" do
-          Tag.find_or_create_by_name("aaa").update_columns(post_count: 100)
-          assert_equal(100, Post.fast_count("aaa"))
-        end
-      end
-
-      context "an aliased tag" do
-        should "return the count of the consequent tag" do
-          assert_equal(Post.fast_count("aaa"), Post.fast_count("alias"))
-        end
-      end
-
-      context "a single metatag" do
-        should "return the correct cached count" do
-          FactoryBot.build(:tag, name: "score:42", post_count: -100).save(validate: false)
-          Post.set_count_in_cache("score:42", 100)
-
-          assert_equal(100, Post.fast_count("score:42"))
-        end
-
-        should "return the correct cached count for a pool:<id> search" do
-          FactoryBot.build(:tag, name: "pool:1234", post_count: -100).save(validate: false)
-          Post.set_count_in_cache("pool:1234", 100)
-
-          assert_equal(100, Post.fast_count("pool:1234"))
-        end
-      end
-
-      context "a multi-tag search" do
-        should "return the cached count, if it exists" do
-          Post.set_count_in_cache("aaa score:42", 100)
-          assert_equal(100, Post.fast_count("aaa score:42"))
-        end
-
-        should "return the true count, if not cached" do
-          assert_equal(1, Post.fast_count("aaa score:42"))
-        end
-
-        should "set the expiration time" do
-          Cache.expects(:put).with(Post.count_cache_key("aaa score:42"), 1, 180)
-          Post.fast_count("aaa score:42")
-        end
-
-        should "work with the hide_deleted_posts option turned on" do
-          user = create(:user, hide_deleted_posts: true)
-          as(user) do
-            assert_equal(1, Post.fast_count("aaa score:42"))
-          end
-        end
-      end
-
-      context "a blank search" do
-        should "should execute a search" do
-          Cache.delete(Post.count_cache_key(''))
-          Post.expects(:fast_count_search).with("", kind_of(Hash)).once.returns(1)
-          assert_equal(1, Post.fast_count(""))
-        end
-
-        should "set the value in cache" do
-          Post.expects(:set_count_in_cache).with("", kind_of(Integer)).once
-          Post.fast_count("")
-        end
-
-        context "with a primed cache" do
-          setup do
-            Cache.put(Post.count_cache_key(''), "100")
-          end
-
-          should "fetch the value from the cache" do
-            assert_equal(100, Post.fast_count(""))
-          end
-        end
-
-        should_eventually "translate an alias" do
-          assert_equal(1, Post.fast_count("alias"))
-        end
-
-        should "return 0 for a nonexisting tag" do
-          assert_equal(0, Post.fast_count("bbb"))
-        end
-
-        context "in safe mode" do
-          setup do
-            CurrentUser.stubs(:safe_mode?).returns(true)
-            FactoryBot.create(:post, "rating" => "s")
-          end
-
-          should "work for a blank search" do
-            assert_equal(1, Post.fast_count(""))
-          end
-
-          should "work for a nil search" do
-            assert_equal(1, Post.fast_count(nil))
-          end
-
-          should "not fail for a two tag search by a member" do
-            post1 = FactoryBot.create(:post, tag_string: "aaa bbb rating:s")
-            post2 = FactoryBot.create(:post, tag_string: "aaa bbb rating:e")
-
-            assert_equal(1, Post.fast_count("aaa bbb"))
-          end
-
-          should "set the value in cache" do
-            Post.expects(:set_count_in_cache).with("rating:s", kind_of(Integer)).once
-            Post.fast_count("")
-          end
-
-          context "with a primed cache" do
-            setup do
-              Cache.put(Post.count_cache_key('rating:s'), "100")
-            end
-
-            should "fetch the value from the cache" do
-              assert_equal(100, Post.fast_count(""))
-            end
-          end
-        end
-      end
+      post.reload
+      assert_equal(1, post.score)
     end
   end
 
@@ -2132,11 +1972,14 @@ class PostTest < ActiveSupport::TestCase
 
   context "URLs:" do
     should "generate the correct urls for animated gifs" do
-      @post = FactoryBot.build(:post, md5: "deadbeef", file_ext: "gif", tag_string: "animated_gif")
+      manager = StorageManager::Local.new(base_url: "https://test.com/data", base_dir: "/")
+      Danbooru.config.stubs(:storage_manager).returns(manager)
 
-      assert_equal("https://localhost/data/preview/deadbeef.jpg", @post.preview_file_url)
-      assert_equal("https://localhost/data/deadbeef.gif", @post.large_file_url)
-      assert_equal("https://localhost/data/deadbeef.gif", @post.file_url)
+      @post = build(:post, md5: "deadbeef", file_ext: "gif", tag_string: "animated_gif")
+
+      assert_equal("https://test.com/data/preview/de/ad/deadbeef.jpg", @post.preview_file_url)
+      assert_equal("https://test.com/data/original/de/ad/deadbeef.gif", @post.large_file_url)
+      assert_equal("https://test.com/data/original/de/ad/deadbeef.gif", @post.file_url)
     end
   end
 

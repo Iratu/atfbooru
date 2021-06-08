@@ -1,5 +1,9 @@
 <% page_title "Terms of Service" %>
 
+<% @app_name = Danbooru.config.canonical_app_name %>
+<% @canonical_url = Danbooru.config.canonical_url %>
+<% @contact_email = Danbooru.config.contact_email %>
+
 <div id="c-static">
   <div id="a-terms-of-service" class="prose fixed-width-container">
     <h1>Rules</h1>
@@ -12,11 +16,7 @@
       <li>You have read the <%= link_to "tagging guidelines", wiki_pages_path(:title => "help:tags") %>.</li>
     </ul>
 
-    <div class="section">
-      <h6>Post Limiting</h6>
-      <p>You cannot upload a post during the first week of signing up.</p>
-      <p>After the initial period, you can post a variable number of posts based on how many of your previous uploads were approved or deleted.</p>
-    </div>
+    <h4>User-Generated Content</h4>
 
     <div class="section">
       <h3>Content</h3>
@@ -108,7 +108,129 @@
     <div class="section">
       <h3>Accounts</h3>
 
-      <p>You may have alternative accounts for bots or scripts, but if there's any suspicion you either create a new account or reuse an existing one to evade a ban or any sort of account limitation (limited uploads, loss of flagging or user feedback permissions), then all your accounts will be banned. Bot accounts that flag posts or leave user feedback are not permitted and will be banned.</p>
-      <p>Account sharing is not permitted. If you are suspected of sharing an account, then it will be banned.</p>
-    </div>
+    <ul class="list-bulleted">
+      <li>A list of links to each post you believe infringes on your copyright.</li>
+      <li>Your contact information.</li>
+      <li>Proof of your identity.</li>
+      <li>
+        A statement affirming that you are the copyright holder for these
+        works, under penalty of perjury.
+      </li>
+    </ul>
+
+    <p>Acceptable proof of identity includes any of the following:</p>
+
+    <ul class="list-bulleted">
+      <li>
+        An email from an email address listed in one of your social media
+        profiles.
+      </li>
+
+      <li>
+        A copy or screenshot of the original .psd file or other source file
+        of one of your works.
+      </li>
+    </ul>
+
+    <p>Please be aware that information about you that does not infringe on
+    your copyright will not be removed from the Site. This includes artist
+    tags, artist profiles, wiki pages, comments, forum posts, links to your
+    social media profiles, and links to your works on other sites.</p>
+
+    <p>If you knowingly misrepresent that any activity or material on our Site
+    is infringing, you may be liable for costs and damages.</p>
+
+    <h4>Account Upgrades</h4>
+
+    <p>You may submit your debit card, credit card, or other payment information
+    ("Payment Information") to purchase a Gold or Platinum account upgrade or
+    other products or services from the Site. We use third-party service
+    providers to process your Payment Information, in accordance with our
+    Privacy Policy. If you submit your Payment Information, you agree to pay
+    all costs that you incur, and you give us permission to charge you when
+    payment is due for an amount that includes these costs and any applicable
+    taxes and fees.</p>
+
+    <p>We may change the fees and benefits associated with Gold and Platinum
+    account upgrades from time to time with reasonable advance notice;
+    provided, however, that no advance notice will be required for temporary
+    promotions, including temporary reductions in the fees associated with
+    these account upgrades.</p>
+
+    <h4>API Usage</h4>
+
+    <p>If you use our API, you agree to abide by the rate limits described in
+    our <%= link_to_wiki "API Documentation", "help:api" %>.</p>
+
+    <h4>Privacy</h4>
+
+    <p>Our <%= link_to "Privacy Policy", privacy_policy_path %> describes how
+    we handle any information we obtain about you when you use our Services.
+    You understand that through your use of our Services you consent to the
+    collection and use of your information as described in our Privacy Policy.</p>
+
+    <h4>Miscellaneous</h4>
+
+    <p>"<%= @app_name %>", "we", or "us" refers to <%= @app_name %>, its
+    successors, and its assigns. "You" refers to any person who has consented
+    to these terms or has become contractually bound to them, whether such
+    person is identified or not at the time.</p>
+
+    <p>These Terms constitute the entire agreement between you and us regarding
+    your access to and use of the Services. Our failure to exercise or enforce
+    any right or provision of these Terms will not operate as a waiver of such
+    right or provision. If any provision of these Terms is, for any reason,
+    held to be illegal, invalid or unenforceable, the rest of the Terms will
+    remain in effect. You may not assign or transfer any of your rights or
+    obligations under these Terms without our consent. We may freely assign
+    these Terms.</p>
+
+    <h4>Changes to These Terms</h4>
+
+    <p>We may update these Terms from time to time. The updated Terms will be
+    indicated by a new "Last updated" date at the top of this page. If we make
+    material changes to these Terms, we may, at our discretion, notify you
+    either by prominently posting a notice of such changes or by directly
+    sending you a notification.</p>
+
+    <p>Changes to these Terms will go into effect as soon as the updated Terms
+    are accessible. By continuing to use our Services after changes to these
+    Terms go into effect, you agree to be bound by the revised Terms.</p>
+
+    <h4>No Warranties</h4>
+
+    <p>THE SERVICES ARE PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES
+    OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+    IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+    AND NON-INFRINGEMENT. <%= @app_name.upcase %>, ITS LICENSORS, AND ITS THIRD
+    PARTY SERVICE PROVIDERS DO NOT WARRANT THAT THE SERVICES ARE ACCURATE,
+    COMPLETE, RELIABLE, CURRENT, OR ERROR FREE. <%= @app_name.upcase %> DOES
+    NOT CONTROL, ENDORSE, OR TAKE RESPONSIBILITY FOR ANY CONTENT AVAILABLE ON
+    OR LINKED TO THE SERVICES OR THE ACTIONS OF ANY THIRD PARTY OR USER,
+    INCLUDING MODERATORS. WHILE <%= @app_name.upcase %> ATTEMPTS TO MAKE YOUR
+    ACCESS TO AND USE OF OUR SERVICES SAFE, WE DO NOT REPRESENT OR WARRANT THAT
+    OUR SERVICES OR SERVERS ARE FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.</p>
+
+    <h4>Limitation of Liability</h4>
+
+    <p>IN NO EVENT AND UNDER NO THEORY OF LIABILITY, INCLUDING CONTRACT, TORT,
+    NEGLIGENCE, STRICT LIABILITY, WARRANTY, OR OTHERWISE, WILL THE <%= @app_name.upcase %>
+    ENTITIES BE LIABLE TO YOU FOR ANY INDIRECT, CONSEQUENTIAL, EXEMPLARY,
+    INCIDENTAL, SPECIAL, OR PUNITIVE DAMAGES, OR LOST PROFITS ARISING FROM OR
+    RELATING TO THESE TERMS OR THE SERVICES, INCLUDING THOSE ARISING FROM OR
+    RELATING TO CONTENT MADE AVAILABLE ON THE SERVICES THAT IS ALLEGED TO BE
+    DEFAMATORY, OFFENSIVE, OR ILLEGAL. ACCESS TO, AND USE OF, THE SERVICES IS AT
+    YOUR OWN DISCRETION AND RISK, AND YOU WILL BE SOLELY RESPONSIBLE FOR ANY
+    DAMAGE TO YOUR DEVICE OR COMPUTER SYSTEM, OR LOSS OF DATA RESULTING
+    THEREFROM. IN NO EVENT WILL THE AGGREGATE LIABILITY OF THE <%= @app_name.upcase %>
+    ENTITIES EXCEED THE GREATER OF ONE HUNDRED U.S. DOLLARS ($100) OR ANY AMOUNT
+    YOU PAID <%= @app_name.upcase %> IN THE PREVIOUS SIX MONTHS FOR THE SERVICES
+    GIVING RISE TO THE CLAIM. THE LIMITATIONS OF THIS SECTION WILL APPLY TO ANY
+    THEORY OF LIABILITY, INCLUDING THOSE BASED ON WARRANTY, CONTRACT, STATUTE,
+    TORT (INCLUDING NEGLIGENCE) OR OTHERWISE, AND EVEN IF THE <%= @app_name.upcase %>
+    ENTITIES HAVE BEEN ADVISED OF THE POSSIBILITY OF ANY SUCH DAMAGE, AND EVEN IF
+    ANY REMEDY SET FORTH HEREIN IS FOUND TO HAVE FAILED ITS ESSENTIAL PURPOSE.
+    THE FOREGOING LIMITATION OF LIABILITY WILL APPLY TO THE FULLEST EXTENT
+    PERMITTED BY LAW IN THE APPLICABLE JURISDICTION.</p>
+  </div>
 </div>

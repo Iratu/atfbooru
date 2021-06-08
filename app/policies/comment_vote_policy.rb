@@ -1,7 +1,10 @@
 class CommentVotePolicy < ApplicationPolicy
+  def create?
+    unbanned? && !record.comment.is_deleted?
+  end
+
   def destroy?
-    # XXX permissions are checked in Comment#unvote!
-    true
+    !record.is_deleted? && (record.user_id == user.id || user.is_admin?)
   end
 
   def can_see_votes?

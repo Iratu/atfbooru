@@ -1,22 +1,26 @@
 class UserDeletion
   include ActiveModel::Validations
 
-  attr_reader :user, :password
+  attr_reader :user, :password, :request
+
   validate :validate_deletion
 
-  def initialize(user, password)
+  def initialize(user, password, request)
     @user = user
     @password = password
+    @request = request
   end
 
   def delete!
     return false if invalid?
+
     clear_user_settings
     remove_favorites
     clear_saved_searches
     rename
     reset_password
     create_mod_action
+    create_user_event
     user
   end
 
@@ -24,6 +28,10 @@ class UserDeletion
 
   def create_mod_action
     ModAction.log("user ##{user.id} deleted", :user_delete)
+  end
+
+  def create_user_event
+    UserEvent.create_from_request!(user, :user_deletion, request)
   end
 
   def clear_saved_searches
@@ -60,11 +68,15 @@ class UserDeletion
 
   def validate_deletion
     if !user.authenticate_password(password)
-      errors[:base] << "Password is incorrect"
+      errors.add(:base, "Password is incorrect")
     end
 
-    if user.level >= User::Levels::ADMIN
-      errors[:base] << "Admins cannot delete their account"
+    if user.is_admin?
+      errors.add(:base, "Admins cannot delete their account")
+    end
+
+    if user.is_banned?
+      errors.add(:base, "You cannot delete your account if you are banned")
     end
   end
 end

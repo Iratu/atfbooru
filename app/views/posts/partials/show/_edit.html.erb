@@ -4,12 +4,12 @@
   </div>
 <% end %>
 
-<%= render "sources/info" %>
+<%= render_source_data(nil) %>
 
 <%= edit_form_for(post, html: { id: "form" }) do |f| %>
-  <%= hidden_field_tag :tags_query, params[:q] %>
-  <%= hidden_field_tag :pool_id, params[:pool_id] %>
-  <%= hidden_field_tag :favgroup_id, params[:favgroup_id] %>
+  <%= f.input :tags_query, as: :hidden, input_html: { id: nil, name: "tags_query", value: params[:q] } %>
+  <%= f.input :pool_id, as: :hidden, input_html: { id: nil, name: "pool_id", value: params[:pool_id] } %>
+  <%= f.input :favgroup_id, as: :hidden, input_html: { id: nil, name: "favgroup_id", value: params[:favgroup_id] } %>
   <%= f.input :old_tag_string, as: :hidden, input_html: { value: post.tag_string } %>
   <%= f.input :old_parent_id, as: :hidden, input_html: { value: post.parent_id } %>
   <%= f.input :old_source, as: :hidden, input_html: { value: post.source } %>
@@ -21,13 +21,13 @@
     <%= f.input :rating, collection: [["Explicit", "e"], ["Questionable", "q"], ["Safe", "s"]], as: :radio_buttons, boolean_style: :inline %>
   <% end %>
 
-  <fieldset class="inline-fieldset">
+  <fieldset class="inline-fieldset post_has_embedded_notes_fieldset">
     <label>Notes</label>
     <%= f.input :has_embedded_notes, label: "Embed notes", as: :boolean, boolean_style: :inline, disabled: post.is_note_locked? %>
   </fieldset>
 
   <% if policy(post).can_lock_rating? || policy(post).can_lock_notes? || policy(post).can_lock_status? %>
-    <fieldset class="inline-fieldset">
+    <fieldset class="inline-fieldset post_lock_fieldset">
       <label>Lock</label>
 
       <% if policy(post).can_lock_rating? %>
@@ -42,27 +42,29 @@
     </fieldset>
   <% end %>
 
-  <%= f.input :parent_id, label: "Parent", input_html: { size: 60 }, as: :string %>
-  <%= f.input :source, input_html: { size: 60 } %>
+  <%= f.input :parent_id, label: "Parent", as: :string %>
+  <%= f.input :source %>
 
   <div class="input fixed-width-container" id="tags-container">
     <div class="header">
       <%= f.label :tag_string, "Tags" %>
 
-      <span class="options">
-        <i id="face" class="fas"></i>
-        <span class="count"></span>
-        <a href="javascript:void(0)"><i id="open-edit-dialog" class="fas fa-arrows-alt" title="detach" data-shortcut="shift+e"></i></a>
+      <span data-tag-counter data-for="#post_tag_string">
+        <span class="tag-count"></span>
+        <img>
       </span>
+      <a href="javascript:void(0)">
+        <%= external_link_icon(id: "open-edit-dialog", "data-shortcut": "shift+e") %>
+      </a>
     </div>
 
     <div>
-      <%= f.input :tag_string, label: false, input_html: { size: "60x5", spellcheck: false, "data-autocomplete": "tag-edit", "data-shortcut": "e", value: post.presenter.split_tag_list_text + " " } %>
+      <%= f.input :tag_string, label: false, hint: "Ctrl+Enter to submit", input_html: { "data-autocomplete": "tag-edit", "data-shortcut": "e", value: post.presenter.split_tag_list_text + " " } %>
     </div>
 
     <%= render "related_tags/buttons" %>
   </div>
-  
+
   <div class="input">
     <%= f.submit "Submit" %>
   </div>

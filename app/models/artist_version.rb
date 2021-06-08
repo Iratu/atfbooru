@@ -5,11 +5,19 @@ class ArtistVersion < ApplicationRecord
   belongs_to_updater
   belongs_to :artist
 
+  def self.visible(user)
+    if policy(user).can_view_banned?
+      all
+    else
+      where(artist: Artist.unbanned)
+    end
+  end
+
   module SearchMethods
     def search(params)
-      q = super
-
-      q = q.search_attributes(params, :updater, :is_deleted, :is_banned, :artist_id, :name, :group_name)
+      q = search_attributes(params, :id, :created_at, :updated_at, :is_deleted, :is_banned, :name, :group_name, :urls, :other_names, :updater, :artist)
+      q = q.text_attribute_matches(:name, params[:name_matches])
+      q = q.text_attribute_matches(:group_name, params[:group_name_matches])
 
       if params[:order] == "name"
         q = q.order("artist_versions.name").default_order

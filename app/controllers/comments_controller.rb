@@ -1,7 +1,6 @@
 class CommentsController < ApplicationController
   respond_to :html, :xml, :json, :atom
-  respond_to :js, only: [:new, :destroy, :undelete]
-  skip_before_action :api_check
+  respond_to :js, only: [:new, :update, :destroy, :undelete]
 
   def index
     params[:group_by] ||= "comment" if params[:search].present?
@@ -32,7 +31,7 @@ class CommentsController < ApplicationController
   def update
     @comment = authorize Comment.find(params[:id])
     @comment.update(permitted_attributes(@comment))
-    respond_with(@comment, :location => post_path(@comment.post_id))
+    respond_with(@comment)
   end
 
   def create
@@ -82,7 +81,8 @@ class CommentsController < ApplicationController
   end
 
   def index_by_post
-    @posts = Post.where("last_comment_bumped_at IS NOT NULL").tag_match(params[:tags]).reorder("last_comment_bumped_at DESC NULLS LAST").paginate(params[:page], :limit => 5, :search_count => params[:search])
+    @limit = params.fetch(:limit, 20)
+    @posts = Post.where("last_comment_bumped_at IS NOT NULL").user_tag_match(params[:tags]).reorder("last_comment_bumped_at DESC NULLS LAST").paginate(params[:page], limit: @limit, search_count: params[:search])
 
     if request.format.html?
       @posts = @posts.includes(comments: [:creator])
@@ -97,6 +97,7 @@ class CommentsController < ApplicationController
 
     if request.format.atom?
       @comments = @comments.includes(:creator, :post)
+      @comments = @comments.select { |comment| comment.post.visible? }
     elsif request.format.html?
       @comments = @comments.includes(:creator, :updater, post: :uploader)
       @comments = @comments.includes(:votes) if CurrentUser.is_member?

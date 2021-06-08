@@ -78,24 +78,20 @@ module PostSets
       end
 
       context "a set for the 'a b c' tag query" do
-        setup do
-          @set = PostSets::Post.new("a b c")
-        end
-
         context "for a non-gold user" do
           should "fail" do
-            assert_raises(::Post::SearchError) do
+            @set = PostSets::Post.new("a b c", user: create(:user))
+
+            assert_raises(PostQueryBuilder::TagLimitError) do
               @set.posts
             end
           end
         end
 
         context "for a gold user" do
-          setup do
-            CurrentUser.user = FactoryBot.create(:gold_user)
-          end
-
           should "pass" do
+            @set = PostSets::Post.new("a b c", user: create(:gold_user))
+
             assert_nothing_raised do
               @set.posts
             end
@@ -133,6 +129,7 @@ module PostSets
 
         context "that has a matching artist" do
           setup do
+            Tag.find_by(name: "a").update!(category: Tag.categories.artist)
             @artist = FactoryBot.create(:artist, :name => "a")
           end
 

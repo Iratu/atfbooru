@@ -39,7 +39,7 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
     context "on api authentication" do
       setup do
         @user = create(:user, password: "password")
-        @api_key = ApiKey.generate!(@user)
+        @api_key = create(:api_key, user: @user)
 
         ActionController::Base.allow_forgery_protection = true
       end
@@ -52,7 +52,20 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
         should "succeed for api key matches" do
           basic_auth_string = "Basic #{::Base64.encode64("#{@user.name}:#{@api_key.key}")}"
           get edit_user_path(@user), headers: { HTTP_AUTHORIZATION: basic_auth_string }
+
           assert_response :success
+          assert_equal(1, @api_key.reload.uses)
+          assert_not_nil(@api_key.reload.last_used_at)
+        end
+
+        should "succeed when the user has multiple api keys" do
+          @api_key2 = create(:api_key, user: @user)
+          basic_auth_string = "Basic #{::Base64.encode64("#{@user.name}:#{@api_key2.key}")}"
+          get edit_user_path(@user), headers: { HTTP_AUTHORIZATION: basic_auth_string }
+
+          assert_response :success
+          assert_equal(1, @api_key2.reload.uses)
+          assert_not_nil(@api_key2.reload.last_used_at)
         end
 
         should "fail for api key mismatches" do
@@ -73,7 +86,19 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
       context "using the api_key parameter" do
         should "succeed for api key matches" do
           get edit_user_path(@user), params: { login: @user.name, api_key: @api_key.key }
+
           assert_response :success
+          assert_equal(1, @api_key.reload.uses)
+          assert_not_nil(@api_key.reload.last_used_at)
+        end
+
+        should "succeed when the user has multiple api keys" do
+          @api_key2 = create(:api_key, user: @user)
+          get edit_user_path(@user), params: { login: @user.name, api_key: @api_key2.key }
+
+          assert_response :success
+          assert_equal(1, @api_key2.reload.uses)
+          assert_not_nil(@api_key2.reload.last_used_at)
         end
 
         should "fail for api key mismatches" do
@@ -92,6 +117,61 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
             put user_path(@user), params: { login: @user.name, api_key: @api_key.key, user: { enable_safe_mode: "true" } }, as: :json
             assert_response :success
           end
+        end
+      end
+
+      context "for an API key with restrictions" do
+        should "restrict requests to the permitted IP addresses" do
+          @api_key = create(:api_key, permitted_ip_addresses: ["192.168.0.1", "10.0.0.1/24", "2600::1/64"])
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("192.168.0.1")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response :success
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("10.0.0.42")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response :success
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("2600::1234:0:0:1")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response :success
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("127.0.0.2")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response 403
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("10.0.1.0")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response 403
+
+          ActionDispatch::Request.any_instance.stubs(:remote_ip).returns("2600:dead:beef::1")
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response 403
+
+          assert_equal(6, @api_key.reload.uses)
+          assert_equal("2600:dead:beef::1", @api_key.reload.last_ip_address.to_s)
+          assert_not_nil(@api_key.reload.last_used_at)
+        end
+
+        should "restrict requests to the permitted endpoints" do
+          @post = create(:post)
+          @api_key = create(:api_key, permissions: ["posts:index", "posts:show"])
+
+          get posts_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response :success
+
+          get post_path(@post), params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response :success
+
+          get tags_path, params: { login: @api_key.user.name, api_key: @api_key.key }
+          assert_response 403
+
+          put post_path(@post), params: { login: @api_key.user.name, api_key: @api_key.key, post: { rating: "s" }}
+          assert_response 403
+
+          assert_equal(4, @api_key.reload.uses)
+          assert_equal("127.0.0.1", @api_key.reload.last_ip_address.to_s)
+          assert_not_nil(@api_key.reload.last_used_at)
         end
       end
 
@@ -147,7 +227,7 @@ class ApplicationControllerTest < ActionDispatch::IntegrationTest
       should "fail with a 429 error" do
         user = create(:user)
         post = create(:post, rating: "s")
-        TokenBucket.any_instance.stubs(:throttled?).returns(true)
+        RateLimit.any_instance.stubs(:limited?).returns(true)
 
         put_auth post_path(post), user, params: { post: { rating: "e" } }
 

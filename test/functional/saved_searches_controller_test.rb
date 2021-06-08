@@ -5,6 +5,7 @@ class SavedSearchesControllerTest < ActionDispatch::IntegrationTest
     setup do
       @user = create(:user)
       @saved_search = create(:saved_search, user: @user)
+      SavedSearch.stubs(:redis).returns(MockRedis.new)
     end
 
     context "index action" do
@@ -12,13 +13,6 @@ class SavedSearchesControllerTest < ActionDispatch::IntegrationTest
         get_auth saved_searches_path, @user
         assert_response :success
         assert_select "#saved-search-#{@saved_search.id}"
-      end
-    end
-
-    context "labels action" do
-      should "render" do
-        get_auth labels_saved_searches_path, @user, as: :json
-        assert_response :success
       end
     end
 

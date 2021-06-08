@@ -14,11 +14,11 @@ Post.SWIPE_VELOCITY = 0.6;
 Post.MAX_RECOMMENDATIONS = 45; // 3 rows of 9 posts at 1920x1080.
 Post.LOW_TAG_COUNT = 10;
 Post.HIGH_TAG_COUNT = 20;
+Post.EDIT_DIALOG_WIDTH = 720;
 
 Post.initialize_all = function() {
 
   if ($("#c-posts").length) {
-    this.initialize_shortcuts();
     this.initialize_saved_searches();
   }
 
@@ -35,6 +35,7 @@ Post.initialize_all = function() {
     this.initialize_post_image_resize_links();
     this.initialize_recommended();
     this.initialize_ugoira_player();
+    this.initialize_ruffle_player();
   }
 
   if ($("#c-posts #a-show, #c-uploads #a-new").length) {
@@ -42,8 +43,6 @@ Post.initialize_all = function() {
   }
 
   var $fields_multiple = $('[data-autocomplete="tag-edit"]');
-  $fields_multiple.on("keypress.danbooru", Post.update_tag_count);
-  $fields_multiple.on("click", Post.update_tag_count);
 
   $(window).on('danbooru:initialize_saved_seraches', () => {
     Post.initialize_saved_searches();
@@ -105,23 +104,20 @@ Post.open_edit_dialog = function() {
   $("#post-edit-link").parent("li").addClass("active");
 
   var $tag_string = $("#post_tag_string,#upload_tag_string");
-  $("div.input").has($tag_string).prevAll().hide();
   $("#open-edit-dialog").hide();
 
   var dialog = $("<div/>").attr("id", "edit-dialog");
   $("#form").appendTo(dialog);
   dialog.dialog({
     title: "Edit tags",
-    width: $(window).width() * 0.6,
+    width: Post.EDIT_DIALOG_WIDTH,
     position: {
       my: "right",
       at: "right-20",
       of: window
     },
     drag: function(e, ui) {
-      if (CurrentUser.data("enable-auto-complete")) {
-        $tag_string.data("uiAutocomplete").close();
-      }
+      $tag_string.data("uiAutocomplete").close();
     },
     close: Post.close_edit_dialog
   });
@@ -179,57 +175,12 @@ Post.swipe_prev = function(e) {
   e.preventDefault();
 }
 
-Post.nav_prev = function(e) {
-  var href = "";
-
-  if ($("#search-seq-nav").length) {
-    href = $("#search-seq-nav a[rel~=prev]").attr("href");
-    if (href) {
-      location.href = href;
-    }
-  } else if ($(".paginator a[rel~=prev]").length) {
-    location.href = $("a[rel~=prev]").attr("href");
-  } else {
-    href = $("#pool-nav li[data-selected=true] a[rel=prev], #favgroup-nav li[data-selected=true] a[rel=prev]").attr("href");
-    if (href) {
-      location.href = href;
-    }
-  }
-
-  e.preventDefault();
-}
-
-Post.nav_next = function(e) {
-  var href = "";
-
-  if ($("#search-seq-nav").length) {
-    href = $("#search-seq-nav a[rel~=next]").attr("href");
-    location.href = href;
-  } else if ($(".paginator a[rel~=next]").length) {
-    location.href = $(".paginator a[rel~=next]").attr("href");
-  } else {
-    href = $("#pool-nav li[data-selected=true] a[rel=next], #favgroup-nav li[data-selected=true] a[rel=next]").attr("href");
-    if (href) {
-      location.href = href;
-    }
-  }
-
-  e.preventDefault();
-}
-
 Post.swipe_next = function(e) {
   if ($(".paginator a[rel~=next ]").length) {
     location.href = $(".paginator a[rel~=next]").attr("href");
   }
 
   e.preventDefault();
-}
-
-Post.initialize_shortcuts = function() {
-  if ($("#a-show").length) {
-    Utility.keydown("a", "prev_page", Post.nav_prev);
-    Utility.keydown("d", "next_page", Post.nav_next);
-  }
 }
 
 Post.initialize_links = function() {
@@ -300,42 +251,44 @@ Post.initialize_favlist = function() {
   });
 }
 
-Post.view_original = function(e) {
+Post.view_original = function(e = null) {
   if (Utility.test_max_width(660)) {
     // Do the default behavior (navigate to image)
     return;
   }
 
   var $image = $("#image");
+  var $post = $(".image-container");
   $image.attr("src", $(".image-view-original-link").attr("href"));
   $image.css("filter", "blur(8px)");
-  $image.width($image.data("original-width"));
-  $image.height($image.data("original-height"));
+  $image.width($post.data("width"));
+  $image.height($post.data("height"));
   $image.on("load.danbooru", function() {
     $image.css("animation", "sharpen 0.5s forwards");
   });
   Note.Box.scale_all();
   $("body").attr("data-post-current-image-size", "original");
-  return false;
+  e?.preventDefault();
 }
 
-Post.view_large = function(e) {
+Post.view_large = function(e = null) {
   if (Utility.test_max_width(660)) {
     // Do the default behavior (navigate to image)
     return;
   }
 
   var $image = $("#image");
+  var $post = $(".image-container");
   $image.attr("src", $(".image-view-large-link").attr("href"));
   $image.css("filter", "blur(8px)");
-  $image.width($image.data("large-width"));
-  $image.height($image.data("large-height"));
+  $image.width($post.data("large-width"));
+  $image.height($post.data("large-height"));
   $image.on("load.danbooru", function() {
     $image.css("animation", "sharpen 0.5s forwards");
   });
   Note.Box.scale_all();
   $("body").attr("data-post-current-image-size", "large");
-  return false;
+  e?.preventDefault();
 }
 
 Post.toggle_fit_window = function(e) {
@@ -400,7 +353,6 @@ Post.initialize_post_sections = function() {
       $("#post_tag_string").focus().selectEnd().height($("#post_tag_string")[0].scrollHeight);
       $("#recommended").hide();
       $(document).trigger("danbooru:open-post-edit-tab");
-      Post.update_tag_count({target: $("#post_tag_string")});
     } else if (e.target.hash === "#recommended") {
       $("#comments").hide();
       $("#edit").hide();
@@ -429,6 +381,19 @@ Post.initialize_ugoira_player = function() {
   }
 };
 
+Post.initialize_ruffle_player = function() {
+  if (!window.RufflePlayer) {
+    return;
+  }
+
+  let ruffle = window.RufflePlayer.newest();
+  let player = ruffle.createPlayer();
+  let $container = $(".ruffle-container[data-swf]");
+  let src = $container.attr("data-swf");
+  $container.get(0).appendChild(player);
+  player.load(src);
+};
+
 Post.resize_ugoira_controls = function() {
   var $img = $("#image");
   var width = Math.max($img.width(), 350);
@@ -445,6 +410,7 @@ Post.show_pending_update_notice = function() {
 }
 
 Post.tag = function(post_id, tags) {
+  tags ??= "";
   const tag_string = (Array.isArray(tags) ? tags.join(" ") : String(tags));
   Post.update(post_id, "tag-script", { post: { old_tag_string: "", tag_string: tag_string }});
 }
@@ -458,7 +424,7 @@ Post.update = async function(post_id, mode, params) {
 
     Post.pending_update_count -= 1;
     Post.show_pending_update_notice();
-  } catch(err) {
+  } catch (err) {
     Post.pending_update_count -= 1;
   }
 }
@@ -510,32 +476,6 @@ Post.initialize_recommended = function() {
     $("#recommended").removeClass("loading-recommended-posts");
   });
 };
-
-Post.update_tag_count = function(event) {
-  let string = "0 tags";
-  let count = 0;
-
-  if (event) {
-    let tags = Utility.regexp_split($(event.target).val());
-    if (tags.length) {
-      count = tags.length;
-      string = (count === 1) ? (count + " tag") : (count + " tags")
-    }
-  }
-
-  $("#tags-container .count").html(string);
-  let klass = "";
-
-  if (count < Post.LOW_TAG_COUNT) {
-    klass = "frown";
-  } else if (count >= Post.LOW_TAG_COUNT && count < Post.HIGH_TAG_COUNT) {
-    klass = "meh";
-  } else {
-    klass = "smile";
-  }
-
-  $("#tags-container .options #face").removeClass().addClass(`far fa-${klass}`);
-}
 
 $(document).ready(function() {
   Post.initialize_all();

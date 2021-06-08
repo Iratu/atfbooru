@@ -1,32 +1,28 @@
 module PostsHelper
-  def post_previews_html(posts, **options)
-    posts.map do |post|
-      PostPresenter.preview(post, **options)
-    end.join("").html_safe
-  end
-
-  def post_search_counts_enabled?
-    Danbooru.config.enable_post_search_counts && Danbooru.config.reportbooru_server.present? && Danbooru.config.reportbooru_key.present?
+  def reportbooru_enabled?
+    Danbooru.config.reportbooru_server.present? && Danbooru.config.reportbooru_key.present?
   end
 
   def discover_mode?
     params[:tags] =~ /order:rank/ || params[:action] =~ /searches|viewed/
   end
 
-  def missed_post_search_count_js(post_set)
-    tags = post_set.query.normalize_query
+  def missed_post_search_count_js(tags)
+    return unless reportbooru_enabled?
+
     sig = generate_reportbooru_signature(tags)
     render "posts/partials/index/missed_search_count", sig: sig
   end
 
-  def post_search_count_js(post_set)
-    tags = post_set.query.normalize_query
+  def post_search_count_js(tags)
+    return unless reportbooru_enabled?
+
     sig = generate_reportbooru_signature("ps-#{tags}")
     render "posts/partials/index/search_count", sig: sig
   end
 
   def post_view_count_js
-    return unless post_search_counts_enabled?
+    return unless reportbooru_enabled?
 
     msg = generate_reportbooru_signature(params[:id])
     render "posts/partials/show/view_count", msg: msg
@@ -46,21 +42,7 @@ module PostsHelper
     end
   end
 
-  def post_favlist(post)
-    post.favorited_users.reverse_each.map {|user| link_to_user(user)}.join(", ").html_safe
-  end
-
-  def is_pool_selected?(pool)
-    return false if params.key?(:q)
-    return false if params.key?(:favgroup_id)
-    return false if !params.key?(:pool_id)
-    return params[:pool_id].to_i == pool.id
-  end
-
-  private
-
-  def nav_params_for(page)
-    query_params = params.except(:controller, :action, :id).merge(page: page).permit!
-    { params: query_params }
+  def is_danbirthday?(post)
+    post.id == 1 && post.created_at.strftime("%m-%d") == Time.zone.today.strftime("%m-%d")
   end
 end

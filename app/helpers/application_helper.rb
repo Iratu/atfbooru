@@ -92,33 +92,28 @@ module ApplicationHelper
     DText.strip_dtext(text)
   end
 
-  def error_messages_for(instance_name)
-    instance = instance_variable_get("@#{instance_name}")
-
-    if instance&.errors&.any?
-      %{<div class="error-messages ui-state-error ui-corner-all"><strong>Error</strong>: #{instance.__send__(:errors).full_messages.join(", ")}</div>}.html_safe
-    else
-      ""
-    end
-  end
-
   def time_tag(content, time, **options)
     datetime = time.strftime("%Y-%m-%dT%H:%M%:z")
 
     tag.time content || datetime, datetime: datetime, title: time.to_formatted_s, **options
   end
 
-  def humanized_duration(from, to)
-    if to - from > 10.years
-      duration = "forever"
+  def humanized_duration(duration)
+    if duration >= 100.years
+      "forever"
     else
-      duration = distance_of_time_in_words(from, to)
+      duration.inspect
     end
+  end
 
-    datetime = from.iso8601 + "/" + to.iso8601
-    title = "#{from.strftime("%Y-%m-%d %H:%M")} to #{to.strftime("%Y-%m-%d %H:%M")}"
-
-    raw content_tag(:time, duration, datetime: datetime, title: title)
+  def humanized_number(number)
+    if number >= 10_000
+      "#{number / 1_000}k"
+    elsif number >= 1_000
+      "%.1fk" % (number / 1_000.0)
+    else
+      number.to_s
+    end
   end
 
   def time_ago_in_words_tagged(time, compact: false)
@@ -162,8 +157,10 @@ module ApplicationHelper
     end
   end
 
-  def link_to_ip(ip)
-    link_to ip, ip_addresses_path(search: { ip_addr: ip, group_by: "user" })
+  def link_to_ip(ip, shorten: false, **options)
+    ip_addr = IPAddr.new(ip.to_s)
+    ip_addr.prefix = 64 if ip_addr.ipv6? && shorten
+    link_to ip_addr.to_s, ip_addresses_path(search: { ip_addr: ip, group_by: "user" }), **options
   end
 
   def link_to_search(search)
@@ -183,15 +180,17 @@ module ApplicationHelper
     to_sentence(links, **options)
   end
 
-  def link_to_user(user)
+  def link_to_user(user, text = nil)
     return "anonymous" if user.blank?
 
-    user_class = "user-#{user.level_string.downcase}"
+    user_class = "user user-#{user.level_string.downcase}"
     user_class += " user-post-approver" if user.can_approve_posts?
     user_class += " user-post-uploader" if user.can_upload_free?
     user_class += " user-banned" if user.is_banned?
-    user_class += " with-style" if CurrentUser.user.style_usernames?
-    link_to(user.pretty_name, user_path(user), :class => user_class)
+
+    text = user.pretty_name if text.blank?
+    data = { "user-id": user.id, "user-name": user.name, "user-level": user.level }
+    link_to(text, user, class: user_class, data: data)
   end
 
   def mod_link_to_user(user, positive_or_negative)
@@ -217,21 +216,8 @@ module ApplicationHelper
     tag.div(text, class: "prose", **options)
   end
 
-  def dtext_field(object, name, options = {})
-    options[:name] ||= name.capitalize
-    options[:input_id] ||= "#{object}_#{name}"
-    options[:input_name] ||= "#{object}[#{name}]"
-    options[:value] ||= instance_variable_get("@#{object}").try(name)
-    options[:preview_id] ||= "dtext-preview"
-    options[:classes] ||= ""
-    options[:hint] ||= ""
-    options[:type] ||= "text"
-
-    render "dtext/form", options
-  end
-
-  def dtext_preview_button(object, name, input_id: "#{object}_#{name}", preview_id: "dtext-preview")
-    tag.input value: "Preview", type: "button", class: "dtext-preview-button", "data-input-id": input_id, "data-preview-id": preview_id
+  def dtext_preview_button(preview_field)
+    tag.input value: "Preview", type: "button", class: "dtext-preview-button", "data-preview-field": preview_field
   end
 
   def quick_search_form_for(attribute, url, name, autocomplete: nil, redirect: false, &block)
@@ -255,18 +241,25 @@ module ApplicationHelper
   def edit_form_for(model, **options, &block)
     options[:html] = { autocomplete: "off", **options[:html].to_h }
     options[:authenticity_token] = true if options[:remote] == true
-    simple_form_for(model, **options, &block)
+
+    simple_form_for(model, **options) do |form|
+      if model.try(:errors).try(:any?)
+        concat tag.div(model.errors.full_messages.join("; "), class: "notice notice-error notice-small")
+      end
+
+      block.call(form)
+    end
   end
 
-  def table_for(*args, **options, &block)
-    table = TableBuilder.new(*args, **options, &block)
+  def table_for(...)
+    table = TableBuilder.new(...)
     render "table_builder/table", table: table
   end
 
   def body_attributes(user, params, current_item = nil)
     current_user_data_attributes = data_attributes_for(user, "current-user", current_user_attributes)
 
-    if current_item.present? && current_item.respond_to?(:html_data_attributes) && current_item.respond_to?(:model_name)
+    if !current_item.nil? && current_item.respond_to?(:html_data_attributes) && current_item.respond_to?(:model_name)
       model_name = current_item.model_name.singular.dasherize
       model_attributes = current_item.html_data_attributes
       current_item_data_attributes = data_attributes_for(current_item, model_name, model_attributes)
@@ -278,12 +271,14 @@ module ApplicationHelper
     {
       lang: "en",
       class: "c-#{controller_param} a-#{action_param}",
+      spellcheck: "false",
       data: {
         controller: controller_param,
         action: action_param,
         layout: controller.class.send(:_layout),
+        "current-user-ip-addr": request.remote_ip,
         **current_user_data_attributes,
-        **current_item_data_attributes.to_h
+        **current_item_data_attributes.to_h,
       }
     }
   end
@@ -292,9 +287,9 @@ module ApplicationHelper
     %i[
       id name level level_string theme always_resize_images can_upload_free
       can_approve_posts disable_categorized_saved_searches
-      disable_mobile_gestures disable_post_tooltips enable_auto_complete
-      enable_post_navigation enable_safe_mode hide_deleted_posts
-      show_deleted_children style_usernames default_image_size
+      disable_mobile_gestures disable_post_tooltips enable_safe_mode
+      hide_deleted_posts show_deleted_children style_usernames
+      default_image_size
     ] + User::Roles.map { |role| :"is_#{role}?" }
   end
 
@@ -350,6 +345,23 @@ module ApplicationHelper
     elsif content_for(:meta_description).present?
       content_for(:meta_description)
     end
+  end
+
+  def canonical_url(url = nil)
+    if url.present?
+      content_for(:canonical_url) { url }
+    elsif content_for(:canonical_url).present?
+      content_for(:canonical_url)
+    else
+      request_params = request.params.sort.to_h.with_indifferent_access
+      request_params.delete(:page) if request_params[:page].to_i == 1
+      request_params.delete(:limit)
+      url_for(**request_params, host: Danbooru.config.hostname, only_path: false)
+    end
+  end
+
+  def noindex
+    content_for(:html_header, tag.meta(name: "robots", content: "noindex"))
   end
 
   def atom_feed_tag(title, url = {})

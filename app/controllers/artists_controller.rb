@@ -3,13 +3,11 @@ class ArtistsController < ApplicationController
 
   def new
     @artist = authorize Artist.new_with_defaults(permitted_attributes(Artist))
-    @artist.build_wiki_page if @artist.wiki_page.nil?
     respond_with(@artist)
   end
 
   def edit
     @artist = authorize Artist.find(params[:id])
-    @artist.build_wiki_page if @artist.wiki_page.nil?
     respond_with(@artist)
   end
 
@@ -32,7 +30,7 @@ class ArtistsController < ApplicationController
   def index
     # XXX
     params[:search][:name] = params.delete(:name) if params[:name]
-    @artists = authorize Artist.paginated_search(params)
+    @artists = authorize Artist.visible(CurrentUser.user).paginated_search(params)
     @artists = @artists.includes(:urls, :tag) if request.format.html?
 
     respond_with(@artists)

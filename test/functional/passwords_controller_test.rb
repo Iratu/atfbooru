@@ -20,6 +20,7 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
         assert_redirected_to @user
         assert_equal(false, @user.reload.authenticate_password("12345"))
         assert_equal(@user, @user.authenticate_password("abcde"))
+        assert_equal(true, @user.user_events.password_change.exists?)
       end
 
       should "update the password when given a valid login key" do
@@ -29,6 +30,25 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
         assert_redirected_to @user
         assert_equal(false, @user.reload.authenticate_password("12345"))
         assert_equal(@user, @user.authenticate_password("abcde"))
+        assert_equal(true, @user.user_events.password_change.exists?)
+      end
+
+      should "allow the site owner to change the password of other users" do
+        @owner = create(:owner_user)
+        put_auth user_password_path(@user), @owner, params: { user: { password: "abcde", password_confirmation: "abcde" } }
+
+        assert_redirected_to @user
+        assert_equal(false, @user.reload.authenticate_password("12345"))
+        assert_equal(@user, @user.authenticate_password("abcde"))
+      end
+
+      should "not allow non-owners to change the password of other users" do
+        @admin = create(:admin_user)
+        put_auth user_password_path(@user), @admin, params: { user: { old_password: "12345", password: "abcde", password_confirmation: "abcde" } }
+
+        assert_response 403
+        assert_equal(@user, @user.reload.authenticate_password("12345"))
+        assert_equal(false, @user.authenticate_password("abcde"))
       end
 
       should "not update the password when given an invalid old password" do
@@ -37,6 +57,7 @@ class PasswordsControllerTest < ActionDispatch::IntegrationTest
         assert_response :success
         assert_equal(@user, @user.reload.authenticate_password("12345"))
         assert_equal(false, @user.authenticate_password("abcde"))
+        assert_equal(false, @user.user_events.password_change.exists?)
       end
 
       should "not update the password when password confirmation fails for the new password" do

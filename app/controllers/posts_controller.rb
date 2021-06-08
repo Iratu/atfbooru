@@ -12,6 +12,7 @@ class PostsController < ApplicationController
       tag_query = params[:tags] || params.dig(:post, :tags)
       @post_set = PostSets::Post.new(tag_query, params[:page], params[:limit], random: params[:random], format: params[:format])
       @posts = authorize @post_set.posts, policy_class: PostPolicy
+      @post_set.log!
       respond_with(@posts) do |format|
         format.atom
       end
@@ -22,11 +23,6 @@ class PostsController < ApplicationController
     @post = authorize Post.find(params[:id])
 
     if request.format.html?
-      @comments = @post.comments
-      @comments = @comments.includes(:creator)
-      @comments = @comments.includes(:votes) if CurrentUser.is_member?
-      @comments = @comments.visible(CurrentUser.user)
-
       include_deleted = @post.is_deleted? || (@post.parent_id.present? && @post.parent.is_deleted?) || CurrentUser.user.show_deleted_children?
       @sibling_posts = @post.parent.present? ? @post.parent.children : Post.none
       @sibling_posts = @sibling_posts.undeleted unless include_deleted
@@ -56,6 +52,18 @@ class PostsController < ApplicationController
     respond_with_post_after_update(@post)
   end
 
+  def destroy
+    @post = authorize Post.find(params[:id])
+
+    if params[:commit] == "Delete"
+      move_favorites = params.dig(:post, :move_favorites).to_s.truthy?
+      @post.delete!(params.dig(:post, :reason), move_favorites: move_favorites, user: CurrentUser.user)
+      flash[:notice] = "Post deleted"
+    end
+
+    respond_with_post_after_update(@post)
+  end
+
   def revert
     @post = authorize Post.find(params[:id])
     @version = @post.versions.find(params[:version_id])
@@ -80,7 +88,7 @@ class PostsController < ApplicationController
   end
 
   def random
-    @post = Post.tag_match(params[:tags]).random
+    @post = Post.user_tag_match(params[:tags]).random(1).first
     raise ActiveRecord::RecordNotFound if @post.nil?
     authorize @post
     respond_with(@post) do |format|

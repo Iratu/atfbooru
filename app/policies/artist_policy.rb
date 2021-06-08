@@ -11,8 +11,12 @@ class ArtistPolicy < ApplicationPolicy
     unbanned?
   end
 
+  def can_view_banned?
+    !user.is_anonymous?
+  end
+
   def permitted_attributes
-    [:name, :other_names, :other_names_string, :group_name, :url_string, :is_deleted, { wiki_page_attributes: [:id, :body] }]
+    [:name, :other_names, :other_names_string, :group_name, :url_string, :is_deleted]
   end
 
   def permitted_attributes_for_new

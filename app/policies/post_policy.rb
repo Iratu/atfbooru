@@ -27,8 +27,16 @@ class PostPolicy < ApplicationPolicy
     user.is_approver? && record.fav_count > 0 && record.parent_id.present?
   end
 
+  def regenerate?
+    user.is_moderator?
+  end
+
   def delete?
     user.is_approver? && !record.is_deleted?
+  end
+
+  def destroy?
+    delete?
   end
 
   def ban?
@@ -44,11 +52,7 @@ class PostPolicy < ApplicationPolicy
   end
 
   def visible?
-    record.visible?
-  end
-
-  def can_view_uploader?
-    user.is_approver?
+    record.visible?(user)
   end
 
   def can_lock_rating?
@@ -84,5 +88,19 @@ class PostPolicy < ApplicationPolicy
       (:is_note_locked if can_lock_notes?),
       (:is_status_locked if can_lock_status?),
     ].compact
+  end
+
+  def api_attributes
+    attributes = super
+    attributes += [:has_large, :has_visible_children]
+    attributes += TagCategory.categories.map {|x| "tag_string_#{x}".to_sym}
+    attributes += [:file_url, :large_file_url, :preview_file_url] if visible?
+    attributes -= [:id, :md5, :file_ext] if !visible?
+    attributes -= [:fav_string]
+    attributes
+  end
+
+  def html_data_attributes
+    super + [:has_large?, :current_image_size]
   end
 end

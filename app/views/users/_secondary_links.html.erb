@@ -1,7 +1,6 @@
 <% content_for(:secondary_links) do %>
   <%= quick_search_form_for(:name_matches, users_path, "users", autocomplete: "user", redirect: true) %>
   <%= subnav_link_to "Listing", users_path %>
-  <%= subnav_link_to "Search", search_users_path %>
 
   <% if CurrentUser.user.is_anonymous? %>
     <%= subnav_link_to "Sign up", new_user_path %>
@@ -16,8 +15,8 @@
 
     <% else %>
       <%= subnav_link_to "Send message", new_dmail_path(:dmail => {:to_id => @user.id}) %>
-      <% if policy(@user).reportable? %>
-        <%= subnav_link_to "Report user", new_moderation_report_path(moderation_report: { model_type: "User", model_id: @user.id }), remote: true %>
+      <% if !@user.is_platinum? %>
+        <%= subnav_link_to "Gift upgrade", new_user_upgrade_path(:user_id => @user.id) %>
       <% end %>
     <% end %>
 
@@ -26,8 +25,8 @@
     <% end %>
 
     <% if policy(Ban.new(user: @user)).create? %>
-      <% if @user.is_banned? && @user.recent_ban.present? %>
-        <%= subnav_link_to "Unban", ban_path(@user.recent_ban) %>
+      <% if @user.is_banned? && @user.active_ban.present? %>
+        <%= subnav_link_to "Unban", ban_path(@user.active_ban) %>
       <% else %>
         <%= subnav_link_to "Ban", new_ban_path(:ban => {:user_id => @user.id}) %>
       <% end %>

@@ -15,7 +15,8 @@ class PasswordResetsControllerTest < ActionDispatch::IntegrationTest
         post password_reset_path, params: { user: { name: @user.name } }
 
         assert_redirected_to new_session_path
-        assert_enqueued_email_with UserMailer, :password_reset, args: [@user]
+        assert_enqueued_email_with UserMailer, :password_reset, args: [@user], queue: "default"
+        assert_equal(true, @user.user_events.password_reset.exists?)
       end
 
       should "should fail if the user doesn't have a verified email address" do

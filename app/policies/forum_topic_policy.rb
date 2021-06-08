@@ -20,7 +20,7 @@ class ForumTopicPolicy < ApplicationPolicy
   end
 
   def mark_all_as_read?
-    user.is_member?
+    !user.is_anonymous?
   end
 
   def reply?
@@ -36,5 +36,9 @@ class ForumTopicPolicy < ApplicationPolicy
       :title, :category_id, { original_post_attributes: [:id, :body] },
       ([:is_sticky, :is_locked, :min_level] if moderate?)
     ].compact.flatten
+  end
+
+  def html_data_attributes
+    super + [:is_read?]
   end
 end

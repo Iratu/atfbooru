@@ -1,4 +1,3 @@
-import Post from './posts.js.erb'
 import Shortcuts from './shortcuts.js';
 import Utility from './utility.js';
 import Dropzone from 'dropzone';
@@ -6,16 +5,15 @@ import SparkMD5 from 'spark-md5';
 
 let Upload = {};
 
-Upload.MAX_FILE_SIZE = <%= Danbooru.config.max_file_size.to_json %> / (1024 * 1024);
+Upload.MAX_FILE_SIZE_BYTES = <%= Danbooru.config.max_file_size.to_json %>;
+Upload.MAX_FILE_SIZE = Upload.MAX_FILE_SIZE_BYTES / (1024 * 1024);
 Upload.IQDB_LIMIT = 5;
 Upload.IQDB_MIN_SIMILARITY = 50;
 Upload.IQDB_HIGH_SIMILARITY = 70;
 
 Upload.initialize_all = function() {
   if ($("#c-uploads,#c-posts").length) {
-    Utility.keydown("return", "submit", Shortcuts.submit_form, "#upload_tag_string, #post_tag_string");
-    $("#upload_source").on("change.danbooru", Upload.fetch_data_manual);
-    $(document).on("click.danbooru", "#fetch-data-manual", Upload.fetch_data_manual);
+    Utility.keydown("return", "submit", Upload.submit_form, "#upload_tag_string, #post_tag_string");
   }
 
   if ($("#c-uploads").length) {
@@ -40,6 +38,13 @@ Upload.initialize_all = function() {
   if ($("#c-uploads #a-new").length) {
     this.initialize_dropzone();
   }
+}
+
+Upload.submit_form = async function(event) {
+  event.preventDefault();
+  Utility.notice("The Enter shortcut will be removed soon. Use Ctrl+Enter instead");
+  await Utility.delay(3000);
+  Shortcuts.submit_form(event);
 }
 
 Upload.initialize_submit = function() {
@@ -143,22 +148,13 @@ Upload.toggle_size = function(e) {
 
 Upload.update_scale = function() {
   let $image = $("#image");
-  let natural_width = $image.get(0).naturalWidth;
-  let natural_height = $image.get(0).naturalHeight;
-  let scale_percentage = Math.round(100 * $image.width() / natural_width);
-  $("#upload-image-metadata-resolution").html(`(${natural_width}x${natural_height}, resized to ${scale_percentage}%)`);
-}
 
-Upload.fetch_data_manual = function(e) {
-  var url = $("#upload_source,#post_source").val();
-  var ref = $("#upload_referer_url").val();
-
-  if (/^https?:\/\//.test(url)) {
-    $("#source-info").addClass("loading");
-    $.get("/source.js", { url: url, ref: ref }).always(resp => $("#source-info").removeClass("loading"));
+  if ($image.length) {
+    let natural_width = $image.get(0).naturalWidth;
+    let natural_height = $image.get(0).naturalHeight;
+    let scale_percentage = Math.round(100 * $image.width() / natural_width);
+    $("#upload-image-metadata-resolution").html(`(${natural_width}x${natural_height}, resized to ${scale_percentage}%)`);
   }
-
-  e.preventDefault();
 }
 
 Upload.toggle_commentary = function() {

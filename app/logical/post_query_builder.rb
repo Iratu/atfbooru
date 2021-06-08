@@ -3,10 +3,15 @@ require "strscan"
 class PostQueryBuilder
   extend Memoist
 
+  class TagLimitError < StandardError; end
+
+  # How many tags a `blah*` search should match.
+  MAX_WILDCARD_TAGS = 100
+
   COUNT_METATAGS = %w[
     comment_count deleted_comment_count active_comment_count
     note_count deleted_note_count active_note_count
-    flag_count resolved_flag_count unresolved_flag_count
+    flag_count
     child_count deleted_child_count active_child_count
     pool_count deleted_pool_count active_pool_count series_pool_count collection_pool_count
     appeal_count approval_count replacement_count
@@ -53,10 +58,18 @@ class PostQueryBuilder
     COUNT_METATAG_SYNONYMS.flat_map { |str| [str, "#{str}_asc"] } +
     CATEGORY_COUNT_METATAGS.flat_map { |str| [str, "#{str}_asc"] }
 
-  attr_accessor :query_string
+  UNLIMITED_METATAGS = %w[status rating limit]
 
-  def initialize(query_string)
+  attr_reader :query_string, :current_user, :tag_limit, :safe_mode, :hide_deleted_posts
+  alias_method :safe_mode?, :safe_mode
+  alias_method :hide_deleted_posts?, :hide_deleted_posts
+
+  def initialize(query_string, current_user = User.anonymous, tag_limit: nil, safe_mode: false, hide_deleted_posts: false)
     @query_string = query_string
+    @current_user = current_user
+    @tag_limit = tag_limit
+    @safe_mode = safe_mode
+    @hide_deleted_posts = hide_deleted_posts
   end
 
   def tags_match(tags, relation)
@@ -66,13 +79,13 @@ class PostQueryBuilder
     optional_wildcard_tags, optional_tags = tags.select(&:optional).partition(&:wildcard)
     required_wildcard_tags, required_tags = tags.reject(&:negated).reject(&:optional).partition(&:wildcard)
 
-    negated_tags = TagAlias.to_aliased(negated_tags.map(&:name))
-    optional_tags = TagAlias.to_aliased(optional_tags.map(&:name))
-    required_tags = TagAlias.to_aliased(required_tags.map(&:name))
+    negated_tags = negated_tags.map(&:name)
+    optional_tags = optional_tags.map(&:name)
+    required_tags = required_tags.map(&:name)
 
-    negated_tags += negated_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name) }
-    optional_tags += optional_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name) }
-    optional_tags += required_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name) }
+    negated_tags += negated_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name).limit(MAX_WILDCARD_TAGS).pluck(:name) }
+    optional_tags += optional_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name).limit(MAX_WILDCARD_TAGS).pluck(:name) }
+    optional_tags += required_wildcard_tags.flat_map { |tag| Tag.wildcard_matches(tag.name).limit(MAX_WILDCARD_TAGS).pluck(:name) }
 
     tsquery << "!(#{negated_tags.sort.uniq.map(&:to_escaped_for_tsquery).join(" | ")})" if negated_tags.present?
     tsquery << "(#{optional_tags.sort.uniq.map(&:to_escaped_for_tsquery).join(" | ")})" if optional_tags.present?
@@ -85,8 +98,8 @@ class PostQueryBuilder
   def metatags_match(metatags, relation)
     metatags.each do |metatag|
       clause = metatag_matches(metatag.name, metatag.value, quoted: metatag.quoted)
-      clause = clause.negate if metatag.negated
-      relation = relation.and(clause)
+      clause = clause.negate_relation if metatag.negated
+      relation = relation.and_relation(clause)
     end
 
     relation
@@ -177,9 +190,9 @@ class PostQueryBuilder
     when "noteupdater"
       user_subquery_matches(NoteVersion.unscoped, value, field: :updater)
     when "upvoter", "upvote"
-      user_subquery_matches(PostVote.positive.visible(CurrentUser.user), value, field: :user)
+      user_subquery_matches(PostVote.positive.visible(current_user), value, field: :user)
     when "downvoter", "downvote"
-      user_subquery_matches(PostVote.negative.visible(CurrentUser.user), value, field: :user)
+      user_subquery_matches(PostVote.negative.visible(current_user), value, field: :user)
     when *CATEGORY_COUNT_METATAGS
       short_category = name.delete_suffix("tags")
       category = TagCategory.short_name_mapping[short_category]
@@ -248,16 +261,16 @@ class PostQueryBuilder
 
     user_subquery_matches(flags, username) do |username|
       flagger = User.find_by_name(username)
-      PostFlag.unscoped.creator_matches(flagger, CurrentUser.user)
+      PostFlag.unscoped.creator_matches(flagger, current_user)
     end
   end
 
   def saved_search_matches(label)
     case label.downcase
     when "all"
-      Post.where(id: SavedSearch.post_ids_for(CurrentUser.id))
+      Post.where(id: SavedSearch.post_ids_for(current_user.id))
     else
-      Post.where(id: SavedSearch.post_ids_for(CurrentUser.id, label: label))
+      Post.where(id: SavedSearch.post_ids_for(current_user.id, label: label))
     end
   end
 
@@ -267,8 +280,10 @@ class PostQueryBuilder
       Post.pending
     when "flagged"
       Post.flagged
+    when "appealed"
+      Post.appealed
     when "modqueue"
-      Post.pending_or_flagged
+      Post.in_modqueue
     when "deleted"
       Post.deleted
     when "banned"
@@ -276,9 +291,9 @@ class PostQueryBuilder
     when "active"
       Post.active
     when "unmoderated"
-      Post.pending_or_flagged.available_for_moderation
+      Post.in_modqueue.available_for_moderation(current_user, hidden: false)
     when "all", "any"
-      Post.all
+      Post.where("TRUE")
     else
       Post.none
     end
@@ -287,8 +302,8 @@ class PostQueryBuilder
   def disapproved_matches(query)
     if query.downcase.in?(PostDisapproval::REASONS)
       Post.where(disapprovals: PostDisapproval.where(reason: query.downcase))
-    elsif User.normalize_name(query) == CurrentUser.user.name
-      Post.where(disapprovals: PostDisapproval.where(user: CurrentUser.user))
+    elsif User.normalize_name(query) == current_user.name
+      Post.where(disapprovals: PostDisapproval.where(user: current_user))
     else
       Post.none
     end
@@ -300,6 +315,8 @@ class PostQueryBuilder
       Post.where(parent: nil)
     when "any"
       Post.where.not(parent: nil)
+    when "pending", "flagged", "appealed", "modqueue", "deleted", "banned", "active", "unmoderated"
+      Post.where.not(parent: nil).where(parent: status_matches(parent))
     when /\A\d+\z/
       Post.where(id: parent).or(Post.where(parent: parent))
     else
@@ -313,14 +330,17 @@ class PostQueryBuilder
       Post.where(has_children: false)
     when "any"
       Post.where(has_children: true)
+    when "pending", "flagged", "appealed", "modqueue", "deleted", "banned", "active", "unmoderated"
+      Post.where(has_children: true).where(children: status_matches(child))
     else
       Post.none
     end
   end
 
   def source_matches(source, quoted = false)
-    case source.downcase
-    in "none" unless quoted
+    if source.empty?
+      Post.where_like(:source, "")
+    elsif source.downcase == "none" && !quoted
       Post.where_like(:source, "")
     else
       Post.where_ilike(:source, source + "*")
@@ -362,21 +382,22 @@ class PostQueryBuilder
 
   def ordfavgroup_matches(query)
     # XXX unify with FavoriteGroup#posts
-    favgroup = FavoriteGroup.visible(CurrentUser.user).name_or_id_matches(query, CurrentUser.user)
+    favgroup = FavoriteGroup.visible(current_user).name_or_id_matches(query, current_user)
     favgroup_posts = favgroup.joins("CROSS JOIN unnest(favorite_groups.post_ids) WITH ORDINALITY AS row(post_id, favgroup_index)").select(:post_id, :favgroup_index)
     Post.joins("JOIN (#{favgroup_posts.to_sql}) favgroup_posts ON favgroup_posts.post_id = posts.id").order("favgroup_posts.favgroup_index ASC")
   end
 
   def favgroup_matches(query)
-    favgroup = FavoriteGroup.visible(CurrentUser.user).name_or_id_matches(query, CurrentUser.user)
+    favgroup = FavoriteGroup.visible(current_user).name_or_id_matches(query, current_user)
     Post.where(id: favgroup.select("unnest(post_ids)"))
   end
 
   def favorites_include(username)
     favuser = User.find_by_name(username)
 
-    if favuser.present? && Pundit.policy!([CurrentUser.user, nil], favuser).can_see_favorites?
-      tags_include("fav:#{favuser.id}")
+    if favuser.present? && Pundit.policy!(current_user, favuser).can_see_favorites?
+      favorites = Favorite.from("favorites_#{favuser.id % 100} AS favorites").where(user: favuser)
+      Post.where(id: favorites.select(:post_id))
     else
       Post.none
     end
@@ -384,7 +405,12 @@ class PostQueryBuilder
 
   def ordfav_matches(username)
     user = User.find_by_name(username)
-    favorites_include(username).joins(:favorites).merge(Favorite.for_user(user.id)).order("favorites.id DESC")
+
+    if user.present? && Pundit.policy!(current_user, user).can_see_favorites?
+      Post.joins(:favorites).merge(Favorite.for_user(user.id)).order("favorites.id DESC")
+    else
+      Post.none
+    end
   end
 
   def note_matches(query)
@@ -445,21 +471,10 @@ class PostQueryBuilder
     relation
   end
 
-  def hide_deleted_posts?
-    return false if CurrentUser.admin_mode?
-    return false if find_metatag(:status).to_s.downcase.in?(%w[deleted active any all])
-    return CurrentUser.user.hide_deleted_posts?
-  end
-
   def build
-    tag_count = terms.count { |term| !Danbooru.config.is_unlimited_tag?(term) }
-    if tag_count > Danbooru.config.tag_query_limit
-      raise ::Post::SearchError
-    end
+    validate!
 
     relation = Post.all
-    relation = relation.where(rating: 's') if CurrentUser.safe_mode?
-    relation = relation.undeleted if hide_deleted_posts?
     relation = add_joins(relation)
     relation = metatags_match(metatags, relation)
     relation = tags_match(tags, relation)
@@ -599,10 +614,10 @@ class PostQueryBuilder
         .order("contributor_fav_count DESC, posts.fav_count DESC, posts.id DESC")
 
     when "modqueue", "modqueue_desc"
-      relation = relation.left_outer_joins(:flags).order(Arel.sql("GREATEST(posts.created_at, post_flags.created_at) DESC, posts.id DESC"))
+      relation = relation.with_queued_at.order("queued_at DESC, posts.id DESC")
 
     when "modqueue_asc"
-      relation = relation.left_outer_joins(:flags).order(Arel.sql("GREATEST(posts.created_at, post_flags.created_at) ASC, posts.id ASC"))
+      relation = relation.with_queued_at.order("queued_at ASC, posts.id ASC")
 
     when "none"
       relation = relation.reorder(nil)
@@ -623,6 +638,18 @@ class PostQueryBuilder
     relation.find_ordered(ids)
   end
 
+  def validate!
+    tag_count = terms.count { |term| !is_unlimited_tag?(term) }
+
+    if tag_limit.present? && tag_count > tag_limit
+      raise TagLimitError
+    end
+  end
+
+  def is_unlimited_tag?(term)
+    term.type == :metatag && term.name.in?(UNLIMITED_METATAGS)
+  end
+
   concerning :ParseMethods do
     def scan_query
       terms = []
@@ -635,14 +662,7 @@ class PostQueryBuilder
         if scanner.scan(/(-)?(#{METATAGS.join("|")}):/io)
           operator = scanner.captures.first
           metatag = scanner.captures.second.downcase
-
-          if scanner.scan(/"(.+)"/) || scanner.scan(/'(.+)'/)
-            value = scanner.captures.first
-            quoted = true
-          else
-            value = scanner.scan(/[^ ]*/)
-            quoted = false
-          end
+          value, quoted = scan_string(scanner)
 
           if metatag.in?(COUNT_METATAG_SYNONYMS)
             metatag = metatag.singularize + "_count"
@@ -666,33 +686,42 @@ class PostQueryBuilder
       terms
     end
 
-    def split_query
-      scan_query.map do |term|
-        if term.type == :metatag && !term.negated && !term.quoted
-          "#{term.name}:#{term.value}"
-        elsif term.type == :metatag && !term.negated && term.quoted
-          "#{term.name}:\"#{term.value}\""
-        elsif term.type == :metatag && term.negated && !term.quoted
-          "-#{term.name}:#{term.value}"
-        elsif term.type == :metatag && term.negated && term.quoted
-          "-#{term.name}:\"#{term.value}\""
-        elsif term.type == :tag && term.negated
-          "-#{term.name}"
-        elsif term.type == :tag && term.optional
-          "~#{term.name}"
-        elsif term.type == :tag
-          term.name
-        end
+    def scan_string(scanner)
+      if scanner.scan(/"((?:\\"|[^"])*)"/)
+        value = scanner.captures.first.gsub(/\\(.)/) { $1 }
+        quoted = true
+      elsif scanner.scan(/'((?:\\'|[^'])*)'/)
+        value = scanner.captures.first.gsub(/\\(.)/) { $1 }
+        quoted = true
+      else
+        value = scanner.scan(/(\\ |[^ ])*/)
+        value = value.gsub(/\\ /) { " " }
+        quoted = false
       end
+
+      [value, quoted]
     end
 
-    def normalize_query(normalize_aliases: false, sort: true)
-      tags = split_query
-      tags = tags.map { |t| Tag.normalize_name(t) }
-      tags = TagAlias.to_aliased(tags) if normalize_aliases
-      tags = tags.sort if sort
-      tags = tags.uniq
-      tags.join(" ")
+    def split_query
+      terms.map do |term|
+        type, name, value = term.type, term.name, term.value
+
+        str = ""
+        str += "-" if term.negated
+        str += "~" if term.optional
+
+        if type == :tag
+          str += name
+        elsif type == :metatag && (term.quoted || value.include?(" "))
+          value = value.gsub(/\\/) { '\\\\' }
+          value = value.gsub(/"/) { '\\"' }
+          str += "#{name}:\"#{value}\""
+        elsif type == :metatag
+          str += "#{name}:#{value}"
+        end
+
+        str
+      end
     end
 
     def parse_tag_edit
@@ -719,6 +748,9 @@ class PostQueryBuilder
       when :age
         DurationParser.parse(object).ago
 
+      when :interval
+        DurationParser.parse(object)
+
       when :ratio
         object =~ /\A(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)\Z/i
 
@@ -744,6 +776,9 @@ class PostQueryBuilder
         end
 
         (size * conversion_factor).to_i
+
+      else
+        raise NotImplementedError, "unrecognized type #{type} for #{object}"
       end
     end
 
@@ -810,25 +845,126 @@ class PostQueryBuilder
     end
   end
 
+  concerning :CountMethods do
+    def fast_count(timeout: 1_000, estimate_count: true, skip_cache: false)
+      count = nil
+      count = estimated_count if estimate_count
+      count = cached_count if count.nil? && !skip_cache
+      count = exact_count(timeout) if count.nil?
+      count
+    end
+
+    def estimated_count
+      if is_empty_search?
+        estimated_row_count
+      elsif is_simple_tag?
+        Tag.find_by(name: tags.first.name).try(:post_count)
+      elsif is_metatag?(:rating)
+        estimated_row_count
+      end
+    end
+
+    def estimated_row_count
+      ExplainParser.new(build).row_count
+    end
+
+    def cached_count
+      Cache.get(count_cache_key)
+    end
+
+    def exact_count(timeout)
+      count = Post.with_timeout(timeout, nil) do
+        build.count
+      end
+
+      set_cached_count(count) if count.present?
+      count
+    rescue Post::SearchError
+      nil
+    end
+
+    def set_cached_count(count)
+      expiry = count.seconds.clamp(3.minutes, 20.hours).to_i
+      Cache.put(count_cache_key, count, expiry)
+    end
+
+    def count_cache_key
+      if is_user_dependent_search?
+        "pfc[#{current_user.id.to_i}]:#{to_s}"
+      else
+        "pfc:#{to_s}"
+      end
+    end
+
+    def is_user_dependent_search?
+      metatags.any? do |metatag|
+        metatag.name.in?(%w[upvoter upvote downvoter downvote search flagger fav ordfav favgroup ordfavgroup]) ||
+        metatag.name == "status" && metatag.value == "unmoderated" ||
+        metatag.name == "disapproved" && User.normalize_name(metatag.value) == current_user.name
+      end
+    end
+  end
+
+  concerning :NormalizationMethods do
+    def normalized_query(implicit: true, sort: true)
+      post_query = dup
+      post_query.terms.concat(implicit_metatags) if implicit
+      post_query.normalize_aliases!
+      post_query.normalize_order! if sort
+      post_query
+    end
+
+    def normalize_aliases!
+      tag_names = tags.map(&:name)
+      tag_aliases = tag_names.zip(TagAlias.to_aliased(tag_names)).to_h
+
+      terms.map! do |term|
+        term.name = tag_aliases[term.name] if term.type == :tag
+        term
+      end
+    end
+
+    def normalize_order!
+      terms.sort_by!(&:to_s).uniq!
+    end
+
+    def implicit_metatags
+      metatags = []
+      metatags << OpenStruct.new(type: :metatag, name: "rating", value: "s") if safe_mode?
+      metatags << OpenStruct.new(type: :metatag, name: "status", value: "deleted", negated: true) if hide_deleted?
+      metatags
+    end
+
+    # XXX unify with PostSets::Post#show_deleted?
+    def hide_deleted?
+      has_status_metatag = select_metatags(:status).any? { |metatag| metatag.value.downcase.in?(%w[deleted active any all unmoderated modqueue appealed]) }
+      hide_deleted_posts? && !has_status_metatag
+    end
+  end
+
   concerning :UtilityMethods do
+    def to_s
+      split_query.join(" ")
+    end
+
     def terms
-      scan_query
+      @terms ||= scan_query
     end
 
     def tags
-      scan_query.select { |term| term.type == :tag }
+      terms.select { |term| term.type == :tag }
     end
 
     def metatags
-      scan_query.select { |term| term.type == :metatag }
+      terms.select { |term| term.type == :metatag }
     end
 
     def select_metatags(*names)
       metatags.select { |term| term.name.in?(names.map(&:to_s)) }
     end
 
-    def find_metatag(metatag)
-      select_metatags(metatag).first.try(:value)
+    def find_metatag(*metatags)
+      select_metatags(*metatags).first.try(:value)
     end
 
     def has_metatag?(*metatag_names)
@@ -848,11 +984,11 @@ class PostQueryBuilder
     end
 
     def is_empty_search?
-      scan_query.size == 0
+      terms.size == 0
     end
 
     def is_single_term?
-      scan_query.size == 1
+      terms.size == 1
     end
 
     def is_single_tag?
@@ -867,7 +1003,12 @@ class PostQueryBuilder
     def is_wildcard_search?
       is_single_tag? && tags.first.wildcard
     end
+
+    def simple_tag
+      return nil if !is_simple_tag?
+      Tag.find_by_name(tags.first.name)
+    end
   end
 
-  memoize :scan_query, :split_query, :normalize_query
+  memoize :split_query
 end

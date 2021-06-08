@@ -6,30 +6,32 @@ class PostFlag < ApplicationRecord
     REJECTED = "Unapproved in three days after returning to moderation queue%"
   end
 
-  COOLDOWN_PERIOD = 3.days
-
   belongs_to :creator, class_name: "User"
   belongs_to :post
   validates :reason, presence: true, length: { in: 1..140 }
   validate :validate_creator_is_not_limited, on: :create
-  validate :validate_post
-  validates_uniqueness_of :creator_id, :scope => :post_id, :on => :create, :unless => :is_deletion, :message => "have already flagged this post"
+  validate :validate_post, on: :create
+  validates_uniqueness_of :creator_id, scope: :post_id, on: :create, unless: :is_deletion, message: "have already flagged this post"
   before_save :update_post
   attr_accessor :is_deletion
 
+  enum status: {
+    pending: 0,
+    succeeded: 1,
+    rejected: 2
+  }
+
   scope :by_users, -> { where.not(creator: User.system) }
   scope :by_system, -> { where(creator: User.system) }
-  scope :in_cooldown, -> { by_users.where("created_at >= ?", COOLDOWN_PERIOD.ago) }
-  scope :resolved, -> { where(is_resolved: true) }
-  scope :unresolved, -> { where(is_resolved: false) }
-  scope :recent, -> { where("post_flags.created_at >= ?", 1.day.ago) }
-  scope :old, -> { where("post_flags.created_at <= ?", 3.days.ago) }
+  scope :in_cooldown, -> { by_users.where("created_at >= ?", Danbooru.config.moderation_period.ago) }
+  scope :expired, -> { pending.where("post_flags.created_at < ?", Danbooru.config.moderation_period.ago) }
+  scope :active, -> { pending.or(rejected.in_cooldown) }
 
   module SearchMethods
     def creator_matches(creator, searcher)
       return none if creator.nil?
 
-      policy = Pundit.policy!([searcher, nil], PostFlag.new(creator: creator))
+      policy = Pundit.policy!(searcher, PostFlag.new(creator: creator))
 
       if policy.can_view_flagger?
         where(creator: creator).where.not(post: searcher.posts)
@@ -54,9 +56,7 @@ class PostFlag < ApplicationRecord
     end
 
     def search(params)
-      q = super
-
-      q = q.search_attributes(params, :post, :is_resolved, :reason)
+      q = search_attributes(params, :id, :created_at, :updated_at, :reason, :status, :post)
       q = q.text_attribute_matches(:reason, params[:reason_matches])
 
       if params[:creator_id].present?
@@ -75,16 +75,7 @@ class PostFlag < ApplicationRecord
     end
   end
 
-  module ApiMethods
-    def api_attributes
-      attributes = super + [:category]
-      attributes -= [:creator_id] unless Pundit.policy!([CurrentUser.user, nil], self).can_view_flagger?
-      attributes
-    end
-  end
-
   extend SearchMethods
-  include ApiMethods
 
   def category
     case reason
@@ -102,36 +93,18 @@ class PostFlag < ApplicationRecord
   end
 
   def validate_creator_is_not_limited
-    return if is_deletion
-
-    if creator.can_approve_posts?
-      # do nothing
-    elsif creator.created_at > 1.week.ago
-      errors[:creator] << "cannot flag within the first week of sign up"
-    elsif creator.is_gold? && flag_count_for_creator >= 50
-      errors[:creator] << "can flag 50 posts a day"
-    elsif !creator.is_gold? && flag_count_for_creator >= 25
-      errors[:creator] << "can flag 25 post a day"
-    end
-
-    flag = post.flags.in_cooldown.last
-    if flag.present?
-      errors[:post] << "cannot be flagged more than once every #{COOLDOWN_PERIOD.inspect} (last flagged: #{flag.created_at.to_s(:long)})"
-    end
+    errors.add(:creator, "have reached your flag limit") if creator.is_flag_limited? && !is_deletion
   end
 
   def validate_post
-    errors[:post] << "is pending and cannot be flagged" if post.is_pending? && !is_deletion
-    errors[:post] << "is locked and cannot be flagged" if post.is_status_locked?
-    errors[:post] << "is deleted" if post.is_deleted?
-  end
+    errors.add(:post, "is pending and cannot be flagged") if post.is_pending? && !is_deletion
+    errors.add(:post, "is deleted and cannot be flagged") if post.is_deleted? && !is_deletion
+    errors.add(:post, "is locked and cannot be flagged") if post.is_status_locked?
 
-  def resolve!
-    update_column(:is_resolved, true)
-  end
-
-  def flag_count_for_creator
-    creator.post_flags.recent.count
+    flag = post.flags.in_cooldown.last
+    if !is_deletion && flag.present?
+      errors.add(:post, "cannot be flagged more than once every #{Danbooru.config.moderation_period.inspect} (last flagged: #{flag.created_at.to_s(:long)})")
+    end
   end
 
   def uploader_id
