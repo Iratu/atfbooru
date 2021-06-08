@@ -1,7 +1,7 @@
 class UploadLimit
   extend Memoist
 
-  INITIAL_POINTS = 5000
+  INITIAL_POINTS = 1000
   MAXIMUM_POINTS = 10_000
   APPEAL_COST = 3
   DELETION_COST = 5
@@ -33,7 +33,7 @@ class UploadLimit
   end
 
   def upload_slots
-    upload_level + 5
+    upload_level + 50
   end
 
   def upload_level
@@ -41,11 +41,11 @@ class UploadLimit
   end
 
   def approvals_on_current_level
-    (user.upload_points - UploadLimit.level_to_points(upload_level)) / 10
+    (user.upload_points - UploadLimit.level_to_points(upload_level)) / 50
   end
 
   def approvals_for_next_level
-    UploadLimit.points_for_next_level(upload_level) / 10
+    UploadLimit.points_for_next_level(upload_level) / 5
   end
 
   def update_limit!(post, incremental: true)

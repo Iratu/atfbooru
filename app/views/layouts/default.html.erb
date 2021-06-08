@@ -56,7 +56,7 @@
 <%= tag.body **body_attributes(CurrentUser.user, params, @current_item) do %>
   <%= render "news_updates/listing" %>
   <header id="top">
-    <%= link_to Danbooru.config.app_name, root_path, id: "app-name-header", class: "heading" %>
+    <a id="app-name-header" class="heading" href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
     <div id="maintoggle" class="mobile-only">
       <a href="#"><%= menu_icon(id: "maintoggle-on") %></a>
       <a href="#"><%= close_icon(id: "maintoggle-off", style: "display: none;") %></a>
