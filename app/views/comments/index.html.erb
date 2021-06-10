@@ -6,6 +6,13 @@
 <div id="c-comments">
   <div id="a-index">
     <h1>Comments</h1>
-        Comments are disabled.
+
+    <%= render "posts/partials/common/inline_blacklist" %>
+
+    <% if params[:group_by] == "comment" %>
+      <%= render "index_by_comment" %>
+    <% else %>
+      <%= render "index_by_post" %>
+    <% end %>
   </div>
 </div>
