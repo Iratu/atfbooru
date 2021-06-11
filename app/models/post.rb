@@ -884,11 +884,6 @@ class Post < ApplicationRecord
       votes.destroy_by(user: voter)
       reload
     end
-    
-    def expire_cache(tag_names)
-       ""
-    end
-    
   end
 
   module ParentMethods

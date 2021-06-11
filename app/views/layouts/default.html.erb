@@ -55,8 +55,10 @@
 </head>
 <%= tag.body **body_attributes(CurrentUser.user, params, @current_item) do %>
   <%= render "news_updates/listing" %>
+
   <header id="top">
     <a id="app-name-header" class="heading" href="/"><img src="/banners/atfbooru_banner.jpg" height="270"></a>
+
     <div id="maintoggle" class="mobile-only">
       <a href="#"><%= menu_icon(id: "maintoggle-on") %></a>
       <a href="#"><%= close_icon(id: "maintoggle-off", style: "display: none;") %></a>
@@ -78,6 +80,7 @@
     <% if !CurrentUser.is_anonymous? && !CurrentUser.is_gold? && !CurrentUser.user.is_banned? && cookies[:hide_upgrade_account_notice].blank? && params[:action] != "upgrade_information" %>
       <%= render "users/upgrade_notice" %>
     <% end %>
+
     <%= render "users/ban_notice" %>
 
     <% if params[:controller] != "dmails" && has_unread_dmails?(CurrentUser.user) %>

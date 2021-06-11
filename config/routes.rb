@@ -147,9 +147,7 @@ Rails.application.routes.draw do
   end
   resources :mod_actions
   resources :moderation_reports, only: [:new, :create, :index, :show]
-  resources :modqueue, only: [:index] do
-    resources :api_keys, only: [:new, :create, :edit, :update, :index, :destroy]
-  end
+  resources :modqueue, only: [:index]
   resources :news_updates
   resources :notes do
     member do

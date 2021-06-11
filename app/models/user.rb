@@ -410,67 +410,43 @@ class User < ApplicationRecord
       def statement_timeout(level)
         if Rails.env.development?
           60_000
-        elsif level >= User::Levels::PLATINUM
-          9_000
-        elsif level == User::Levels::GOLD
-          6_000
         else
           3_000
         end
       end
 
       def page_limit(level)
-        if level >= User::Levels::PLATINUM
-          5000
-        elsif level == User::Levels::GOLD
-          2000
-        else
-          1000
-        end
+        5000
+
       end
 
       def tag_query_limit(level)
         if level >= User::Levels::BUILDER
           Float::INFINITY
         elsif level == User::Levels::PLATINUM
-          12
+          80
         elsif level == User::Levels::GOLD
-          6
+          40
         else
-          2
+          20
         end
       end
 
       def favorite_limit(level)
-        if level >= User::Levels::PLATINUM
           Float::INFINITY
-        elsif level == User::Levels::GOLD
-          20_000
-        else
-          10_000
         end
       end
 
       def favorite_group_limit(level)
         if level >= User::Levels::BUILDER
           Float::INFINITY
-        elsif level == User::Levels::PLATINUM
-          10
-        elsif level == User::Levels::GOLD
-          5
         else
-          3
+          200
         end
       end
 
       def max_saved_searches(level)
-        if level >= User::Levels::BUILDER
-          Float::INFINITY
-        elsif level == User::Levels::PLATINUM
-          1_000
-        else
-          250
-        end
+        Float::INFINITY
       end
 
       # regen this amount per second
@@ -504,7 +480,7 @@ class User < ApplicationRecord
 
       recent_flags = post_flags.where("created_at >= ?", 3.months.ago)
       flag_ratio = recent_flags.succeeded.count / recent_flags.count.to_f
-      recent_flags.count >= 30 && flag_ratio >= 0.70
+      recent_flags.count >= 15 && flag_ratio >= 0.70
     end
 
     def upload_limit

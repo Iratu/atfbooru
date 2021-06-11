@@ -15,6 +15,10 @@
   <li id="post-option-find-similar">
     <%= link_to "Find similar", iqdb_queries_path(post_id: post.id), ref: "nofollow" %>
   </li>
+    <li id="post-option-iqdb-find-similar"><a href="http://iqdb.org/?url=<%= post.file_url %>" target="_blank">IQDB Find similar</a></li>
+    <% if @api_keys.present? %>
+        <li><a href="https://allthefallen.moe/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= @api_keys.first.key %>" target="_blank">Tag Autocopy</a></li>
+    <% end %>
   <% if policy(post).visible? %>
     <li id="post-option-download">
       <%= link_to "Download", post.tagged_file_url + "?download=1", download: post.presenter.filename_for_download(CurrentUser.user) %>
@@ -46,11 +50,6 @@
   <% end %>
   <% if policy(FavoriteGroup).create? %>
     <li id="post-option-add-fav-group"><%= link_to "Add to fav group", "#", id: "open-favgroup-dialog-link", "data-shortcut": "g" %></li>
-    <li><%= link_to "Find similar", iqdb_queries_path(:post_id => post.id) %></li>
-    <li><a href="http://iqdb.org/?url=<%= post.file_url %>" target="_blank">IQDB Find similar</a></li>
-    <% if @api_keys.present? %>
-        <li><a href="https://allthefallen.moe/the_world_of_lauri/autotagger.php?startid=<%= post.id %>&usr=<%= CurrentUser.user.name %>&apikey=<%= @api_keys.first.key %>" target="_blank">Tag Autocopy</a></li>
-    <% end %>
   <% end %>
 
     <% if post.is_status_locked? %>
