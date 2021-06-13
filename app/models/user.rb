@@ -434,7 +434,6 @@ class User < ApplicationRecord
 
       def favorite_limit(level)
           Float::INFINITY
-        end
       end
 
       def favorite_group_limit(level)
