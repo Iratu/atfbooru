@@ -68,16 +68,16 @@ class PostPolicy < ApplicationPolicy
   end
 
   def can_use_mode_menu?
-    user.is_member
+    user.is_member?
   end
 
   def can_view_favlist?
-    user.is_member
+    user.is_member?
   end
 
   # whether to show the + - links in the tag list.
   def show_extra_links?
-    user.is_member
+    user.is_member?
   end
 
   def permitted_attributes
