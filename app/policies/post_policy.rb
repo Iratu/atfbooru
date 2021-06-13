@@ -48,7 +48,7 @@ class PostPolicy < ApplicationPolicy
   end
 
   def expunge?
-    user.is_approver
+    user.is_approver?
   end
 
   def visible?
