@@ -1,10 +1,10 @@
 class UploadLimit
   extend Memoist
 
-  INITIAL_POINTS = 1000
-  MAXIMUM_POINTS = 10_000
-  APPEAL_COST = 3
-  DELETION_COST = 5
+  INITIAL_POINTS = 5000
+  MAXIMUM_POINTS = 500_000
+  APPEAL_COST = 1
+  DELETION_COST = 1
 
   attr_reader :user
 
